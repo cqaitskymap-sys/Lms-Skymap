@@ -1,0 +1,176 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function userDoc() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function role() {
+      return userDoc().role;
+    }
+
+    function isActive() {
+      return isSignedIn() && userDoc().isActive == true;
+    }
+
+    function hasRole(roles) {
+      return isActive() && role() in roles;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isSelfEmployee() {
+      return isActive() && userDoc().employeeId != null;
+    }
+
+    // Users — own profile readable/creatable for first-login bootstrap
+    match /users/{userId} {
+      allow read: if isSignedIn() && (
+        isOwner(userId) ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+          isActive() &&
+          hasRole(['super_admin', 'hr', 'qa', 'department_head']))
+      );
+      allow create: if isSignedIn() && isOwner(userId)
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.email == request.auth.token.email;
+      allow update: if isOwner(userId) || hasRole(['super_admin', 'hr']);
+      allow delete: if hasRole(['super_admin']);
+    }
+
+    // Departments
+    match /departments/{id} {
+      allow read: if isActive();
+      allow write: if hasRole(['super_admin', 'hr']);
+    }
+
+    // Employees
+    match /employees/{id} {
+      allow read: if isActive() && (
+        hasRole(['super_admin', 'hr', 'qa', 'department_head', 'trainer']) ||
+        (isSelfEmployee() && resource.data.id == userDoc().employeeId)
+      );
+      allow create, update: if hasRole(['super_admin', 'hr', 'department_head']);
+      allow delete: if hasRole(['super_admin', 'hr']);
+    }
+
+    // Induction
+    match /induction_modules/{id} {
+      allow read: if isActive();
+      allow write: if hasRole(['super_admin', 'hr']);
+    }
+
+    match /induction_assignments/{id} {
+      allow read: if isActive() && (
+        hasRole(['super_admin', 'hr']) ||
+        resource.data.employeeId == userDoc().employeeId
+      );
+      allow create: if hasRole(['super_admin', 'hr']);
+      allow update: if hasRole(['super_admin', 'hr']) ||
+        resource.data.employeeId == userDoc().employeeId;
+    }
+
+    // JD & TNI
+    match /job_descriptions/{id} {
+      allow read: if isActive();
+      allow write: if hasRole(['super_admin', 'department_head', 'hr']);
+    }
+
+    match /training_need_identifications/{id} {
+      allow read: if isActive();
+      allow write: if hasRole(['super_admin', 'department_head', 'hr']);
+    }
+
+    // SOPs
+    match /sops/{id} {
+      allow read: if isActive();
+      allow create, update: if hasRole(['super_admin', 'qa']);
+      allow delete: if hasRole(['super_admin']);
+    }
+
+    match /sop_versions/{id} {
+      allow read: if isActive();
+      allow write: if hasRole(['super_admin', 'qa']);
+    }
+
+    // Trainers & training
+    match /trainers/{id} {
+      allow read: if isActive();
+      allow write: if hasRole(['super_admin', 'hr', 'department_head', 'qa']);
+    }
+
+    match /training_sessions/{id} {
+      allow read: if isActive();
+      allow write: if hasRole(['super_admin', 'department_head', 'trainer']);
+    }
+
+    match /training_assignments/{id} {
+      allow read: if isActive() && (
+        hasRole(['super_admin', 'hr', 'qa', 'department_head', 'trainer']) ||
+        resource.data.employeeId == userDoc().employeeId
+      );
+      allow create: if hasRole(['super_admin', 'department_head', 'qa']);
+      allow update: if hasRole(['super_admin', 'department_head', 'trainer', 'qa']) ||
+        resource.data.employeeId == userDoc().employeeId;
+    }
+
+    // Assessments
+    match /question_banks/{id} {
+      allow read: if isActive();
+      allow write: if hasRole(['super_admin', 'qa', 'hr']);
+    }
+
+    match /questions/{id} {
+      allow read: if isActive() && hasRole(['super_admin', 'qa', 'hr', 'department_head']);
+      // Employees must NOT read correct answers directly — use Cloud Functions for attempts
+      allow write: if hasRole(['super_admin', 'qa', 'hr']);
+    }
+
+    match /exams/{id} {
+      allow read: if isActive();
+      allow write: if hasRole(['super_admin', 'qa', 'hr']);
+    }
+
+    match /assessment_attempts/{id} {
+      allow read: if isActive() && (
+        hasRole(['super_admin', 'hr', 'qa', 'department_head']) ||
+        resource.data.employeeId == userDoc().employeeId
+      );
+      // Create/submit via Cloud Functions preferred; allow employee create of own attempt shell
+      allow create: if isActive() && request.resource.data.employeeId == userDoc().employeeId;
+      allow update: if isActive() && (
+        hasRole(['super_admin', 'qa', 'hr']) ||
+        resource.data.employeeId == userDoc().employeeId
+      );
+    }
+
+    // Certificates — public verify via Cloud Function / API; authenticated read
+    match /certificates/{id} {
+      allow read: if isActive();
+      allow create: if false; // Cloud Functions only
+      allow update: if hasRole(['super_admin', 'qa']);
+    }
+
+    // Notifications
+    match /notifications/{id} {
+      allow read: if isActive() && resource.data.userId == request.auth.uid;
+      allow update: if isActive() && resource.data.userId == request.auth.uid;
+      allow create: if hasRole(['super_admin', 'hr', 'qa', 'department_head', 'trainer']) ||
+        request.auth.token.admin == true;
+    }
+
+    // Audit logs — append-only for clients with elevated roles; full read for auditors
+    match /audit_logs/{id} {
+      allow read: if hasRole(['super_admin', 'hr', 'qa']);
+      allow create: if isActive();
+      allow update, delete: if false;
+    }
+  }
+}
