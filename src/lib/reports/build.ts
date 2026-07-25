@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Build filtered report datasets from demo / local LMS stores.
  */
 
@@ -35,7 +35,7 @@ function empCode(id: string) {
   const e =
     readLifecycleStore().employees.find((x) => x.id === id) ||
     DEMO_EMPLOYEES.find((x) => x.id === id);
-  return e?.employeeCode || "—";
+  return e?.employeeCode || "â€”";
 }
 
 function deptName(id: string) {
@@ -52,11 +52,11 @@ function sopLabel(id: string) {
 }
 
 function sopTitle(id: string) {
-  return DEMO_SOPS.find((x) => x.id === id)?.title || "—";
+  return DEMO_SOPS.find((x) => x.id === id)?.title || "â€”";
 }
 
 function trainerName(id?: string) {
-  if (!id) return "—";
+  if (!id) return "â€”";
   for (const u of Object.values(DEMO_USERS)) {
     if (u.profile.uid === id) return u.profile.displayName;
   }
@@ -116,8 +116,8 @@ function buildEmployeeTraining(filters: ReportFilters): ReportDataset {
     sopTitle: sopTitle(a.sopId),
     trainer: trainerName(a.trainerId),
     status: a.status,
-    score: a.score ?? "—",
-    dueDate: a.dueDate ? formatDate(a.dueDate) : "—",
+    score: a.score ?? "â€”",
+    dueDate: a.dueDate ? formatDate(a.dueDate) : "â€”",
     overdue: isOverdue(a) ? "Yes" : "No",
   }));
 
@@ -125,7 +125,6 @@ function buildEmployeeTraining(filters: ReportFilters): ReportDataset {
   const total = rows.length || 1;
 
   return {
-    type: "employee_training",
     ...catalogMeta("employee_training"),
     generatedAt: new Date().toISOString(),
     columns: [
@@ -197,7 +196,6 @@ function buildDepartmentCompliance(filters: ReportFilters): ReportDataset {
   );
 
   return {
-    type: "department_compliance",
     ...catalogMeta("department_compliance"),
     generatedAt: new Date().toISOString(),
     columns: [
@@ -264,7 +262,6 @@ function buildTrainerPerformance(filters: ReportFilters): ReportDataset {
   });
 
   return {
-    type: "trainer_performance",
     ...catalogMeta("trainer_performance"),
     generatedAt: new Date().toISOString(),
     columns: [
@@ -340,7 +337,7 @@ function buildExamResults(filters: ReportFilters): ReportDataset {
       percentage: r.percentage,
       passed: r.passed ? "Pass" : "Fail",
       certificateEligible: r.certificateEligible ? "Yes" : "No",
-      rank: r.rank ?? "—",
+      rank: r.rank ?? "â€”",
       timeMin: Math.round(r.timeSpentSeconds / 60),
       date: formatDate(r.createdAt),
     }));
@@ -348,7 +345,6 @@ function buildExamResults(filters: ReportFilters): ReportDataset {
   const pass = rows.filter((r) => r.passed === "Pass").length;
 
   return {
-    type: "exam_results",
     ...catalogMeta("exam_results"),
     generatedAt: new Date().toISOString(),
     columns: [
@@ -424,7 +420,6 @@ function buildPassFail(filters: ReportFilters): ReportDataset {
   }).filter((r) => matchesSearch(r.department, filters.search));
 
   return {
-    type: "pass_fail",
     ...catalogMeta("pass_fail"),
     generatedAt: new Date().toISOString(),
     columns: [
@@ -469,7 +464,7 @@ function buildOverdue(filters: ReportFilters): ReportDataset {
       department: deptName(a.departmentId),
       sop: sopLabel(a.sopId),
       status: a.status,
-      dueDate: a.dueDate ? formatDate(a.dueDate) : "—",
+      dueDate: a.dueDate ? formatDate(a.dueDate) : "â€”",
       daysOverdue: a.dueDate
         ? Math.max(
             0,
@@ -480,7 +475,6 @@ function buildOverdue(filters: ReportFilters): ReportDataset {
     }));
 
   return {
-    type: "overdue_training",
     ...catalogMeta("overdue_training"),
     generatedAt: new Date().toISOString(),
     columns: [
@@ -572,7 +566,6 @@ function buildUpcomingExpiry(filters: ReportFilters): ReportDataset {
     .sort((a, b) => a.daysLeft - b.daysLeft);
 
   return {
-    type: "upcoming_expiry",
     ...catalogMeta("upcoming_expiry"),
     generatedAt: new Date().toISOString(),
     columns: [
@@ -587,7 +580,7 @@ function buildUpcomingExpiry(filters: ReportFilters): ReportDataset {
     kpis: [
       { label: "Within 180 days", value: rows.length, tone: "warning" },
       {
-        label: "≤ 30 days",
+        label: "â‰¤ 30 days",
         value: rows.filter((r) => r.daysLeft <= 30).length,
         tone: "danger",
       },
@@ -598,7 +591,7 @@ function buildUpcomingExpiry(filters: ReportFilters): ReportDataset {
         title: "Expiry window",
         kind: "bar",
         data: [
-          { name: "≤30d", value: rows.filter((r) => r.daysLeft <= 30).length },
+          { name: "â‰¤30d", value: rows.filter((r) => r.daysLeft <= 30).length },
           {
             name: "31-90d",
             value: rows.filter((r) => r.daysLeft > 30 && r.daysLeft <= 90).length,
@@ -640,7 +633,6 @@ function buildCertificateStatus(filters: ReportFilters): ReportDataset {
     }));
 
   return {
-    type: "certificate_status",
     ...catalogMeta("certificate_status"),
     generatedAt: new Date().toISOString(),
     columns: [
@@ -719,7 +711,6 @@ function buildSopCoverage(filters: ReportFilters): ReportDataset {
     });
 
   return {
-    type: "sop_coverage",
     ...catalogMeta("sop_coverage"),
     generatedAt: new Date().toISOString(),
     columns: [
@@ -779,17 +770,16 @@ function buildTrainingMatrix(filters: ReportFilters): ReportDataset {
         );
         row[s.sopNumber] = a
           ? a.status === "passed"
-            ? "✓"
+            ? "âœ“"
             : a.status === "failed"
-              ? "✗"
-              : "…"
-          : "—";
+              ? "âœ—"
+              : "â€¦"
+          : "â€”";
       }
       return row;
     });
 
   return {
-    type: "training_matrix",
     ...catalogMeta("training_matrix"),
     generatedAt: new Date().toISOString(),
     columns: [
@@ -805,7 +795,7 @@ function buildTrainingMatrix(filters: ReportFilters): ReportDataset {
       {
         label: "Cells trained",
         value: rows.reduce(
-          (acc, r) => acc + sops.filter((s) => r[s.sopNumber] === "✓").length,
+          (acc, r) => acc + sops.filter((s) => r[s.sopNumber] === "âœ“").length,
           0
         ),
         tone: "success",
@@ -818,7 +808,7 @@ function buildTrainingMatrix(filters: ReportFilters): ReportDataset {
         kind: "bar",
         data: sops.map((s) => ({
           name: s.sopNumber,
-          value: rows.filter((r) => r[s.sopNumber] === "✓").length,
+          value: rows.filter((r) => r[s.sopNumber] === "âœ“").length,
         })),
       },
     ],
@@ -844,7 +834,6 @@ function buildAuditReport(filters: ReportFilters): ReportDataset {
     }));
 
   return {
-    type: "audit_report",
     ...catalogMeta("audit_report"),
     generatedAt: new Date().toISOString(),
     columns: [
