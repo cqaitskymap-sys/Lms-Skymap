@@ -43,7 +43,7 @@ import {
   writeAssessmentStore,
 } from "@/lib/assessments/demo-store";
 
-async function useLocal(): Promise<boolean> {
+async function preferLocalData(): Promise<boolean> {
   if (isDemoMode()) return true;
   try {
     const snap = await getDocs(query(collection(db, COLLECTIONS.exams), limit(1)));
@@ -54,7 +54,7 @@ async function useLocal(): Promise<boolean> {
 }
 
 async function loadExam(examId: string): Promise<Exam | null> {
-  if (await useLocal()) {
+  if (await preferLocalData()) {
     return readAssessmentStore().exams.find((e) => e.id === examId) || null;
   }
   try {
@@ -67,7 +67,7 @@ async function loadExam(examId: string): Promise<Exam | null> {
 }
 
 async function loadBankQuestions(exam: Exam): Promise<Question[]> {
-  if (await useLocal()) {
+  if (await preferLocalData()) {
     return readAssessmentStore().questions;
   }
   try {
@@ -91,7 +91,7 @@ async function loadBankQuestions(exam: Exam): Promise<Question[]> {
 }
 
 export async function listQuestionBanks(): Promise<QuestionBank[]> {
-  if (await useLocal()) return readAssessmentStore().banks.filter((b) => b.isActive);
+  if (await preferLocalData()) return readAssessmentStore().banks.filter((b) => b.isActive);
   try {
     const snap = await getDocs(collection(db, COLLECTIONS.questionBanks));
     const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }) as QuestionBank);
@@ -108,7 +108,7 @@ export async function listQuestions(filters?: {
   type?: string;
 }): Promise<Question[]> {
   let rows =
-    (await useLocal())
+    (await preferLocalData())
       ? readAssessmentStore().questions
       : await (async () => {
           try {
@@ -127,7 +127,7 @@ export async function listQuestions(filters?: {
 }
 
 export async function listExams(): Promise<Exam[]> {
-  if (await useLocal()) return readAssessmentStore().exams.filter((e) => e.isActive);
+  if (await preferLocalData()) return readAssessmentStore().exams.filter((e) => e.isActive);
   try {
     const snap = await getDocs(collection(db, COLLECTIONS.exams));
     const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Exam);
@@ -147,7 +147,7 @@ export async function getAttempt(
   opts?: { revealAnswers?: boolean }
 ): Promise<AssessmentAttempt | null> {
   let attempt: AssessmentAttempt | null = null;
-  if (await useLocal()) {
+  if (await preferLocalData()) {
     attempt = readAssessmentStore().attempts.find((a) => a.id === id) || null;
   } else {
     try {
@@ -220,7 +220,7 @@ export async function startAssessment(params: {
     createdBy: params.employeeId,
   };
 
-  if (await useLocal()) {
+  if (await preferLocalData()) {
     pushAttemptLocal(attempt);
   } else {
     // Store full keys server-side; client getAttempt strips until submit
@@ -239,7 +239,7 @@ export async function autoSaveAssessment(
   actorId: string
 ): Promise<void> {
   const now = nowISO();
-  if (await useLocal()) {
+  if (await preferLocalData()) {
     const store = readAssessmentStore();
     const idx = store.attempts.findIndex((a) => a.id === attemptId);
     if (idx < 0) return;
@@ -274,7 +274,7 @@ export async function submitAssessment(
   answers: Record<string, string[]>,
   actorId: string
 ): Promise<AssessmentAttempt> {
-  const local = await useLocal();
+  const local = await preferLocalData();
   let attempt: AssessmentAttempt | null = null;
   let exam: Exam | null = null;
 
@@ -425,7 +425,7 @@ async function handleTrainingAssessmentResult(
   actorId: string
 ) {
   const now = nowISO();
-  if (await useLocal()) {
+  if (await preferLocalData()) {
     return;
   }
 
@@ -521,7 +521,7 @@ export async function issueCertificate(params: {
   let sopVersionId = "sopv_001";
   let trainerId = params.trainerId;
 
-  if (!(await useLocal())) {
+  if (!(await preferLocalData())) {
     try {
       const assignSnap = await getDoc(
         doc(db, COLLECTIONS.trainingAssignments, params.trainingAssignmentId)
@@ -555,7 +555,7 @@ export async function listAttemptsForEmployee(
   examId: string,
   employeeId: string
 ): Promise<AssessmentAttempt[]> {
-  if (await useLocal()) {
+  if (await preferLocalData()) {
     return readAssessmentStore().attempts.filter(
       (a) => a.examId === examId && a.employeeId === employeeId
     );
@@ -577,7 +577,7 @@ export async function listAttemptsForEmployee(
 }
 
 export async function getLeaderboard(examId: string, topN = 20): Promise<LeaderboardEntry[]> {
-  if (await useLocal()) {
+  if (await preferLocalData()) {
     return readAssessmentStore()
       .results.filter((r) => r.examId === examId)
       .sort((a, b) => (a.rank || 999) - (b.rank || 999))
@@ -628,7 +628,7 @@ export async function getExamAnalytics(examId: string): Promise<AssessmentAnalyt
   if (!exam) return null;
 
   let results: ExamResult[] = [];
-  if (await useLocal()) {
+  if (await preferLocalData()) {
     results = readAssessmentStore().results.filter((r) => r.examId === examId);
   } else {
     try {
@@ -699,7 +699,7 @@ export async function getExamAnalytics(examId: string): Promise<AssessmentAnalyt
 
   // Miss rates from attempts
   const missMap = new Map<string, { miss: number; total: number; text: string }>();
-  const attempts = (await useLocal())
+  const attempts = (await preferLocalData())
     ? readAssessmentStore().attempts.filter(
         (a) => a.examId === examId && a.status !== "in_progress"
       )
@@ -752,7 +752,7 @@ export async function createQuestion(
     createdBy: actorId,
   };
 
-  if (await useLocal()) {
+  if (await preferLocalData()) {
     const store = readAssessmentStore();
     store.questions.push(question);
     store.banks = store.banks.map((b) =>
@@ -773,7 +773,7 @@ export async function createQuestion(
 
 /** Super Admin only — delete a question from the bank. */
 export async function deleteQuestion(questionId: string): Promise<void> {
-  if (await useLocal()) {
+  if (await preferLocalData()) {
     const store = readAssessmentStore();
     const removed = store.questions.find((q) => q.id === questionId);
     store.questions = store.questions.filter((q) => q.id !== questionId);
@@ -797,7 +797,7 @@ export async function deleteQuestion(questionId: string): Promise<void> {
 
 /** Super Admin only — delete an exam definition. */
 export async function deleteExam(examId: string): Promise<void> {
-  if (await useLocal()) {
+  if (await preferLocalData()) {
     const store = readAssessmentStore();
     store.exams = store.exams.filter((e) => e.id !== examId);
     store.attempts = store.attempts.filter((a) => a.examId !== examId);

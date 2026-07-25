@@ -47,7 +47,7 @@ export interface SopActor {
 }
 
 /** Prefer local demo store when demo mode is on, or SOP only exists locally. */
-async function useLocalStore(sopId?: string): Promise<boolean> {
+async function preferLocalSopStore(sopId?: string): Promise<boolean> {
   if (isDemoMode()) return true;
   if (!sopId) return false;
   try {
@@ -436,7 +436,7 @@ export async function reviseSopWithFiles(
     createdBy: actor.uid,
   };
 
-  if (await useLocalStore(sopId)) {
+  if (await preferLocalSopStore(sopId)) {
     const store = readSopStore();
     store.versions = store.versions.map((v) =>
       v.id === current.id ? { ...v, ...superseded, status: "superseded" } : v
@@ -483,7 +483,7 @@ export async function submitSopForReview(
   actor: SopActor
 ): Promise<void> {
   const now = nowISO();
-  if (await useLocalStore(sopId)) {
+  if (await preferLocalSopStore(sopId)) {
     const store = readSopStore();
     store.versions = store.versions.map((v) =>
       v.id === versionId
@@ -535,7 +535,7 @@ export async function approveSopVersionFull(
 
   let retrainCount = 0;
 
-  if (await useLocalStore(sopId)) {
+  if (await preferLocalSopStore(sopId)) {
     const store = readSopStore();
     const version = store.versions.find((v) => v.id === versionId);
     const isRevision = Boolean(version?.supersedesVersionId);
@@ -759,7 +759,7 @@ export async function archiveSopVersion(
   const now = nowISO();
   const store = readSopStore();
   const found = store.versions.find((v) => v.id === versionId);
-  const local = found ? await useLocalStore(found.sopId) : isDemoMode();
+  const local = found ? await preferLocalSopStore(found.sopId) : isDemoMode();
 
   if (local) {
     store.versions = store.versions.map((v) =>
@@ -813,7 +813,7 @@ export async function recordSopView(params: {
     source: params.source,
   };
 
-  if (isDemoMode() || (await useLocalStore(params.sopId))) {
+  if (isDemoMode() || (await preferLocalSopStore(params.sopId))) {
     const store = readSopStore();
     store.views.unshift(record);
     store.versions = store.versions.map((v) =>
@@ -864,7 +864,7 @@ export async function acknowledgeSop(params: {
     signatureDataUrl: params.signatureDataUrl,
   };
 
-  if (isDemoMode() || (await useLocalStore(params.sopId))) {
+  if (isDemoMode() || (await preferLocalSopStore(params.sopId))) {
     const store = readSopStore();
     const exists = store.acknowledgements.some(
       (a) => a.versionId === params.versionId && a.userId === params.actor.uid
@@ -975,7 +975,7 @@ export async function getSop(id: string) {
 
 /** Super Admin only — deletes SOP and related versions / views / acks. */
 export async function deleteSop(sopId: string): Promise<void> {
-  if (await useLocalStore(sopId)) {
+  if (await preferLocalSopStore(sopId)) {
     const store = readSopStore();
     store.sops = store.sops.filter((s) => s.id !== sopId);
     store.versions = store.versions.filter((v) => v.sopId !== sopId);

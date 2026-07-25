@@ -399,9 +399,9 @@ export async function getEmployeeInductionBundle(
 
   return assignments
     .map((assignment) => {
-      const module = byId.get(assignment.moduleId);
-      if (!module) return null;
-      return { assignment, module };
+      const inductionModule = byId.get(assignment.moduleId);
+      if (!inductionModule) return null;
+      return { assignment, module: inductionModule };
     })
     .filter(Boolean) as InductionBundleItem[];
 }

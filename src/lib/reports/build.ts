@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Build filtered report datasets from demo / local LMS stores.
  */
 
@@ -35,14 +35,16 @@ function empCode(id: string) {
   const e =
     readLifecycleStore().employees.find((x) => x.id === id) ||
     DEMO_EMPLOYEES.find((x) => x.id === id);
-  return e?.employeeCode || "â€”";
+  return e?.employeeCode || "—";
 }
 
-function deptName(id: string) {
+function deptName(id: string | undefined) {
+  if (!id) return "—";
   return DEMO_DEPARTMENTS.find((d) => d.id === id)?.name || id;
 }
 
-function deptCode(id: string) {
+function deptCode(id: string | undefined) {
+  if (!id) return "—";
   return DEMO_DEPARTMENTS.find((d) => d.id === id)?.code || id;
 }
 
@@ -52,11 +54,11 @@ function sopLabel(id: string) {
 }
 
 function sopTitle(id: string) {
-  return DEMO_SOPS.find((x) => x.id === id)?.title || "â€”";
+  return DEMO_SOPS.find((x) => x.id === id)?.title || "—";
 }
 
 function trainerName(id?: string) {
-  if (!id) return "â€”";
+  if (!id) return "—";
   for (const u of Object.values(DEMO_USERS)) {
     if (u.profile.uid === id) return u.profile.displayName;
   }
@@ -116,8 +118,8 @@ function buildEmployeeTraining(filters: ReportFilters): ReportDataset {
     sopTitle: sopTitle(a.sopId),
     trainer: trainerName(a.trainerId),
     status: a.status,
-    score: a.score ?? "â€”",
-    dueDate: a.dueDate ? formatDate(a.dueDate) : "â€”",
+    score: a.score ?? "—",
+    dueDate: a.dueDate ? formatDate(a.dueDate) : "—",
     overdue: isOverdue(a) ? "Yes" : "No",
   }));
 
@@ -337,7 +339,7 @@ function buildExamResults(filters: ReportFilters): ReportDataset {
       percentage: r.percentage,
       passed: r.passed ? "Pass" : "Fail",
       certificateEligible: r.certificateEligible ? "Yes" : "No",
-      rank: r.rank ?? "â€”",
+      rank: r.rank ?? "—",
       timeMin: Math.round(r.timeSpentSeconds / 60),
       date: formatDate(r.createdAt),
     }));
@@ -464,7 +466,7 @@ function buildOverdue(filters: ReportFilters): ReportDataset {
       department: deptName(a.departmentId),
       sop: sopLabel(a.sopId),
       status: a.status,
-      dueDate: a.dueDate ? formatDate(a.dueDate) : "â€”",
+      dueDate: a.dueDate ? formatDate(a.dueDate) : "—",
       daysOverdue: a.dueDate
         ? Math.max(
             0,
@@ -695,7 +697,7 @@ function buildSopCoverage(filters: ReportFilters): ReportDataset {
       const related = asg.filter((a) => a.sopId === s.id);
       const trained = related.filter((a) => a.status === "passed").length;
       const required = Math.max(related.length, DEMO_EMPLOYEES.filter((e) =>
-        s.departmentIds.includes(e.departmentId)
+        Boolean(e.departmentId && s.departmentIds.includes(e.departmentId))
       ).length);
       const coverage = required ? Math.round((trained / required) * 100) : 0;
       return {
@@ -773,8 +775,8 @@ function buildTrainingMatrix(filters: ReportFilters): ReportDataset {
             ? "âœ“"
             : a.status === "failed"
               ? "âœ—"
-              : "â€¦"
-          : "â€”";
+              : "…"
+          : "—";
       }
       return row;
     });
