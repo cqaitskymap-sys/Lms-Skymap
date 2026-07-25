@@ -16,8 +16,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           <Sidebar open={mobileOpen} onClose={() => setMobileOpen(false)} />
           <div className="flex flex-1 flex-col overflow-hidden">
             <Header onMenuClick={() => setMobileOpen(true)} />
-            <main className="flex-1 overflow-y-auto bg-background p-4 md:p-6">
-              <div className="mx-auto max-w-7xl animate-fade-in">{children}</div>
+            <main className="dashboard-atmosphere flex-1 overflow-y-auto p-4 md:p-6 lg:p-8">
+              <div className="mx-auto max-w-7xl">{children}</div>
             </main>
           </div>
         </div>

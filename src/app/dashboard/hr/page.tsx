@@ -1,12 +1,16 @@
 "use client";
 
-import { Users, GraduationCap, UserCheck, ClipboardList } from "lucide-react";
-import { StatCard } from "@/components/shared/stat-card";
-import { DEMO_EMPLOYEES, DEMO_STATS } from "@/lib/demo/data";
-import { StatusBadge } from "@/components/shared/status-badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
 import Link from "next/link";
+import { Loader2 } from "lucide-react";
+import { useAuth } from "@/contexts/auth-context";
+import { useLifecycleDirectory } from "@/hooks/use-employee-lifecycle";
+import { DashboardShell } from "@/components/dashboard/dashboard-shell";
+import { LifecycleDashboardCards } from "@/components/lifecycle/lifecycle-dashboard-cards";
+import { LifecycleApprovals } from "@/components/lifecycle/lifecycle-approvals";
+import { MotionItem } from "@/components/dashboard/motion";
+import { GlassCard, GlassCardHeader } from "@/components/dashboard/glass-card";
+import { StatusBadge } from "@/components/shared/status-badge";
+import { Button } from "@/components/ui/button";
 import {
   Table,
   TableBody,
@@ -16,62 +20,96 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { formatDate } from "@/lib/utils";
+import type { UserRole } from "@/types";
 
 export default function HrDashboardPage() {
+  const { profile } = useAuth();
+  const { employees, approvals, loading, refresh } = useLifecycleDirectory();
+
+  if (loading) {
+    return (
+      <div className="flex justify-center py-20">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    );
+  }
+
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">HR Dashboard</h1>
-          <p className="text-muted-foreground">Employee onboarding & induction</p>
-        </div>
-        <Button asChild>
-          <Link href="/dashboard/employees/new">Add employee</Link>
-        </Button>
-      </div>
+    <DashboardShell
+      role="hr"
+      title="HR Dashboard"
+      subtitle="Onboarding, induction & workforce lifecycle"
+    >
+      <MotionItem>
+        <LifecycleDashboardCards employees={employees} />
+      </MotionItem>
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard title="Total employees" value={DEMO_STATS.totalEmployees} icon={Users} />
-        <StatCard title="Induction in progress" value={DEMO_STATS.inductionInProgress} icon={GraduationCap} />
-        <StatCard title="Ready for handover" value={1} icon={UserCheck} />
-        <StatCard title="Pending assessments" value={DEMO_STATS.pendingAssessments} icon={ClipboardList} />
-      </div>
+      <div className="grid gap-4 lg:grid-cols-2">
+        <MotionItem>
+          <GlassCard className="h-full">
+            <GlassCardHeader
+              title="Pending approvals"
+              description="Verification & handover gates"
+              action={
+                <Button size="sm" asChild>
+                  <Link href="/dashboard/employees/new">Onboard employee</Link>
+                </Button>
+              }
+            />
+            {profile && (
+              <LifecycleApprovals
+                approvals={approvals}
+                actor={{
+                  uid: profile.uid,
+                  name: profile.displayName,
+                  role: profile.role as UserRole,
+                  email: profile.email,
+                }}
+                onUpdated={() => void refresh()}
+              />
+            )}
+          </GlassCard>
+        </MotionItem>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Recent employees</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Code</TableHead>
-                <TableHead>Name</TableHead>
-                <TableHead>Designation</TableHead>
-                <TableHead>DOJ</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Induction</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {DEMO_EMPLOYEES.map((e) => (
-                <TableRow key={e.id}>
-                  <TableCell>
-                    <Link href={`/dashboard/employees/${e.id}`} className="font-medium text-primary hover:underline">
-                      {e.employeeCode}
-                    </Link>
-                  </TableCell>
-                  <TableCell>{e.firstName} {e.lastName}</TableCell>
-                  <TableCell>{e.designation}</TableCell>
-                  <TableCell>{formatDate(e.dateOfJoining)}</TableCell>
-                  <TableCell><StatusBadge status={e.status} /></TableCell>
-                  <TableCell><StatusBadge status={e.inductionStatus} /></TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
-    </div>
+        <MotionItem>
+          <GlassCard className="h-full">
+            <GlassCardHeader title="Recent employees" description="Lifecycle progress" />
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Code</TableHead>
+                    <TableHead>Name</TableHead>
+                    <TableHead>Stage</TableHead>
+                    <TableHead>DOJ</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {employees.map((e) => (
+                    <TableRow key={e.id}>
+                      <TableCell>
+                        <Link
+                          href={`/dashboard/employees/${e.id}`}
+                          className="font-medium text-primary hover:underline"
+                        >
+                          {e.employeeCode}
+                        </Link>
+                      </TableCell>
+                      <TableCell>
+                        {e.firstName} {e.lastName}
+                      </TableCell>
+                      <TableCell>
+                        <StatusBadge status={e.lifecycleStage || e.status} />
+                      </TableCell>
+                      <TableCell>{formatDate(e.dateOfJoining)}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </GlassCard>
+        </MotionItem>
+      </div>
+    </DashboardShell>
   );
 }

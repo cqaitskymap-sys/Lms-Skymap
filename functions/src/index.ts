@@ -363,4 +363,147 @@ export const onEmployeeCreated = onDocumentCreated("employees/{employeeId}", asy
     description: `Employee ${data.employeeCode} created`,
     after: { employeeCode: data.employeeCode, email: data.email },
   });
+
+  // Ensure lifecycle fields exist for API-created employees
+  if (!data.lifecycleStage) {
+    await event.data?.ref.set(
+      {
+        lifecycleStage: "hr_verification",
+        lifecycleProgress: 8,
+        status: data.status === "draft" ? "pending_verification" : data.status,
+      },
+      { merge: true }
+    );
+  }
+
+  if (data.userId) {
+    await notify(
+      data.userId,
+      "system",
+      "Welcome to PharmaLMS",
+      "Your employee profile has been created. Complete induction when assigned.",
+      `/dashboard/employees/${event.params.employeeId}`
+    );
+  }
 });
+
+/**
+ * When training assignment status changes, mirror employee lifecycle stage.
+ */
+export const onTrainingAssignmentUpdated = onDocumentUpdated(
+  "training_assignments/{assignmentId}",
+  async (event) => {
+    const before = event.data?.before.data();
+    const after = event.data?.after.data();
+    if (!before || !after || before.status === after.status) return;
+
+    const employeeId = after.employeeId as string;
+    const empRef = db.collection("employees").doc(employeeId);
+    const empSnap = await empRef.get();
+    if (!empSnap.exists) return;
+
+    const now = new Date().toISOString();
+    const status = after.status as string;
+    let patch: Record<string, unknown> | null = null;
+
+    if (status === "assigned" && after.trainerId) {
+      patch = {
+        lifecycleStage: "sop_assigned",
+        lifecycleProgress: 68,
+        currentTrainerId: after.trainerId,
+        status: "active",
+        updatedAt: now,
+      };
+    } else if (["in_progress", "training_scheduled", "training_completed"].includes(status)) {
+      patch = { lifecycleStage: "training", lifecycleProgress: 76, status: "active", updatedAt: now };
+    } else if (status === "assessment_pending") {
+      patch = { lifecycleStage: "exam", lifecycleProgress: 84, status: "active", updatedAt: now };
+    } else if (status === "passed") {
+      patch = {
+        lifecycleStage: after.certificateId ? "certified" : "passed",
+        lifecycleProgress: after.certificateId ? 96 : 90,
+        status: "active",
+        updatedAt: now,
+      };
+    }
+
+    if (!patch) return;
+    await empRef.set(patch, { merge: true });
+
+    const levId = id("lev");
+    await db.collection("lifecycle_events").doc(levId).set({
+      id: levId,
+      employeeId,
+      stage: patch.lifecycleStage,
+      title: String(patch.lifecycleStage),
+      description: `Auto-synced from training assignment (${status})`,
+      status: "completed",
+      actorId: "system",
+      actorName: "Cloud Function",
+      actorRole: "super_admin",
+      completedAt: now,
+      createdAt: now,
+      metadata: { assignmentId: event.params.assignmentId },
+    });
+
+    const userId = empSnap.data()?.userId;
+    if (userId) {
+      await notify(
+        userId,
+        "assignment",
+        "Training progress updated",
+        `Your training status is now: ${status.replace(/_/g, " ")}`,
+        `/dashboard/employees/${employeeId}`
+      );
+    }
+  }
+);
+
+/**
+ * When certificate is issued, mark employee certified → qualified if all required done.
+ */
+export const onCertificateCreated = onDocumentCreated(
+  "certificates/{certificateId}",
+  async (event) => {
+    const data = event.data?.data();
+    if (!data?.employeeId) return;
+    const now = new Date().toISOString();
+    const empRef = db.collection("employees").doc(data.employeeId);
+    await empRef.set(
+      {
+        lifecycleStage: "qualified",
+        lifecycleProgress: 100,
+        status: "qualified",
+        qualifiedAt: now,
+        updatedAt: now,
+      },
+      { merge: true }
+    );
+
+    const levId = id("lev");
+    await db.collection("lifecycle_events").doc(levId).set({
+      id: levId,
+      employeeId: data.employeeId,
+      stage: "qualified",
+      title: "Qualified Employee",
+      description: `Certificate ${data.certificateNumber} issued — employee qualified`,
+      status: "completed",
+      actorId: "system",
+      actorName: "Cloud Function",
+      completedAt: now,
+      createdAt: now,
+      metadata: { certificateId: event.params.certificateId },
+    });
+
+    const emp = await empRef.get();
+    if (emp.data()?.userId) {
+      await notify(
+        emp.data()!.userId,
+        "certificate",
+        "Certificate issued",
+        "You are now a qualified employee for the assigned SOP.",
+        "/dashboard/certificates"
+      );
+    }
+  }
+);

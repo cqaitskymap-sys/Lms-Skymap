@@ -1,72 +1,130 @@
 "use client";
 
-import { BookOpen, Award, ClipboardList, GraduationCap } from "lucide-react";
-import { StatCard } from "@/components/shared/stat-card";
-import { DEMO_ASSIGNMENTS, DEMO_CERTIFICATES, DEMO_NOTIFICATIONS } from "@/lib/demo/data";
+import Link from "next/link";
+import { BookOpen, ClipboardCheck, GraduationCap } from "lucide-react";
+import { useAuth } from "@/contexts/auth-context";
+import { useMyInduction } from "@/hooks/use-induction";
+import { DashboardShell } from "@/components/dashboard/dashboard-shell";
+import { MotionItem } from "@/components/dashboard/motion";
+import { GlassCard, GlassCardHeader } from "@/components/dashboard/glass-card";
 import { StatusBadge } from "@/components/shared/status-badge";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
-import Link from "next/link";
 
 export default function EmployeeDashboardPage() {
-  const pending = DEMO_ASSIGNMENTS.filter((a) =>
-    ["assigned", "in_progress", "assessment_pending", "retraining"].includes(a.status)
-  );
+  const { profile } = useAuth();
+  const employeeId = profile?.employeeId;
+  const { items, loading, progress } = useMyInduction(employeeId);
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">My Learning</h1>
-        <p className="text-muted-foreground">Your training & assessment workspace</p>
-      </div>
-
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard title="Active trainings" value={pending.length} icon={GraduationCap} />
-        <StatCard title="Assessments due" value={1} icon={ClipboardList} />
-        <StatCard title="Certificates" value={DEMO_CERTIFICATES.length} icon={Award} />
-        <StatCard title="Modules" value={2} icon={BookOpen} />
-      </div>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>My assignments</CardTitle>
-          <CardDescription>SOP training progress</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {DEMO_ASSIGNMENTS.map((a) => (
-            <div key={a.id} className="flex flex-col gap-3 rounded-lg border p-4 sm:flex-row sm:items-center sm:justify-between">
-              <div className="space-y-1">
-                <p className="font-medium">{a.sopId === "sop_001" ? "Document Control Procedure" : "Deviation Management"}</p>
-                <div className="flex items-center gap-2">
-                  <StatusBadge status={a.status} />
-                  {a.score != null && <span className="text-xs text-muted-foreground">Score: {a.score}%</span>}
-                </div>
-                <Progress value={a.status === "passed" ? 100 : a.status === "assessment_pending" ? 75 : 40} className="mt-2 w-48" />
-              </div>
+    <DashboardShell
+      role="employee"
+      title="My Learning"
+      subtitle="Induction, trainings, exams & certificates"
+    >
+      <MotionItem>
+        <GlassCard>
+          <GlassCardHeader
+            title="Onboarding checklist"
+            description="Complete induction modules assigned by HR"
+            action={
               <Button size="sm" asChild>
-                <Link href={a.status === "assessment_pending" ? "/dashboard/exams" : `/dashboard/training/${a.id}`}>
-                  {a.status === "assessment_pending" ? "Take assessment" : a.status === "passed" ? "View certificate" : "Continue"}
-                </Link>
+                <Link href="/dashboard/induction">Open induction</Link>
               </Button>
+            }
+          />
+          <div className="mb-4 space-y-2">
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-muted-foreground">Induction progress</span>
+              <span className="font-medium">{progress}%</span>
             </div>
-          ))}
-        </CardContent>
-      </Card>
+            <Progress value={progress} className="h-2" />
+          </div>
+          {loading ? (
+            <p className="text-sm text-muted-foreground">Loading assignments…</p>
+          ) : items.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-white/30 bg-white/20 p-6 text-sm text-muted-foreground dark:bg-white/5">
+              <GraduationCap className="mb-2 h-8 w-8 opacity-60" />
+              No induction modules yet. HR will assign your onboarding modules after verification.
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {items.map((item) => (
+                <div
+                  key={item.assignment.id}
+                  className="flex flex-col gap-3 rounded-xl border border-white/20 bg-white/30 p-4 sm:flex-row sm:items-center sm:justify-between dark:bg-white/5"
+                >
+                  <div className="min-w-0 space-y-2">
+                    <p className="font-medium">{item.module.title}</p>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <StatusBadge status={item.assignment.status} />
+                      <span className="text-xs text-muted-foreground">
+                        {item.assignment.progressPercent ?? 0}% complete
+                      </span>
+                    </div>
+                    <Progress
+                      value={item.assignment.progressPercent ?? 0}
+                      className="h-1.5 w-full max-w-xs"
+                    />
+                  </div>
+                  <Button size="sm" asChild>
+                    <Link href="/dashboard/induction">
+                      {item.assignment.status === "assessment_pending"
+                        ? "Take assessment"
+                        : "Continue"}
+                    </Link>
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
+        </GlassCard>
+      </MotionItem>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Notifications</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {DEMO_NOTIFICATIONS.map((n) => (
-            <div key={n.id} className="rounded-md border px-3 py-2">
-              <p className="text-sm font-medium">{n.title}</p>
-              <p className="text-xs text-muted-foreground">{n.message}</p>
+      <div className="grid gap-4 sm:grid-cols-3">
+        <MotionItem>
+          <GlassCard className="h-full">
+            <div className="flex items-start gap-3 p-1">
+              <BookOpen className="mt-0.5 h-5 w-5 text-cyan-700" />
+              <div>
+                <p className="font-medium">Training</p>
+                <p className="text-sm text-muted-foreground">SOP assignments after handover</p>
+                <Button size="sm" variant="link" className="px-0" asChild>
+                  <Link href="/dashboard/training">View training</Link>
+                </Button>
+              </div>
             </div>
-          ))}
-        </CardContent>
-      </Card>
-    </div>
+          </GlassCard>
+        </MotionItem>
+        <MotionItem>
+          <GlassCard className="h-full">
+            <div className="flex items-start gap-3 p-1">
+              <ClipboardCheck className="mt-0.5 h-5 w-5 text-cyan-700" />
+              <div>
+                <p className="font-medium">Assessments</p>
+                <p className="text-sm text-muted-foreground">Exams linked to your modules</p>
+                <Button size="sm" variant="link" className="px-0" asChild>
+                  <Link href="/dashboard/exams">Open exams</Link>
+                </Button>
+              </div>
+            </div>
+          </GlassCard>
+        </MotionItem>
+        <MotionItem>
+          <GlassCard className="h-full">
+            <div className="flex items-start gap-3 p-1">
+              <GraduationCap className="mt-0.5 h-5 w-5 text-cyan-700" />
+              <div>
+                <p className="font-medium">Certificates</p>
+                <p className="text-sm text-muted-foreground">Issued after you pass assessments</p>
+                <Button size="sm" variant="link" className="px-0" asChild>
+                  <Link href="/dashboard/certificates">My certificates</Link>
+                </Button>
+              </div>
+            </div>
+          </GlassCard>
+        </MotionItem>
+      </div>
+    </DashboardShell>
   );
 }

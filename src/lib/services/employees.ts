@@ -5,7 +5,6 @@ import {
   getDocs,
   setDoc,
   updateDoc,
-  deleteDoc,
   query,
   where,
   orderBy,
@@ -108,5 +107,6 @@ export async function handoverEmployee(
 }
 
 export async function deleteEmployee(id: string): Promise<void> {
-  await deleteDoc(doc(db, COLLECTIONS.employees, id));
+  const { deleteEmployeeLifecycle } = await import("@/lib/services/lifecycle");
+  await deleteEmployeeLifecycle(id);
 }

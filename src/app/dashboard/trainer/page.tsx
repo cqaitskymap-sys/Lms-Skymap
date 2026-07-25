@@ -1,11 +1,12 @@
 "use client";
 
-import { Calendar, Users, CheckSquare, Clock } from "lucide-react";
-import { StatCard } from "@/components/shared/stat-card";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { StatusBadge } from "@/components/shared/status-badge";
 import Link from "next/link";
+import { DashboardShell } from "@/components/dashboard/dashboard-shell";
+import { MotionItem } from "@/components/dashboard/motion";
+import { GlassCard, GlassCardHeader } from "@/components/dashboard/glass-card";
+import { StatusBadge } from "@/components/shared/status-badge";
+import { Button } from "@/components/ui/button";
+import { formatDateTime } from "@/lib/utils";
 
 const SESSIONS = [
   {
@@ -26,42 +27,34 @@ const SESSIONS = [
 
 export default function TrainerDashboardPage() {
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Trainer Dashboard</h1>
-        <p className="text-muted-foreground">Sessions, attendance & completion</p>
-      </div>
-
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard title="Upcoming sessions" value={1} icon={Calendar} />
-        <StatCard title="Trainees this week" value={14} icon={Users} />
-        <StatCard title="Completed sessions" value={12} icon={CheckSquare} />
-        <StatCard title="Pending attendance" value={1} icon={Clock} />
-      </div>
-
+    <DashboardShell
+      role="trainer"
+      title="Trainer Dashboard"
+      subtitle="Sessions, attendance & delivery performance"
+    >
       <div className="grid gap-4 md:grid-cols-2">
         {SESSIONS.map((s) => (
-          <Card key={s.id}>
-            <CardHeader>
-              <div className="flex items-start justify-between">
-                <div>
-                  <CardTitle className="text-base">{s.title}</CardTitle>
-                  <CardDescription>{new Date(s.scheduledAt).toLocaleString("en-IN")}</CardDescription>
-                </div>
-                <StatusBadge status={s.status} />
+          <MotionItem key={s.id}>
+            <GlassCard hover className="h-full">
+              <GlassCardHeader
+                title={s.title}
+                description={formatDateTime(s.scheduledAt)}
+                action={<StatusBadge status={s.status} />}
+              />
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-muted-foreground">
+                  {s.attendees} attendees
+                </span>
+                <Button size="sm" asChild>
+                  <Link href={`/dashboard/training/sessions/${s.id}`}>
+                    {s.status === "scheduled" ? "Conduct" : "View"}
+                  </Link>
+                </Button>
               </div>
-            </CardHeader>
-            <CardContent className="flex items-center justify-between">
-              <span className="text-sm text-muted-foreground">{s.attendees} attendees</span>
-              <Button size="sm" asChild>
-                <Link href={`/dashboard/training/sessions/${s.id}`}>
-                  {s.status === "scheduled" ? "Conduct" : "View"}
-                </Link>
-              </Button>
-            </CardContent>
-          </Card>
+            </GlassCard>
+          </MotionItem>
         ))}
       </div>
-    </div>
+    </DashboardShell>
   );
 }

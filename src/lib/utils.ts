@@ -34,6 +34,12 @@ export function generateCertificateNumber() {
   return `CERT-${year}-${seq}`;
 }
 
+/** Sequential org code: EMP000001, EMP000002, … */
+export function formatEmployeeCode(seq: number) {
+  return `EMP${String(seq).padStart(6, "0")}`;
+}
+
+/** @deprecated Prefer formatEmployeeCode for org-wide sequential IDs */
 export function generateEmployeeCode(deptCode: string, seq: number) {
   return `EMP-${deptCode.toUpperCase()}-${String(seq).padStart(4, "0")}`;
 }
@@ -81,6 +87,10 @@ export function statusColor(status: string): string {
     obsolete: "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300",
     superseded: "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300",
     pending: "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300",
+    pending_verification: "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300",
+    verified: "bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300",
+    qualified: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200",
+    induction_complete: "bg-teal-100 text-teal-700 dark:bg-teal-900/40 dark:text-teal-300",
     in_progress: "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300",
     assigned: "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300",
     scheduled: "bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300",

@@ -2,12 +2,16 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { Plus, Download } from "lucide-react";
-import { DEMO_EMPLOYEES, DEMO_DEPARTMENTS } from "@/lib/demo/data";
+import { Plus, Download, Loader2 } from "lucide-react";
+import { DEMO_DEPARTMENTS } from "@/lib/demo/data";
+import { useLifecycleDirectory } from "@/hooks/use-employee-lifecycle";
+import { deleteEmployeeLifecycle } from "@/lib/services/lifecycle";
 import { RequirePermission } from "@/components/auth/require-permission";
+import { AdminDeleteButton } from "@/components/auth/admin-delete-button";
 import { DataToolbar } from "@/components/shared/data-toolbar";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { Pagination } from "@/components/shared/pagination";
+import { LifecycleProgressBar } from "@/components/lifecycle/lifecycle-progress-bar";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -23,21 +27,27 @@ import { toast } from "sonner";
 import * as XLSX from "xlsx";
 
 export default function EmployeesPage() {
+  const { employees, loading, refresh } = useLifecycleDirectory();
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("");
   const [page, setPage] = useState(1);
+  const pageSize = 10;
 
   const filtered = useMemo(() => {
-    return DEMO_EMPLOYEES.filter((e) => {
+    return employees.filter((e) => {
       const matchSearch =
         !search ||
         `${e.firstName} ${e.lastName} ${e.email} ${e.employeeCode}`
           .toLowerCase()
           .includes(search.toLowerCase());
-      const matchStatus = !status || e.status === status;
+      const matchStatus =
+        !status || e.status === status || e.lifecycleStage === status;
       return matchSearch && matchStatus;
     });
-  }, [search, status]);
+  }, [employees, search, status]);
+
+  const pageData = filtered.slice((page - 1) * pageSize, page * pageSize);
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
 
   const exportExcel = () => {
     const ws = XLSX.utils.json_to_sheet(
@@ -47,6 +57,8 @@ export default function EmployeesPage() {
         Email: e.email,
         Designation: e.designation,
         Status: e.status,
+        Lifecycle: e.lifecycleStage,
+        Progress: e.lifecycleProgress,
         Induction: e.inductionStatus,
         DOJ: e.dateOfJoining,
       }))
@@ -60,6 +72,14 @@ export default function EmployeesPage() {
   const deptName = (id?: string) =>
     DEMO_DEPARTMENTS.find((d) => d.id === id)?.name || "—";
 
+  if (loading) {
+    return (
+      <div className="flex justify-center py-20">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    );
+  }
+
   return (
     <RequirePermission permission="employees:read">
       <div className="space-y-6">
@@ -67,6 +87,18 @@ export default function EmployeesPage() {
           <div>
             <h1 className="text-2xl font-bold tracking-tight">Employees</h1>
             <p className="text-muted-foreground">Manage workforce profiles & lifecycle</p>
+          </div>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={exportExcel}>
+              <Download className="mr-2 h-4 w-4" />
+              Export
+            </Button>
+            <Button asChild>
+              <Link href="/dashboard/employees/new">
+                <Plus className="mr-2 h-4 w-4" />
+                Onboard employee
+              </Link>
+            </Button>
           </div>
         </div>
 
@@ -82,36 +114,25 @@ export default function EmployeesPage() {
               label: "Status",
               value: status,
               options: [
-                { label: "Draft", value: "draft" },
+                { label: "Pending verification", value: "hr_verification" },
                 { label: "Induction", value: "induction" },
                 { label: "Handed over", value: "handed_over" },
                 { label: "Active", value: "active" },
+                { label: "Qualified", value: "qualified" },
               ],
             },
           ]}
-          onFilterChange={(_, v) => {
-            setStatus(v);
-            setPage(1);
+          onFilterChange={(key, value) => {
+            if (key === "status") {
+              setStatus(value);
+              setPage(1);
+            }
           }}
-          actions={
-            <>
-              <Button variant="outline" size="sm" onClick={exportExcel}>
-                <Download className="mr-2 h-4 w-4" />
-                Export
-              </Button>
-              <Button size="sm" asChild>
-                <Link href="/dashboard/employees/new">
-                  <Plus className="mr-2 h-4 w-4" />
-                  Add employee
-                </Link>
-              </Button>
-            </>
-          }
         />
 
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">{filtered.length} employees</CardTitle>
+            <CardTitle>Directory ({filtered.length})</CardTitle>
           </CardHeader>
           <CardContent>
             <Table>
@@ -120,14 +141,14 @@ export default function EmployeesPage() {
                   <TableHead>Code</TableHead>
                   <TableHead>Name</TableHead>
                   <TableHead>Department</TableHead>
-                  <TableHead>Designation</TableHead>
+                  <TableHead>Lifecycle</TableHead>
+                  <TableHead>Progress</TableHead>
                   <TableHead>DOJ</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Induction</TableHead>
+                  <TableHead className="w-12" />
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filtered.map((e) => (
+                {pageData.map((e) => (
                   <TableRow key={e.id}>
                     <TableCell>
                       <Link
@@ -139,22 +160,37 @@ export default function EmployeesPage() {
                     </TableCell>
                     <TableCell>
                       {e.firstName} {e.lastName}
-                      <div className="text-xs text-muted-foreground">{e.email}</div>
                     </TableCell>
                     <TableCell>{deptName(e.departmentId)}</TableCell>
-                    <TableCell>{e.designation}</TableCell>
+                    <TableCell>
+                      <StatusBadge status={e.lifecycleStage || e.status} />
+                    </TableCell>
+                    <TableCell className="min-w-[140px]">
+                      <LifecycleProgressBar
+                        stage={e.lifecycleStage || "created"}
+                        progress={e.lifecycleProgress}
+                        showLabel={false}
+                      />
+                    </TableCell>
                     <TableCell>{formatDate(e.dateOfJoining)}</TableCell>
                     <TableCell>
-                      <StatusBadge status={e.status} />
-                    </TableCell>
-                    <TableCell>
-                      <StatusBadge status={e.inductionStatus} />
+                      <AdminDeleteButton
+                        confirmTitle={`Delete ${e.firstName} ${e.lastName}?`}
+                        confirmDescription="Employee profile and related lifecycle records will be removed permanently."
+                        successMessage="Employee deleted"
+                        onDelete={async () => {
+                          await deleteEmployeeLifecycle(e.id);
+                          await refresh();
+                        }}
+                      />
                     </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
             </Table>
-            <Pagination page={page} totalPages={1} onPageChange={setPage} />
+            <div className="mt-4">
+              <Pagination page={page} totalPages={totalPages} onPageChange={setPage} />
+            </div>
           </CardContent>
         </Card>
       </div>

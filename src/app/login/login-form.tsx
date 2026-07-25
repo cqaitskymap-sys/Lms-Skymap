@@ -1,36 +1,66 @@
 "use client";
 
-import { useState, Suspense } from "react";
+import { Suspense, useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
-import { Loader2, Shield } from "lucide-react";
+import { Eye, EyeOff, Loader2, Shield } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
+import { loginSchema, type LoginInput } from "@/lib/auth/schemas";
+import { ROLE_DASHBOARD_ROUTES } from "@/lib/rbac/permissions";
+import { resolveLoginIdentifier, needsFirstLoginOnboarding } from "@/lib/services/onboarding";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
 function LoginForm() {
-  const { signIn, isDemo } = useAuth();
+  const { signIn, isDemo, user, loading } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [email, setEmail] = useState(isDemo ? "admin@pharma.local" : "");
-  const [password, setPassword] = useState(isDemo ? "Admin@123" : "");
-  const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
+  useEffect(() => {
+    if (!loading && user) {
+      const redirect = searchParams.get("redirect") || "/dashboard";
+      router.replace(redirect);
+    }
+  }, [loading, user, router, searchParams]);
+
+  const {
+    register,
+    handleSubmit,
+    setValue,
+    formState: { errors, isSubmitting },
+  } = useForm<LoginInput>({
+    resolver: zodResolver(loginSchema),
+    defaultValues: {
+      email: isDemo ? "admin@pharma.local" : "",
+      password: isDemo ? "Admin@123" : "",
+    },
+  });
+
+  const deactivated = searchParams.get("error") === "deactivated";
+
+  const onSubmit = async (data: LoginInput) => {
     try {
-      await signIn(email, password);
+      const email = await resolveLoginIdentifier(data.email);
+      const profile = await signIn(email, data.password);
       toast.success("Signed in successfully");
+      if (needsFirstLoginOnboarding(profile)) {
+        router.push("/dashboard/onboarding");
+        return;
+      }
       const redirect = searchParams.get("redirect");
-      router.push(redirect || "/dashboard");
+      if (redirect) {
+        router.push(redirect);
+        return;
+      }
+      router.push(ROLE_DASHBOARD_ROUTES[profile.role] || "/dashboard");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Sign in failed");
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -60,8 +90,8 @@ function LoginForm() {
               Enterprise training. Audit-ready compliance.
             </h1>
             <p className="max-w-sm text-slate-300">
-              Induction, SOP version control, assessments, certificates, and complete audit trails —
-              built for pharmaceutical GMP environments.
+              Secure role-based access with session controls, login auditing, and GMP-aligned
+              activity trails.
             </p>
           </div>
           <p className="text-sm text-slate-500">© 2026 PharmaLMS · SkyMap</p>
@@ -70,45 +100,75 @@ function LoginForm() {
 
       <div className="flex w-full flex-col justify-center px-6 py-12 lg:w-1/2">
         <div className="mx-auto w-full max-w-md space-y-6">
-          <div className="lg:hidden flex items-center gap-2 mb-4">
+          <div className="mb-4 flex items-center gap-2 lg:hidden">
             <Shield className="h-6 w-6 text-primary" />
             <span className="font-semibold">PharmaLMS</span>
           </div>
+
+          {deactivated && (
+            <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+              Your account has been deactivated. Contact HR.
+            </div>
+          )}
 
           <Card>
             <CardHeader>
               <CardTitle>Sign in</CardTitle>
               <CardDescription>
-                Access your role-based training workspace
+                Sign in with employee code (e.g. EMP000001) or work email
                 {isDemo && " (Demo mode)"}
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <form onSubmit={handleSubmit} className="space-y-4">
+              <form onSubmit={handleSubmit(onSubmit)} className="space-y-4" noValidate>
                 <div className="space-y-2">
-                  <Label htmlFor="email">Email</Label>
+                  <Label htmlFor="email">Username or email</Label>
                   <Input
                     id="email"
-                    type="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    required
-                    autoComplete="email"
+                    type="text"
+                    autoComplete="username"
+                    placeholder="EMP000001 or name@company.com"
+                    aria-invalid={!!errors.email}
+                    {...register("email")}
                   />
+                  {errors.email && (
+                    <p className="text-xs text-destructive">{errors.email.message}</p>
+                  )}
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="password">Password</Label>
-                  <Input
-                    id="password"
-                    type="password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    required
-                    autoComplete="current-password"
-                  />
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="password">Password</Label>
+                    <Link
+                      href="/forgot-password"
+                      className="text-xs text-muted-foreground hover:text-foreground"
+                    >
+                      Forgot password?
+                    </Link>
+                  </div>
+                  <div className="relative">
+                    <Input
+                      id="password"
+                      type={showPassword ? "text" : "password"}
+                      autoComplete="current-password"
+                      aria-invalid={!!errors.password}
+                      className="pr-10"
+                      {...register("password")}
+                    />
+                    <button
+                      type="button"
+                      className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-muted-foreground hover:text-foreground"
+                      onClick={() => setShowPassword((v) => !v)}
+                      aria-label={showPassword ? "Hide password" : "Show password"}
+                    >
+                      {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </button>
+                  </div>
+                  {errors.password && (
+                    <p className="text-xs text-destructive">{errors.password.message}</p>
+                  )}
                 </div>
-                <Button type="submit" className="w-full" disabled={loading}>
-                  {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                <Button type="submit" className="w-full" disabled={isSubmitting}>
+                  {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                   Sign in
                 </Button>
               </form>
@@ -119,7 +179,9 @@ function LoginForm() {
             <Card>
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm">Demo accounts</CardTitle>
-                <CardDescription className="text-xs">Click to fill credentials</CardDescription>
+                <CardDescription className="text-xs">
+                  Click to fill credentials · lockout after 5 failures
+                </CardDescription>
               </CardHeader>
               <CardContent className="grid grid-cols-2 gap-2">
                 {demoAccounts.map((a) => (
@@ -127,8 +189,8 @@ function LoginForm() {
                     key={a.email}
                     type="button"
                     onClick={() => {
-                      setEmail(a.email);
-                      setPassword(a.pass);
+                      setValue("email", a.email);
+                      setValue("password", a.pass);
                     }}
                     className="rounded-md border px-2 py-1.5 text-left text-xs transition-colors hover:bg-accent"
                   >

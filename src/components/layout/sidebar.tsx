@@ -16,6 +16,7 @@ import {
   Settings,
   Building2,
   UserCog,
+  UserPlus,
   HelpCircle,
   Briefcase,
   Target,
@@ -47,6 +48,12 @@ const NAV_ITEMS: NavItem[] = [
     href: "/dashboard/employees",
     icon: Users,
     roles: ["super_admin", "hr", "department_head", "qa"],
+  },
+  {
+    title: "Onboard employee",
+    href: "/dashboard/employees/new",
+    icon: UserPlus,
+    roles: ["super_admin", "hr"],
   },
   {
     title: "Induction",
@@ -103,7 +110,7 @@ const NAV_ITEMS: NavItem[] = [
     roles: ["super_admin", "qa", "hr"],
   },
   {
-    title: "Exams",
+    title: "Assessments",
     href: "/dashboard/exams",
     icon: BookOpen,
     roles: ["super_admin", "qa", "hr", "employee"],

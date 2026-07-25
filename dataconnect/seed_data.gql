@@ -1,0 +1,80 @@
+mutation SeedAllTables @transaction {
+  user_insertMany(data: [
+    {
+      id: "770e8400-e29b-41d4-a716-446655440001",
+      email: "alice@example.com",
+      username: "alice_fit",
+      dailyCalorieGoal: 2000,
+      weightGoal: 65.0
+    },
+    {
+      id: "770e8400-e29b-41d4-a716-446655440002",
+      email: "bob@example.com",
+      username: "bob_lifts",
+      dailyCalorieGoal: 2500,
+      weightGoal: 80.0
+    }
+  ])
+  foodItem_insertMany(data: [
+    {
+      id: "880e8400-e29b-41d4-a716-446655440001",
+      name: "Oatmeal",
+      calories: 150,
+      protein: 5.0,
+      carbs: 27.0,
+      fat: 3.0,
+      servingSize: "1 cup",
+      brand: "Quaker"
+    },
+    {
+      id: "880e8400-e29b-41d4-a716-446655440002",
+      name: "Chicken Breast",
+      calories: 165,
+      protein: 31.0,
+      carbs: 0.0,
+      fat: 3.6,
+      servingSize: "100g",
+      brand: "Generic"
+    }
+  ])
+  logEntry_insertMany(data: [
+    {
+      userId: "770e8400-e29b-41d4-a716-446655440001",
+      foodItemId: "880e8400-e29b-41d4-a716-446655440001",
+      timestamp: "2023-10-27T08:00:00Z",
+      mealType: "Breakfast",
+      portionMultiplier: 1.0
+    },
+    {
+      userId: "770e8400-e29b-41d4-a716-446655440002",
+      foodItemId: "880e8400-e29b-41d4-a716-446655440002",
+      timestamp: "2023-10-27T12:30:00Z",
+      mealType: "Lunch",
+      portionMultiplier: 2.0
+    }
+  ])
+  goal_insertMany(data: [
+    {
+      userId: "770e8400-e29b-41d4-a716-446655440001",
+      startDate: "2023-01-01",
+      targetWeight: 60.0,
+      targetCalories: 1800
+    },
+    {
+      userId: "770e8400-e29b-41d4-a716-446655440002",
+      startDate: "2023-01-01",
+      targetWeight: 75.0,
+      targetCalories: 2200
+    }
+  ])
+  favorite_insertMany(data: [
+    {
+      userId: "770e8400-e29b-41d4-a716-446655440001",
+      foodItemId: "880e8400-e29b-41d4-a716-446655440001"
+    },
+    {
+      userId: "770e8400-e29b-41d4-a716-446655440002",
+      foodItemId: "880e8400-e29b-41d4-a716-446655440002"
+    }
+  ])
+}

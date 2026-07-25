@@ -10,41 +10,59 @@ export type Permission =
   | "users:delete"
   | "employees:read"
   | "employees:write"
+  | "employees:delete"
   | "employees:handover"
+  | "employees:onboard"
+  | "employees:email_credentials"
   | "induction:read"
   | "induction:write"
   | "induction:assign"
+  | "induction:delete"
   | "departments:read"
   | "departments:write"
+  | "departments:delete"
   | "jd:read"
   | "jd:write"
   | "jd:approve"
+  | "jd:delete"
   | "tni:read"
   | "tni:write"
   | "tni:approve"
+  | "tni:delete"
   | "sops:read"
   | "sops:write"
   | "sops:approve"
   | "sops:assign"
+  | "sops:delete"
   | "trainers:read"
   | "trainers:write"
+  | "trainers:delete"
   | "training:read"
   | "training:write"
   | "training:conduct"
   | "training:attend"
+  | "training:delete"
   | "assessments:read"
   | "assessments:write"
   | "assessments:take"
+  | "assessments:delete"
   | "questions:read"
   | "questions:write"
+  | "questions:delete"
   | "exams:read"
   | "exams:write"
+  | "exams:delete"
   | "certificates:read"
   | "certificates:issue"
+  | "certificates:delete"
   | "reports:read"
   | "reports:export"
+  | "reports:delete"
   | "notifications:read"
+  | "notifications:delete"
   | "audit:read"
+  | "audit:delete"
+  | "lifecycle:delete"
   | "dashboard:admin"
   | "dashboard:hr"
   | "dashboard:qa"
@@ -59,41 +77,59 @@ const ALL_PERMISSIONS: Permission[] = [
   "users:delete",
   "employees:read",
   "employees:write",
+  "employees:delete",
   "employees:handover",
+  "employees:onboard",
+  "employees:email_credentials",
   "induction:read",
   "induction:write",
   "induction:assign",
+  "induction:delete",
   "departments:read",
   "departments:write",
+  "departments:delete",
   "jd:read",
   "jd:write",
   "jd:approve",
+  "jd:delete",
   "tni:read",
   "tni:write",
   "tni:approve",
+  "tni:delete",
   "sops:read",
   "sops:write",
   "sops:approve",
   "sops:assign",
+  "sops:delete",
   "trainers:read",
   "trainers:write",
+  "trainers:delete",
   "training:read",
   "training:write",
   "training:conduct",
   "training:attend",
+  "training:delete",
   "assessments:read",
   "assessments:write",
   "assessments:take",
+  "assessments:delete",
   "questions:read",
   "questions:write",
+  "questions:delete",
   "exams:read",
   "exams:write",
+  "exams:delete",
   "certificates:read",
   "certificates:issue",
+  "certificates:delete",
   "reports:read",
   "reports:export",
+  "reports:delete",
   "notifications:read",
+  "notifications:delete",
   "audit:read",
+  "audit:delete",
+  "lifecycle:delete",
   "dashboard:admin",
   "dashboard:hr",
   "dashboard:qa",
@@ -104,11 +140,14 @@ const ALL_PERMISSIONS: Permission[] = [
 ];
 
 export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
+  // Super Admin has every permission — also short-circuited in hasPermission()
   super_admin: ALL_PERMISSIONS,
   hr: [
     "employees:read",
     "employees:write",
     "employees:handover",
+    "employees:onboard",
+    "employees:email_credentials",
     "induction:read",
     "induction:write",
     "induction:assign",
@@ -193,7 +232,9 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
   ],
 };
 
+/** Super Admin always has every permission (including future ones). */
 export function hasPermission(role: UserRole, permission: Permission): boolean {
+  if (role === "super_admin") return true;
   return ROLE_PERMISSIONS[role]?.includes(permission) ?? false;
 }
 

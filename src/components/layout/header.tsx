@@ -66,8 +66,16 @@ export function Header({ onMenuClick }: HeaderProps) {
               Profile
             </Link>
           </DropdownMenuItem>
+          <DropdownMenuItem asChild>
+            <Link href="/dashboard/settings?tab=password">Change password</Link>
+          </DropdownMenuItem>
           <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={() => signOut()}>
+          <DropdownMenuItem
+            onClick={async () => {
+              await signOut();
+              window.location.href = "/login";
+            }}
+          >
             <LogOut className="mr-2 h-4 w-4" />
             Sign out
           </DropdownMenuItem>

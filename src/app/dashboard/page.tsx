@@ -2,23 +2,14 @@
 
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
-import {
-  Users,
-  GraduationCap,
-  FileText,
-  Award,
-  AlertTriangle,
-  CheckCircle2,
-  ClipboardList,
-  BookOpen,
-} from "lucide-react";
+import Link from "next/link";
 import { useAuth } from "@/contexts/auth-context";
 import { ROLE_DASHBOARD_ROUTES } from "@/lib/rbac/permissions";
-import { DEMO_STATS, DEMO_AUDIT, DEMO_ASSIGNMENTS } from "@/lib/demo/data";
-import { StatCard } from "@/components/shared/stat-card";
-import { ActivityTimeline } from "@/components/shared/activity-timeline";
+import { DashboardShell } from "@/components/dashboard/dashboard-shell";
+import { MotionItem } from "@/components/dashboard/motion";
+import { GlassCard, GlassCardHeader } from "@/components/dashboard/glass-card";
 import { StatusBadge } from "@/components/shared/status-badge";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { DEMO_ASSIGNMENTS } from "@/lib/demo/data";
 import {
   Table,
   TableBody,
@@ -27,7 +18,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { formatDate } from "@/lib/utils";
 
 export default function DashboardPage() {
   const { role, profile, isDemo } = useAuth();
@@ -40,44 +30,24 @@ export default function DashboardPage() {
     }
   }, [role, router]);
 
-  const stats = DEMO_STATS;
-
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">
-          Welcome, {profile?.displayName?.split(" ")[0]}
-        </h1>
-        <p className="text-muted-foreground">
-          Compliance overview{isDemo ? " · Demo data" : ""}
-        </p>
-      </div>
-
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard title="Employees" value={stats.totalEmployees} icon={Users} description="Active workforce" />
-        <StatCard title="Compliance rate" value={`${stats.complianceRate}%`} icon={CheckCircle2} trend={{ value: 2.4, label: "vs last month" }} />
-        <StatCard title="Pending assessments" value={stats.pendingAssessments} icon={ClipboardList} />
-        <StatCard title="Overdue trainings" value={stats.overdueTrainings} icon={AlertTriangle} />
-      </div>
-
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard title="Active trainings" value={stats.activeTrainings} icon={GraduationCap} />
-        <StatCard title="Certificates issued" value={stats.certificatesIssued} icon={Award} />
-        <StatCard title="SOP revisions" value={stats.sopRevisionsThisMonth} icon={FileText} description="This month" />
-        <StatCard title="Inductions in progress" value={stats.inductionInProgress} icon={BookOpen} />
-      </div>
-
-      <div className="grid gap-6 lg:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle>Recent training assignments</CardTitle>
-            <CardDescription>Latest SOP training status</CardDescription>
-          </CardHeader>
-          <CardContent>
+    <DashboardShell
+      role="super_admin"
+      title={`Welcome, ${profile?.displayName?.split(" ")[0] || "Admin"}`}
+      subtitle={`Enterprise compliance command center${isDemo ? " · Demo data" : ""}`}
+    >
+      <MotionItem>
+        <GlassCard>
+          <GlassCardHeader
+            title="Training assignments snapshot"
+            description="Latest SOP training status across the org"
+          />
+          <div className="overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow>
                   <TableHead>Assignment</TableHead>
+                  <TableHead>Employee</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Score</TableHead>
                 </TableRow>
@@ -85,7 +55,15 @@ export default function DashboardPage() {
               <TableBody>
                 {DEMO_ASSIGNMENTS.map((a) => (
                   <TableRow key={a.id}>
-                    <TableCell className="font-medium">{a.id}</TableCell>
+                    <TableCell className="font-medium">
+                      <Link
+                        href="/dashboard/training"
+                        className="text-primary hover:underline"
+                      >
+                        {a.id}
+                      </Link>
+                    </TableCell>
+                    <TableCell>{a.employeeId}</TableCell>
                     <TableCell>
                       <StatusBadge status={a.status} />
                     </TableCell>
@@ -94,23 +72,9 @@ export default function DashboardPage() {
                 ))}
               </TableBody>
             </Table>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Activity timeline</CardTitle>
-            <CardDescription>Audit trail snapshot</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <ActivityTimeline items={DEMO_AUDIT} />
-          </CardContent>
-        </Card>
-      </div>
-
-      <p className="text-xs text-muted-foreground">
-        Last refreshed {formatDate(new Date().toISOString())}
-      </p>
-    </div>
+          </div>
+        </GlassCard>
+      </MotionItem>
+    </DashboardShell>
   );
 }

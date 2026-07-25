@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 280 80" fill="none">
+  <path d="M20 50 C40 20, 70 20, 90 45 C110 70, 140 15, 170 40 C190 55, 220 35, 250 48" stroke="#0B3D4A" stroke-width="2.5" stroke-linecap="round" fill="none"/>
+  <path d="M35 55 C55 40, 80 55, 100 48 C120 40, 150 60, 180 45" stroke="#0B3D4A" stroke-width="1.5" stroke-linecap="round" fill="none" opacity="0.7"/>
+  <text x="20" y="74" fill="#0B3D4A" font-family="Georgia, serif" font-size="10" font-style="italic">Dr. Meera Iyer</text>
+</svg>

@@ -1,0 +1,36 @@
+type User @table {
+  email: String!
+  username: String!
+  dailyCalorieGoal: Int
+  weightGoal: Float
+}
+
+type FoodItem @table {
+  name: String!
+  calories: Int!
+  protein: Float!
+  carbs: Float!
+  fat: Float!
+  servingSize: String
+  brand: String
+}
+
+type LogEntry @table {
+  user: User!
+  foodItem: FoodItem!
+  timestamp: Timestamp!
+  mealType: String!
+  portionMultiplier: Float
+}
+
+type Goal @table {
+  user: User!
+  startDate: Date!
+  targetWeight: Float
+  targetCalories: Int
+}
+
+type Favorite @table {
+  user: User!
+  foodItem: FoodItem!
+}
