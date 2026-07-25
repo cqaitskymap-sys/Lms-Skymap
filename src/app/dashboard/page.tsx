@@ -2,14 +2,11 @@
 
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
 import { useAuth } from "@/contexts/auth-context";
 import { ROLE_DASHBOARD_ROUTES } from "@/lib/rbac/permissions";
 import { DashboardShell } from "@/components/dashboard/dashboard-shell";
 import { MotionItem } from "@/components/dashboard/motion";
 import { GlassCard, GlassCardHeader } from "@/components/dashboard/glass-card";
-import { StatusBadge } from "@/components/shared/status-badge";
-import { DEMO_ASSIGNMENTS } from "@/lib/demo/data";
 import {
   Table,
   TableBody,
@@ -53,23 +50,11 @@ export default function DashboardPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {DEMO_ASSIGNMENTS.map((a) => (
-                  <TableRow key={a.id}>
-                    <TableCell className="font-medium">
-                      <Link
-                        href="/dashboard/training"
-                        className="text-primary hover:underline"
-                      >
-                        {a.id}
-                      </Link>
-                    </TableCell>
-                    <TableCell>{a.employeeId}</TableCell>
-                    <TableCell>
-                      <StatusBadge status={a.status} />
-                    </TableCell>
-                    <TableCell>{a.score != null ? `${a.score}%` : "—"}</TableCell>
-                  </TableRow>
-                ))}
+                <TableRow>
+                  <TableCell colSpan={4} className="text-center text-muted-foreground">
+                    No training assignments yet.
+                  </TableCell>
+                </TableRow>
               </TableBody>
             </Table>
           </div>

@@ -16,7 +16,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { RequirePermission } from "@/components/auth/require-permission";
-import { DEMO_SOPS } from "@/lib/demo/data";
 
 interface NeedRow {
   id: string;
@@ -27,15 +26,7 @@ interface NeedRow {
 }
 
 export default function TniPage() {
-  const [needs, setNeeds] = useState<NeedRow[]>([
-    {
-      id: "1",
-      topic: "Document Control",
-      sopId: "sop_001",
-      priority: "high",
-      rationale: "Core QA responsibility per JD",
-    },
-  ]);
+  const [needs, setNeeds] = useState<NeedRow[]>([]);
 
   const addNeed = () =>
     setNeeds((n) => [
@@ -107,11 +98,9 @@ export default function TniPage() {
                         <SelectValue placeholder="Select SOP" />
                       </SelectTrigger>
                       <SelectContent>
-                        {DEMO_SOPS.map((s) => (
-                          <SelectItem key={s.id} value={s.id}>
-                            {s.sopNumber}
-                          </SelectItem>
-                        ))}
+                        <SelectItem value="__none" disabled>
+                          No SOPs available yet
+                        </SelectItem>
                       </SelectContent>
                     </Select>
                   </div>

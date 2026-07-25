@@ -4,8 +4,6 @@ import Link from "next/link";
 import { DashboardShell } from "@/components/dashboard/dashboard-shell";
 import { MotionItem } from "@/components/dashboard/motion";
 import { GlassCard, GlassCardHeader } from "@/components/dashboard/glass-card";
-import { StatusBadge } from "@/components/shared/status-badge";
-import { DEMO_SOPS } from "@/lib/demo/data";
 import { Button } from "@/components/ui/button";
 import {
   Table,
@@ -45,23 +43,11 @@ export default function QaDashboardPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {DEMO_SOPS.map((s) => (
-                  <TableRow key={s.id}>
-                    <TableCell>
-                      <Link
-                        href={`/dashboard/sops/${s.id}`}
-                        className="font-medium text-primary hover:underline"
-                      >
-                        {s.sopNumber}
-                      </Link>
-                    </TableCell>
-                    <TableCell>{s.title}</TableCell>
-                    <TableCell>{s.category}</TableCell>
-                    <TableCell>
-                      <StatusBadge status={s.status} />
-                    </TableCell>
-                  </TableRow>
-                ))}
+                <TableRow>
+                  <TableCell colSpan={4} className="text-center text-muted-foreground">
+                    No SOPs yet. Create one to get started.
+                  </TableCell>
+                </TableRow>
               </TableBody>
             </Table>
           </div>

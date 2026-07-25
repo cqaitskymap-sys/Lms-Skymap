@@ -2,11 +2,9 @@
 
 import { useState } from "react";
 import { toast } from "sonner";
-import { DEMO_EMPLOYEES, DEMO_SOPS } from "@/lib/demo/data";
 import { RequirePermission } from "@/components/auth/require-permission";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -16,8 +14,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
-import { StatusBadge } from "@/components/shared/status-badge";
-import { DEMO_ASSIGNMENTS } from "@/lib/demo/data";
 import {
   Table,
   TableBody,
@@ -29,8 +25,7 @@ import {
 
 export default function TrainingPage() {
   const [sopId, setSopId] = useState("");
-  const [trainerId, setTrainerId] = useState("user_trainer");
-  const [selected, setSelected] = useState<string[]>([]);
+  const [trainerId, setTrainerId] = useState("");
 
   return (
     <div className="space-y-6">
@@ -54,11 +49,9 @@ export default function TrainingPage() {
                     <SelectValue placeholder="Select SOP" />
                   </SelectTrigger>
                   <SelectContent>
-                    {DEMO_SOPS.filter((s) => s.status === "approved").map((s) => (
-                      <SelectItem key={s.id} value={s.id}>
-                        {s.sopNumber} — {s.title}
-                      </SelectItem>
-                    ))}
+                    <SelectItem value="__none" disabled>
+                      No approved SOPs yet
+                    </SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -66,10 +59,12 @@ export default function TrainingPage() {
                 <Label>Trainer</Label>
                 <Select value={trainerId} onValueChange={setTrainerId}>
                   <SelectTrigger>
-                    <SelectValue />
+                    <SelectValue placeholder="Select trainer" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="user_trainer">Vikram Singh</SelectItem>
+                    <SelectItem value="__none" disabled>
+                      No trainers listed yet
+                    </SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -78,31 +73,10 @@ export default function TrainingPage() {
                 <Input type="date" />
               </div>
             </div>
-            <div className="space-y-2">
-              <Label>Employees</Label>
-              {DEMO_EMPLOYEES.filter((e) => e.status === "active" || e.status === "handed_over").map(
-                (e) => (
-                  <label key={e.id} className="flex items-center gap-2 text-sm">
-                    <Checkbox
-                      checked={selected.includes(e.id)}
-                      onCheckedChange={(c) =>
-                        setSelected((prev) =>
-                          c ? [...prev, e.id] : prev.filter((x) => x !== e.id)
-                        )
-                      }
-                    />
-                    {e.firstName} {e.lastName} ({e.employeeCode})
-                  </label>
-                )
-              )}
-            </div>
+            <p className="text-sm text-muted-foreground">No employees available for assignment yet.</p>
             <Button
               onClick={() => {
-                if (!sopId || !selected.length) {
-                  toast.error("Select SOP and at least one employee");
-                  return;
-                }
-                toast.success(`Assigned training to ${selected.length} employee(s)`);
+                toast.error("Create SOPs and employees first, then assign training");
               }}
             >
               Assign training
@@ -127,17 +101,11 @@ export default function TrainingPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {DEMO_ASSIGNMENTS.map((a) => (
-                <TableRow key={a.id}>
-                  <TableCell className="font-mono text-xs">{a.id}</TableCell>
-                  <TableCell>{a.employeeId}</TableCell>
-                  <TableCell>{a.sopId}</TableCell>
-                  <TableCell>
-                    <StatusBadge status={a.status} />
-                  </TableCell>
-                  <TableCell>{a.score != null ? `${a.score}%` : "—"}</TableCell>
-                </TableRow>
-              ))}
+              <TableRow>
+                <TableCell colSpan={5} className="text-center text-muted-foreground">
+                  No training assignments yet.
+                </TableCell>
+              </TableRow>
             </TableBody>
           </Table>
         </CardContent>

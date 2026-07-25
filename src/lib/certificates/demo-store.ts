@@ -1,58 +1,33 @@
 /**
- * Demo certificate store — issued certificates with QR / PDF metadata.
+ * Local certificate store — empty by default (no seeded demo records).
  */
 
 import type { Certificate } from "@/types";
-import { DEMO_CERTIFICATES, isDemoMode } from "@/lib/demo/data";
+import { isDemoMode } from "@/lib/demo/data";
 
-const STORE_KEY = "pharma_lms_certificates_v1";
+const STORE_KEY = "pharma_lms_certificates_v2";
 export const CERTIFICATES_UPDATED_EVENT = "pharma-certificates-updated";
 
 export interface CertificateStore {
   certificates: Certificate[];
 }
 
-function enrichDemo(c: Certificate): Certificate {
-  return {
-    ...c,
-    employeeName: c.employeeName || "Aarav Kumar",
-    employeeCode: c.employeeCode || "EMP-QA-0001",
-    departmentName: c.departmentName || "Quality Assurance",
-    trainerName: c.trainerName || "Vikram Singh",
-    sopNumber: c.sopNumber || "SOP-QA-001",
-    sopTitle: c.sopTitle || "Document Control Procedure",
-    companyName: c.companyName || "SkyMap Pharma",
-    companyLogoUrl: c.companyLogoUrl || "/brand/skymap-logo.svg",
-    signedBy: c.signedBy || "Dr. Meera Iyer",
-    signedByTitle: c.signedByTitle || "Head of Quality Assurance",
-    digitalSignatureUrl: c.digitalSignatureUrl || "/brand/qa-signature.svg",
-  };
-}
-
-function defaultStore(): CertificateStore {
-  return {
-    certificates: DEMO_CERTIFICATES.map(enrichDemo),
-  };
+function emptyStore(): CertificateStore {
+  return { certificates: [] };
 }
 
 export function readCertificateStore(): CertificateStore {
-  if (typeof window === "undefined") return defaultStore();
+  if (typeof window === "undefined") return emptyStore();
   try {
     const raw = localStorage.getItem(STORE_KEY);
     if (!raw) {
-      const seeded = defaultStore();
-      localStorage.setItem(STORE_KEY, JSON.stringify(seeded));
-      return seeded;
+      const store = emptyStore();
+      localStorage.setItem(STORE_KEY, JSON.stringify(store));
+      return store;
     }
-    const parsed = JSON.parse(raw) as CertificateStore;
-    if (!parsed.certificates?.[0]?.employeeName) {
-      const seeded = defaultStore();
-      localStorage.setItem(STORE_KEY, JSON.stringify(seeded));
-      return seeded;
-    }
-    return parsed;
+    return JSON.parse(raw) as CertificateStore;
   } catch {
-    return defaultStore();
+    return emptyStore();
   }
 }
 

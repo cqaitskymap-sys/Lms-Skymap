@@ -25,7 +25,9 @@ function loadServiceAccountFromFile(): ServiceAccountJson | null {
   const filePath = credentialsFilePath();
   if (!filePath || !existsSync(filePath)) return null;
   try {
-    return JSON.parse(readFileSync(filePath, "utf8")) as ServiceAccountJson;
+    // Strip UTF-8 BOM (common when saving JSON from Windows editors / downloads)
+    const raw = readFileSync(filePath, "utf8").replace(/^\uFEFF/, "");
+    return JSON.parse(raw) as ServiceAccountJson;
   } catch (err) {
     console.error("[firebase-admin] Failed to read credentials file:", filePath, err);
     return null;

@@ -27,22 +27,13 @@ import {
 
 async function preferLocal(moduleId?: string): Promise<boolean> {
   if (isDemoMode()) return true;
-  if (!moduleId) {
-    try {
-      const snap = await getDocs(
-        query(collection(db, COLLECTIONS.inductionModules), where("isActive", "==", true))
-      );
-      return snap.empty;
-    } catch {
-      return true;
-    }
-  }
+  if (!moduleId) return false;
   try {
     const snap = await getDoc(doc(db, COLLECTIONS.inductionModules, moduleId));
     if (snap.exists()) return false;
     return readInductionStore().modules.some((m) => m.id === moduleId);
   } catch {
-    return true;
+    return false;
   }
 }
 
@@ -76,7 +67,7 @@ export async function createInductionModule(
 }
 
 export async function listInductionModules(): Promise<InductionModule[]> {
-  if (await preferLocal()) {
+  if (isDemoMode()) {
     return readInductionStore()
       .modules.filter((m) => m.isActive)
       .sort((a, b) => a.order - b.order);
@@ -89,14 +80,19 @@ export async function listInductionModules(): Promise<InductionModule[]> {
       orderBy("order", "asc")
     );
     const snap = await getDocs(q);
-    const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }) as InductionModule);
-    if (rows.length) return rows;
+    return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as InductionModule);
   } catch {
-    /* fall through */
+    try {
+      const snap = await getDocs(
+        query(collection(db, COLLECTIONS.inductionModules), where("isActive", "==", true))
+      );
+      return snap.docs
+        .map((d) => ({ id: d.id, ...d.data() }) as InductionModule)
+        .sort((a, b) => a.order - b.order);
+    } catch {
+      return [];
+    }
   }
-  return readInductionStore()
-    .modules.filter((m) => m.isActive)
-    .sort((a, b) => a.order - b.order);
 }
 
 export async function getInductionModule(id: string): Promise<InductionModule | null> {

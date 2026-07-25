@@ -4,8 +4,6 @@ import Link from "next/link";
 import { DashboardShell } from "@/components/dashboard/dashboard-shell";
 import { MotionItem } from "@/components/dashboard/motion";
 import { GlassCard, GlassCardHeader } from "@/components/dashboard/glass-card";
-import { StatusBadge } from "@/components/shared/status-badge";
-import { DEMO_ASSIGNMENTS, DEMO_EMPLOYEES } from "@/lib/demo/data";
 import { Button } from "@/components/ui/button";
 import {
   Table,
@@ -17,8 +15,6 @@ import {
 } from "@/components/ui/table";
 
 export default function DeptDashboardPage() {
-  const deptEmployees = DEMO_EMPLOYEES.filter((e) => e.departmentId === "dept_qa");
-
   return (
     <DashboardShell
       role="department_head"
@@ -29,7 +25,7 @@ export default function DeptDashboardPage() {
         <GlassCard>
           <GlassCardHeader
             title="Department training status"
-            description={`${deptEmployees.length} team members in focus`}
+            description="Team training assignments"
             action={
               <div className="flex gap-2">
                 <Button variant="outline" size="sm" asChild>
@@ -52,16 +48,11 @@ export default function DeptDashboardPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {DEMO_ASSIGNMENTS.map((a) => (
-                  <TableRow key={a.id}>
-                    <TableCell className="font-medium">{a.id}</TableCell>
-                    <TableCell>{a.employeeId}</TableCell>
-                    <TableCell>{a.sopId}</TableCell>
-                    <TableCell>
-                      <StatusBadge status={a.status} />
-                    </TableCell>
-                  </TableRow>
-                ))}
+                <TableRow>
+                  <TableCell colSpan={4} className="text-center text-muted-foreground">
+                    No department training data yet.
+                  </TableCell>
+                </TableRow>
               </TableBody>
             </Table>
           </div>

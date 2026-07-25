@@ -11,6 +11,7 @@
     "functions:serve": "cd functions && npm run serve",
     "functions:deploy": "cd functions && npm run deploy",
     "emulators": "firebase emulators:start",
+    "storage:cors": "node scripts/set-storage-cors.mjs",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

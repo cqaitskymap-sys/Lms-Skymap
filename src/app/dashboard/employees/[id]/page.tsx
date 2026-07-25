@@ -4,9 +4,10 @@ import { use, useMemo, useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
 import { KeyRound, Loader2, ArrowRight } from "lucide-react";
-import { DEMO_DEPARTMENTS, DEMO_INDUCTION_MODULES } from "@/lib/demo/data";
+import { DEMO_DEPARTMENTS } from "@/lib/demo/data";
 import { useAuth } from "@/contexts/auth-context";
 import { useEmployeeLifecycle } from "@/hooks/use-employee-lifecycle";
+import { useInductionCatalog } from "@/hooks/use-induction";
 import {
   advanceToNext,
   assignInductionLifecycle,
@@ -47,7 +48,8 @@ export default function EmployeeDetailPage({
   const { id } = use(params);
   const { profile, can } = useAuth();
   const { employee, events, approvals, loading, refresh } = useEmployeeLifecycle(id);
-  const [selectedModules, setSelectedModules] = useState<string[]>(["ind_001"]);
+  const { modules: inductionModules } = useInductionCatalog();
+  const [selectedModules, setSelectedModules] = useState<string[]>([]);
   const [handoverDept, setHandoverDept] = useState("");
   const [busy, setBusy] = useState(false);
   const [credentials, setCredentials] = useState<{
@@ -294,18 +296,24 @@ export default function EmployeeDetailPage({
                   stage === "induction_assigned") && (
                   <div className="space-y-3 rounded-md border p-3">
                     <p className="text-sm font-medium">Assign induction modules</p>
-                    {DEMO_INDUCTION_MODULES.map((m) => (
-                      <div key={m.id} className="flex items-start gap-3">
-                        <Checkbox
-                          id={m.id}
-                          checked={selectedModules.includes(m.id)}
-                          onCheckedChange={() => toggleModule(m.id)}
-                        />
-                        <Label htmlFor={m.id} className="font-normal">
-                          {m.title}
-                        </Label>
-                      </div>
-                    ))}
+                    {inductionModules.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">
+                        No induction modules yet. Create them under Induction → Catalog.
+                      </p>
+                    ) : (
+                      inductionModules.map((m) => (
+                        <div key={m.id} className="flex items-start gap-3">
+                          <Checkbox
+                            id={m.id}
+                            checked={selectedModules.includes(m.id)}
+                            onCheckedChange={() => toggleModule(m.id)}
+                          />
+                          <Label htmlFor={m.id} className="font-normal">
+                            {m.title}
+                          </Label>
+                        </div>
+                      ))
+                    )}
                     <Button
                       disabled={busy || !selectedModules.length}
                       onClick={() =>

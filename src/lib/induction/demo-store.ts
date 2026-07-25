@@ -1,12 +1,11 @@
 /**
- * Demo / offline induction store — modules + assignments in localStorage.
+ * Local induction store — empty by default (no seeded demo records).
+ * Used when demo mode is on, or as offline cache for user-created data.
  */
 
 import type { InductionAssignment, InductionModule } from "@/types";
-import { DEMO_INDUCTION_MODULES } from "@/lib/demo/data";
-import { nowISO } from "@/lib/services/helpers";
 
-const STORE_KEY = "pharma_lms_induction_v1";
+const STORE_KEY = "pharma_lms_induction_v2";
 export const INDUCTION_UPDATED_EVENT = "pharma-induction-updated";
 
 export interface InductionStore {
@@ -14,90 +13,22 @@ export interface InductionStore {
   assignments: InductionAssignment[];
 }
 
-function seedAssignments(): InductionAssignment[] {
-  const now = nowISO();
-  return [
-    {
-      id: "inda_001",
-      employeeId: "emp_001",
-      moduleId: "ind_001",
-      status: "passed",
-      progressPercent: 100,
-      documentsViewed: ["doc_001"],
-      startedAt: "2026-06-05T00:00:00.000Z",
-      completedAt: "2026-06-15T00:00:00.000Z",
-      score: 92,
-      passed: true,
-      assessmentAttemptId: "att_demo_001",
-      createdAt: "2026-06-02T00:00:00.000Z",
-      updatedAt: "2026-06-15T00:00:00.000Z",
-      createdBy: "user_hr",
-    },
-    {
-      id: "inda_002",
-      employeeId: "emp_001",
-      moduleId: "ind_002",
-      status: "passed",
-      progressPercent: 100,
-      documentsViewed: [],
-      startedAt: "2026-06-08T00:00:00.000Z",
-      completedAt: "2026-06-14T00:00:00.000Z",
-      score: 88,
-      passed: true,
-      createdAt: "2026-06-02T00:00:00.000Z",
-      updatedAt: "2026-06-14T00:00:00.000Z",
-      createdBy: "user_hr",
-    },
-    {
-      id: "inda_003",
-      employeeId: "emp_002",
-      moduleId: "ind_001",
-      status: "in_progress",
-      progressPercent: 0,
-      documentsViewed: [],
-      createdAt: now,
-      updatedAt: now,
-      createdBy: "user_hr",
-    },
-    {
-      id: "inda_004",
-      employeeId: "emp_002",
-      moduleId: "ind_002",
-      status: "not_started",
-      progressPercent: 0,
-      documentsViewed: [],
-      createdAt: now,
-      updatedAt: now,
-      createdBy: "user_hr",
-    },
-  ];
-}
-
-function seedModules(): InductionModule[] {
-  return DEMO_INDUCTION_MODULES.map((m) =>
-    m.id === "ind_001" ? { ...m, assessmentId: "exam_001" } : { ...m }
-  );
-}
-
-function defaultStore(): InductionStore {
-  return {
-    modules: seedModules(),
-    assignments: seedAssignments(),
-  };
+function emptyStore(): InductionStore {
+  return { modules: [], assignments: [] };
 }
 
 export function readInductionStore(): InductionStore {
-  if (typeof window === "undefined") return defaultStore();
+  if (typeof window === "undefined") return emptyStore();
   try {
     const raw = localStorage.getItem(STORE_KEY);
     if (!raw) {
-      const seeded = defaultStore();
-      localStorage.setItem(STORE_KEY, JSON.stringify(seeded));
-      return seeded;
+      const store = emptyStore();
+      localStorage.setItem(STORE_KEY, JSON.stringify(store));
+      return store;
     }
     return JSON.parse(raw) as InductionStore;
   } catch {
-    return defaultStore();
+    return emptyStore();
   }
 }
 
@@ -108,7 +39,7 @@ export function writeInductionStore(store: InductionStore): void {
 }
 
 export function resetInductionStore(): InductionStore {
-  const seeded = defaultStore();
-  writeInductionStore(seeded);
-  return seeded;
+  const store = emptyStore();
+  writeInductionStore(store);
+  return store;
 }

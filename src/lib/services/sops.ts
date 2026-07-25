@@ -177,25 +177,9 @@ export async function listSopsDetailed(filters?: {
       query(collection(db, COLLECTIONS.sops), orderBy("sopNumber", "asc"))
     );
     const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }) as SopDocument);
-    if (list.length === 0) {
-      // Empty project — fall back to seeded demo store for UX
-      const store = readSopStore();
-      return applyFilters(
-        store.sops.map((s) => ({
-          ...s,
-          version: store.versions.find((v) => v.id === s.currentVersionId),
-        }))
-      );
-    }
     return applyFilters(list);
   } catch {
-    const store = readSopStore();
-    return applyFilters(
-      store.sops.map((s) => ({
-        ...s,
-        version: store.versions.find((v) => v.id === s.currentVersionId),
-      }))
-    );
+    return [];
   }
 }
 

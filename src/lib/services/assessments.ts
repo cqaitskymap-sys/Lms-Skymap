@@ -45,12 +45,7 @@ import {
 
 async function preferLocalData(): Promise<boolean> {
   if (isDemoMode()) return true;
-  try {
-    const snap = await getDocs(query(collection(db, COLLECTIONS.exams), limit(1)));
-    return snap.empty;
-  } catch {
-    return true;
-  }
+  return false;
 }
 
 async function loadExam(examId: string): Promise<Exam | null> {

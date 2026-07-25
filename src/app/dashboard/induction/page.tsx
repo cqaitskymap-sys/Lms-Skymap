@@ -278,6 +278,16 @@ export default function InductionPage() {
               <div className="flex items-center gap-2 text-muted-foreground">
                 <Loader2 className="h-4 w-4 animate-spin" /> Loading catalog…
               </div>
+            ) : modules.length === 0 ? (
+              <Card>
+                <CardContent className="flex flex-col items-center gap-3 py-12 text-center">
+                  <BookOpen className="h-10 w-10 text-muted-foreground" />
+                  <p className="font-medium">No induction modules yet</p>
+                  <p className="text-sm text-muted-foreground">
+                    Create modules to build your onboarding catalog.
+                  </p>
+                </CardContent>
+              </Card>
             ) : (
               <div className="grid gap-4 md:grid-cols-2">
                 {modules.map((m) => (

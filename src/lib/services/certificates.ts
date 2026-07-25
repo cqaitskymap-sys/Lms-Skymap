@@ -38,6 +38,41 @@ const APP_URL =
     ? window.location.origin
     : process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
 
+const STORAGE_UNAVAILABLE_KEY = "pharma_lms_storage_unavailable";
+
+function isStorageMarkedUnavailable(): boolean {
+  if (typeof window === "undefined") return false;
+  return sessionStorage.getItem(STORAGE_UNAVAILABLE_KEY) === "1";
+}
+
+function markStorageUnavailable(): void {
+  if (typeof window === "undefined") return;
+  sessionStorage.setItem(STORAGE_UNAVAILABLE_KEY, "1");
+  console.warn(
+    "[storage] Firebase Storage unavailable (bucket missing / billing / CORS). Using local PDF data URLs until the session ends."
+  );
+}
+
+/** Upload PDF to Storage, or fall back to a data URL when the bucket is unavailable. */
+async function storeCertificatePdf(
+  path: string,
+  pdfBlob: Blob
+): Promise<{ pdfStoragePath: string; pdfDownloadUrl: string }> {
+  if (!isStorageMarkedUnavailable()) {
+    try {
+      const storageRef = ref(storage, path);
+      await uploadBytes(storageRef, pdfBlob, { contentType: "application/pdf" });
+      const pdfDownloadUrl = await getDownloadURL(storageRef);
+      return { pdfStoragePath: path, pdfDownloadUrl };
+    } catch {
+      markStorageUnavailable();
+    }
+  }
+
+  const pdfDownloadUrl = await blobToDataUrl(pdfBlob);
+  return { pdfStoragePath: `local/${path}`, pdfDownloadUrl };
+}
+
 async function preferLocal(): Promise<boolean> {
   if (isDemoMode()) return true;
   try {
@@ -166,7 +201,7 @@ export async function issueTrainingCertificate(
     createdBy: input.actorId,
   };
 
-  // Generate PDF and upload
+  // Generate PDF and upload (falls back to data URL if Storage bucket is unavailable)
   try {
     const pdfBlob = await buildCertificatePdf(certificate, qrCodeImageUrl);
     const path = `certificates/${certificateNumber}.pdf`;
@@ -179,14 +214,8 @@ export async function issueTrainingCertificate(
         pdfDownloadUrl: dataUrl,
       };
     } else {
-      const storageRef = ref(storage, path);
-      await uploadBytes(storageRef, pdfBlob, { contentType: "application/pdf" });
-      const pdfDownloadUrl = await getDownloadURL(storageRef);
-      certificate = {
-        ...certificate,
-        pdfStoragePath: path,
-        pdfDownloadUrl,
-      };
+      const stored = await storeCertificatePdf(path, pdfBlob);
+      certificate = { ...certificate, ...stored };
     }
   } catch {
     /* PDF optional at issue time — can regenerate client-side */
@@ -347,15 +376,20 @@ export async function uploadCertificatePdf(
     return { pdfStoragePath: updated.pdfStoragePath!, pdfDownloadUrl };
   }
 
-  const storageRef = ref(storage, path);
-  await uploadBytes(storageRef, blob, { contentType: "application/pdf" });
-  const pdfDownloadUrl = await getDownloadURL(storageRef);
-  await updateDoc(doc(db, COLLECTIONS.certificates, certificateId), {
-    pdfStoragePath: path,
-    pdfDownloadUrl,
-    updatedAt: nowISO(),
-  });
-  return { pdfStoragePath: path, pdfDownloadUrl };
+  const stored = await storeCertificatePdf(path, blob);
+  try {
+    await updateDoc(doc(db, COLLECTIONS.certificates, certificateId), {
+      ...stored,
+      updatedAt: nowISO(),
+    });
+  } catch {
+    upsertCertificateLocal({
+      ...cert,
+      ...stored,
+      updatedAt: nowISO(),
+    });
+  }
+  return stored;
 }
 
 /** Super Admin only — permanently delete a certificate record. */
