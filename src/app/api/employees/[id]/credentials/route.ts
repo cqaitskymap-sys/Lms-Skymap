@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import {
-  requirePermission,
   unauthorized,
   verifyAuthDetailed,
   writeAuditLog,
@@ -42,7 +41,10 @@ export async function POST(
     !hasPermission(auth.role, "employees:email_credentials") &&
     !hasPermission(auth.role, "employees:write")
   ) {
-    return requirePermission(auth, "employees:email_credentials");
+    return NextResponse.json(
+      { success: false, error: "Forbidden: insufficient permissions" },
+      { status: 403 }
+    );
   }
 
   const { id } = await context.params;

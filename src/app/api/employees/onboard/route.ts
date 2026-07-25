@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import {
-  requirePermission,
   unauthorized,
   verifyAuthDetailed,
   writeAuditLog,
@@ -36,7 +35,10 @@ export async function POST(request: NextRequest) {
     !hasPermission(auth.role, "employees:onboard") &&
     !hasPermission(auth.role, "employees:write")
   ) {
-    return requirePermission(auth, "employees:onboard");
+    return NextResponse.json(
+      { success: false, error: "Forbidden: insufficient permissions" },
+      { status: 403 }
+    );
   }
 
   let raw: unknown;
