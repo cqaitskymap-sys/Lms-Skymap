@@ -86,7 +86,10 @@ export async function POST(
 
   const username = employee.username || employee.employeeCode;
   const loginUrl = `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/login`;
-  let emailResult = { sent: false, reason: "Email skipped" as string | undefined };
+  let emailResult: { sent: boolean; reason?: string } = {
+    sent: false,
+    reason: "Email skipped",
+  };
 
   if (body.emailCredentials !== false) {
     emailResult = await sendOnboardingCredentialsEmail({
