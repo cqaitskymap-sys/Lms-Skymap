@@ -1,0 +1,53 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function role() {
+      return firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.role;
+    }
+
+    function hasRole(roles) {
+      return isSignedIn() && role() in roles;
+    }
+
+    function isSuperAdmin() {
+      return hasRole(['super_admin']);
+    }
+
+    match /induction/{moduleId}/{fileName} {
+      allow read: if isSignedIn();
+      allow write: if hasRole(['super_admin', 'hr'])
+        && request.resource.size < 100 * 1024 * 1024
+        && request.resource.contentType.matches('application/pdf|video/.*|application/vnd.*|application/octet-stream');
+      allow delete: if isSuperAdmin() || hasRole(['hr']);
+    }
+
+    match /sops/{sopId}/{fileName} {
+      allow read: if isSignedIn();
+      allow write: if hasRole(['super_admin', 'qa'])
+        && request.resource.size < 100 * 1024 * 1024;
+      allow delete: if isSuperAdmin() || hasRole(['qa']);
+    }
+
+    match /signatures/{userId}/{fileName} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && request.auth.uid == userId
+        && request.resource.contentType.matches('image/.*')
+        && request.resource.size < 2 * 1024 * 1024;
+      allow delete: if isSuperAdmin()
+        || (isSignedIn() && request.auth.uid == userId);
+    }
+
+    match /certificates/{fileName} {
+      allow read: if true;
+      allow write: if hasRole(['super_admin', 'qa', 'hr'])
+        && request.resource.size < 15 * 1024 * 1024
+        && request.resource.contentType == 'application/pdf';
+      allow delete: if isSuperAdmin();
+    }
+  }
+}

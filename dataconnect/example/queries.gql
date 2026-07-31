@@ -1,0 +1,115 @@
+mutation CreateUser($username: String!, $email: String!) @auth(level: USER) {
+  user_insert(data: {id_expr: "auth.uid", username: $username, email: $email})
+}
+
+mutation UpdateUser($username: String) @auth(level: USER) {
+  user_update(key: {id_expr: "auth.uid"}, data: {username: $username})
+}
+
+mutation DeleteUser @auth(level: USER) {
+  user_delete(key: {id_expr: "auth.uid"})
+}
+
+query GetCurrentUser @auth(level: USER) {
+  user(key: {id_expr: "auth.uid"}) {
+    username email dailyCalorieGoal weightGoal
+  }
+}
+
+query ListUsers @auth(level: PUBLIC, insecureReason: "Publicly accessible list of users.") {
+  users {
+    username
+  }
+}
+
+mutation CreateFoodItem($name: String!, $calories: Int!, $protein: Float!, $carbs: Float!, $fat: Float!) @auth(level: PUBLIC, insecureReason: "Allowing users to contribute to public food database.") {
+  foodItem_insert(data: {name: $name, calories: $calories, protein: $protein, carbs: $carbs, fat: $fat})
+}
+
+mutation UpdateFoodItem($id: UUID!, $calories: Int) @auth(level: PUBLIC, insecureReason: "Allowing users to correct food data.") {
+  foodItem_update(id: $id, data: {calories: $calories})
+}
+
+mutation DeleteFoodItem($id: UUID!) @auth(level: PUBLIC, insecureReason: "Deleting food items.") {
+  foodItem_delete(id: $id)
+}
+
+query GetFoodItem($id: UUID!) @auth(level: PUBLIC, insecureReason: "Public read access.") {
+  foodItem(id: $id) {
+    name calories protein
+  }
+}
+
+query ListFoodItems @auth(level: PUBLIC, insecureReason: "Public read access.") {
+  foodItems {
+    name brand
+  }
+}
+
+mutation CreateLogEntry($foodItemId: UUID!, $mealType: String!, $portionMultiplier: Float!) @auth(level: USER) {
+  logEntry_insert(data: {userId_expr: "auth.uid", foodItemId: $foodItemId, mealType: $mealType, portionMultiplier: $portionMultiplier, timestamp_expr: "request.time"})
+}
+
+mutation UpdateLogEntry($id: UUID!, $portionMultiplier: Float!) @auth(level: USER) {
+  logEntry_update(key: {id: $id}, data: {portionMultiplier: $portionMultiplier})
+}
+
+mutation DeleteLogEntry($id: UUID!) @auth(level: USER) {
+  logEntry_delete(key: {id: $id})
+}
+
+query GetLogEntry($id: UUID!) @auth(level: USER) {
+  logEntry(key: {id: $id}) {
+    mealType portionMultiplier
+  }
+}
+
+query ListMyLogEntries @auth(level: USER) {
+  logEntries(where: {userId: {eq_expr: "auth.uid"}}) {
+    mealType timestamp
+  }
+}
+
+mutation CreateGoal($startDate: Date!, $targetWeight: Float!) @auth(level: USER) {
+  goal_insert(data: {userId_expr: "auth.uid", startDate: $startDate, targetWeight: $targetWeight})
+}
+
+mutation UpdateGoal($id: UUID!, $targetWeight: Float!) @auth(level: USER) {
+  goal_update(key: {id: $id}, data: {targetWeight: $targetWeight})
+}
+
+mutation DeleteGoal($id: UUID!) @auth(level: USER) {
+  goal_delete(key: {id: $id})
+}
+
+query GetGoal($id: UUID!) @auth(level: USER) {
+  goal(key: {id: $id}) {
+    targetWeight targetCalories
+  }
+}
+
+query ListMyGoals @auth(level: USER) {
+  goals(where: {userId: {eq_expr: "auth.uid"}}) {
+    startDate targetWeight
+  }
+}
+
+mutation CreateFavorite($foodItemId: UUID!) @auth(level: USER) {
+  favorite_insert(data: {userId_expr: "auth.uid", foodItemId: $foodItemId})
+}
+
+mutation DeleteFavorite($id: UUID!) @auth(level: USER) {
+  favorite_delete(key: {id: $id})
+}
+
+query GetFavorite($id: UUID!) @auth(level: USER) {
+  favorite(key: {id: $id}) {
+    foodItem { name }
+  }
+}
+
+query ListMyFavorites @auth(level: USER) {
+  favorites(where: {userId: {eq_expr: "auth.uid"}}) {
+    foodItem { name }
+  }
+}
