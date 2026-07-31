@@ -1,9 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Plus, Download, Loader2 } from "lucide-react";
-import { DEMO_DEPARTMENTS } from "@/lib/demo/data";
+import { listDepartments, departmentLabel } from "@/lib/services/departments";
 import { useLifecycleDirectory } from "@/hooks/use-employee-lifecycle";
 import { deleteEmployeeLifecycle } from "@/lib/services/lifecycle";
 import { RequirePermission } from "@/components/auth/require-permission";
@@ -25,13 +25,19 @@ import {
 import { formatDate } from "@/lib/utils";
 import { toast } from "sonner";
 import * as XLSX from "xlsx";
+import type { Department } from "@/types";
 
 export default function EmployeesPage() {
   const { employees, loading, refresh } = useLifecycleDirectory();
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("");
   const [page, setPage] = useState(1);
+  const [departments, setDepartments] = useState<Department[]>([]);
   const pageSize = 10;
+
+  useEffect(() => {
+    void listDepartments().then(setDepartments);
+  }, []);
 
   const filtered = useMemo(() => {
     return employees.filter((e) => {
@@ -69,8 +75,7 @@ export default function EmployeesPage() {
     toast.success("Exported to Excel");
   };
 
-  const deptName = (id?: string) =>
-    DEMO_DEPARTMENTS.find((d) => d.id === id)?.name || "—";
+  const deptName = (id?: string) => departmentLabel(departments, id);
 
   if (loading) {
     return (

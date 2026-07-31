@@ -8,6 +8,7 @@ import {
   CheckCircle2,
   ClipboardList,
   Loader2,
+  Plus,
   UserPlus,
 } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
@@ -29,6 +30,7 @@ import {
 } from "@/lib/services/induction";
 import { RequirePermission, Can } from "@/components/auth/require-permission";
 import { AdminDeleteButton } from "@/components/auth/admin-delete-button";
+import { AiExplainInline } from "@/components/ai/ai-explain-inline";
 import { PdfViewer } from "@/components/shared/pdf-viewer";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { Button } from "@/components/ui/button";
@@ -232,6 +234,13 @@ export default function InductionPage() {
                             </div>
                           ))}
 
+                          <AiExplainInline
+                            kind="induction"
+                            title={m.title}
+                            description={m.description}
+                            buttonLabel="Study help (AI)"
+                          />
+
                           <div className="flex flex-wrap gap-2">
                             {assignment.status !== "passed" &&
                               assignment.status !== "assessment_pending" && (
@@ -274,6 +283,15 @@ export default function InductionPage() {
           )}
 
           <TabsContent value="catalog" className="space-y-4">
+            <Can permission="induction:write">
+              <div className="flex justify-end">
+                <Button asChild>
+                  <Link href="/dashboard/induction/new">
+                    <Plus className="mr-1.5 h-4 w-4" /> Create module
+                  </Link>
+                </Button>
+              </div>
+            </Can>
             {catLoading ? (
               <div className="flex items-center gap-2 text-muted-foreground">
                 <Loader2 className="h-4 w-4 animate-spin" /> Loading catalog…
@@ -286,6 +304,13 @@ export default function InductionPage() {
                   <p className="text-sm text-muted-foreground">
                     Create modules to build your onboarding catalog.
                   </p>
+                  <Can permission="induction:write">
+                    <Button asChild className="mt-1">
+                      <Link href="/dashboard/induction/new">
+                        <Plus className="mr-1.5 h-4 w-4" /> Create module
+                      </Link>
+                    </Button>
+                  </Can>
                 </CardContent>
               </Card>
             ) : (
@@ -352,23 +377,32 @@ export default function InductionPage() {
 
                   <div className="space-y-2">
                     <Label>Modules</Label>
-                    <div className="space-y-2 rounded-md border p-3">
-                      {modules.map((m) => (
-                        <label
-                          key={m.id}
-                          className="flex cursor-pointer items-start gap-3 rounded-md p-2 hover:bg-accent/50"
-                        >
-                          <Checkbox
-                            checked={selectedModules.includes(m.id)}
-                            onCheckedChange={() => toggleModule(m.id)}
-                          />
-                          <div>
-                            <p className="text-sm font-medium">{m.title}</p>
-                            <p className="text-xs text-muted-foreground">{m.description}</p>
-                          </div>
-                        </label>
-                      ))}
-                    </div>
+                    {modules.length === 0 ? (
+                      <div className="rounded-md border border-dashed p-4 text-center text-sm text-muted-foreground">
+                        <p>No modules in catalog yet.</p>
+                        <Button asChild variant="link" className="mt-1 h-auto p-0">
+                          <Link href="/dashboard/induction/new">Create a module first</Link>
+                        </Button>
+                      </div>
+                    ) : (
+                      <div className="space-y-2 rounded-md border p-3">
+                        {modules.map((m) => (
+                          <label
+                            key={m.id}
+                            className="flex cursor-pointer items-start gap-3 rounded-md p-2 hover:bg-accent/50"
+                          >
+                            <Checkbox
+                              checked={selectedModules.includes(m.id)}
+                              onCheckedChange={() => toggleModule(m.id)}
+                            />
+                            <div>
+                              <p className="text-sm font-medium">{m.title}</p>
+                              <p className="text-xs text-muted-foreground">{m.description}</p>
+                            </div>
+                          </label>
+                        ))}
+                      </div>
+                    )}
                   </div>
 
                   <Button disabled={busy} onClick={() => void handleAssign()}>

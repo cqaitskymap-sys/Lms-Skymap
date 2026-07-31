@@ -11,7 +11,7 @@ import {
   Trophy,
 } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
-import { useExamAnalytics, useExamLeaderboard, useExams } from "@/hooks/use-assessment";
+import { useExamAnalytics, useExamLeaderboard, useExams, useQuestionBank } from "@/hooks/use-assessment";
 import {
   autoSaveAssessment,
   deleteExam,
@@ -29,6 +29,8 @@ import { LeaderboardTable } from "@/components/exams/leaderboard-table";
 import { AssessmentAnalyticsPanel } from "@/components/exams/assessment-analytics-panel";
 import { RequirePermission } from "@/components/auth/require-permission";
 import { AdminDeleteButton } from "@/components/auth/admin-delete-button";
+import { AiExamBlueprintDialog } from "@/components/ai/ai-exam-blueprint-dialog";
+import { CreateExamDialog } from "@/components/exams/create-exam-dialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
@@ -42,6 +44,7 @@ function ExamsPageInner() {
   const searchParams = useSearchParams();
   const { profile } = useAuth();
   const { exams, loading: examsLoading, refresh: refreshExams } = useExams();
+  const { banks } = useQuestionBank();
 
   const [phase, setPhase] = useState<Phase>("list");
   const [exam, setExam] = useState<Exam | null>(null);
@@ -51,7 +54,7 @@ function ExamsPageInner() {
   const [busy, setBusy] = useState(false);
   const [saving, setSaving] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
-  const [selectedExamId, setSelectedExamId] = useState<string>("exam_001");
+  const [selectedExamId, setSelectedExamId] = useState<string>("");
   const submittingRef = useRef(false);
 
   const { entries: leaderboard } = useExamLeaderboard(
@@ -266,11 +269,17 @@ function ExamsPageInner() {
   return (
     <RequirePermission permission={["assessments:take", "exams:read", "assessments:read"]}>
       <div className="space-y-6">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">Assessment engine</h1>
-          <p className="text-muted-foreground">
-            Timed exams · question banks · autosave · analytics · certificates
-          </p>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight">Assessment engine</h1>
+            <p className="text-muted-foreground">
+              Timed exams · question banks · autosave · analytics · certificates
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <CreateExamDialog banks={banks} onCreated={refreshExams} />
+            <AiExamBlueprintDialog banks={banks} onSaved={refreshExams} />
+          </div>
         </div>
 
         <Tabs defaultValue="exams">
@@ -289,6 +298,16 @@ function ExamsPageInner() {
               <div className="flex items-center gap-2 text-muted-foreground">
                 <Loader2 className="h-4 w-4 animate-spin" /> Loading exams…
               </div>
+            ) : exams.length === 0 ? (
+              <Card>
+                <CardContent className="flex flex-col items-center gap-3 py-12 text-center">
+                  <p className="font-medium">No exams yet</p>
+                  <p className="text-sm text-muted-foreground">
+                    Create an exam manually or generate a blueprint with AI.
+                  </p>
+                  <CreateExamDialog banks={banks} onCreated={refreshExams} />
+                </CardContent>
+              </Card>
             ) : (
               <div className="grid gap-4 md:grid-cols-2">
                 {exams.map((e) => (

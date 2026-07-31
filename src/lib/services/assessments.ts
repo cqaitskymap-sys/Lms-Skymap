@@ -27,7 +27,7 @@ import type {
   QuestionBank,
   TrainingAssignment,
 } from "@/types";
-import { generateId, nowISO, addDays } from "@/lib/services/helpers";
+import { generateId, nowISO, addDays, stripUndefined } from "@/lib/services/helpers";
 import { calculatePercentage } from "@/lib/utils";
 import { isDemoMode } from "@/lib/demo/data";
 import {
@@ -200,9 +200,6 @@ export async function startAssessment(params: {
     examId: params.examId,
     examTitle: exam.title,
     employeeId: params.employeeId,
-    employeeName: params.employeeName,
-    assignmentId: params.assignmentId,
-    inductionAssignmentId: params.inductionAssignmentId,
     status: "in_progress",
     startedAt: now.toISOString(),
     expiresAt: expiresAt.toISOString(),
@@ -213,13 +210,21 @@ export async function startAssessment(params: {
     createdAt: now.toISOString(),
     updatedAt: now.toISOString(),
     createdBy: params.employeeId,
+    ...(params.employeeName ? { employeeName: params.employeeName } : {}),
+    ...(params.assignmentId ? { assignmentId: params.assignmentId } : {}),
+    ...(params.inductionAssignmentId
+      ? { inductionAssignmentId: params.inductionAssignmentId }
+      : {}),
   };
 
   if (await preferLocalData()) {
     pushAttemptLocal(attempt);
   } else {
     // Store full keys server-side; client getAttempt strips until submit
-    await setDoc(doc(db, COLLECTIONS.assessmentAttempts, id), attempt);
+    await setDoc(
+      doc(db, COLLECTIONS.assessmentAttempts, id),
+      stripUndefined(attempt)
+    );
   }
 
   return {
@@ -358,8 +363,14 @@ export async function submitAssessment(
     ];
     writeAssessmentStore(store);
   } else {
-    await setDoc(doc(db, COLLECTIONS.assessmentAttempts, attemptId), updated);
-    await setDoc(doc(db, COLLECTIONS.examResults, result.id), result);
+    await setDoc(
+      doc(db, COLLECTIONS.assessmentAttempts, attemptId),
+      stripUndefined(updated)
+    );
+    await setDoc(
+      doc(db, COLLECTIONS.examResults, result.id),
+      stripUndefined(result)
+    );
   }
 
   if (attempt.assignmentId) {
@@ -395,13 +406,12 @@ export async function submitAssessment(
           employeeId: updated.employeeId,
           employeeName: updated.employeeName,
           trainingAssignmentId: updated.assignmentId || `standalone_${updated.id}`,
-          sopId: examDoc.sopId || "sop_001",
-          sopVersionId: "sopv_current",
+          sopId: examDoc.sopId || examDoc.inductionModuleId || `standalone_${examDoc.id}`,
+          sopVersionId: examDoc.sopId ? "sopv_current" : "n/a",
           examId: examDoc.id,
           attemptId: updated.id,
           score: updated.score || 0,
           percentage: updated.percentage || 0,
-          trainerId: undefined,
           actorId,
         });
       }
@@ -420,7 +430,20 @@ async function handleTrainingAssessmentResult(
   actorId: string
 ) {
   const now = nowISO();
+
   if (await preferLocalData()) {
+    try {
+      const { updateAssignmentAfterAssessment } = await import("@/lib/services/training");
+      await updateAssignmentAfterAssessment({
+        assignmentId,
+        passed: !!attempt.passed,
+        score: attempt.percentage ?? attempt.score ?? 0,
+        attemptId: attempt.id!,
+        actorId,
+      });
+    } catch {
+      /* non-blocking */
+    }
     return;
   }
 
@@ -512,24 +535,31 @@ export async function issueCertificate(params: {
 }): Promise<Certificate> {
   const { issueTrainingCertificate } = await import("@/lib/services/certificates");
 
-  let sopId = "sop_001";
-  let sopVersionId = "sopv_001";
+  let sopId = `standalone_${params.examId}`;
+  let sopVersionId = "n/a";
   let trainerId = params.trainerId;
 
-  if (!(await preferLocalData())) {
-    try {
+  try {
+    const { listTrainingAssignments } = await import("@/lib/services/training");
+    const all = await listTrainingAssignments();
+    const assignment = all.find((a) => a.id === params.trainingAssignmentId);
+    if (assignment) {
+      sopId = assignment.sopId;
+      sopVersionId = assignment.sopVersionId;
+      trainerId = trainerId || assignment.trainerId;
+    } else if (!(await preferLocalData())) {
       const assignSnap = await getDoc(
         doc(db, COLLECTIONS.trainingAssignments, params.trainingAssignmentId)
       );
       if (assignSnap.exists()) {
-        const assignment = assignSnap.data() as TrainingAssignment;
-        sopId = assignment.sopId;
-        sopVersionId = assignment.sopVersionId;
-        trainerId = trainerId || assignment.trainerId;
+        const row = assignSnap.data() as TrainingAssignment;
+        sopId = row.sopId;
+        sopVersionId = row.sopVersionId;
+        trainerId = trainerId || row.trainerId;
       }
-    } catch {
-      /* use defaults */
     }
+  } catch {
+    /* use standalone defaults */
   }
 
   return issueTrainingCertificate({
@@ -733,6 +763,47 @@ export async function getExamAnalytics(examId: string): Promise<AssessmentAnalyt
   };
 }
 
+export async function createQuestionBank(
+  data: {
+    name: string;
+    description?: string;
+    sopId?: string;
+    departmentId?: string;
+  },
+  actorId: string
+): Promise<QuestionBank> {
+  const id = generateId("qb");
+  const now = nowISO();
+  const bank: QuestionBank = {
+    id,
+    name: data.name.trim(),
+    description: data.description?.trim(),
+    sopId: data.sopId,
+    departmentId: data.departmentId,
+    questionCount: 0,
+    isActive: true,
+    createdAt: now,
+    updatedAt: now,
+    createdBy: actorId,
+  };
+
+  if (await preferLocalData()) {
+    const store = readAssessmentStore();
+    store.banks.push(bank);
+    writeAssessmentStore(store);
+    return bank;
+  }
+
+  try {
+    await setDoc(doc(db, COLLECTIONS.questionBanks, id), bank);
+  } catch {
+    const store = readAssessmentStore();
+    store.banks.push(bank);
+    writeAssessmentStore(store);
+  }
+  return bank;
+}
+
 export async function createQuestion(
   data: Omit<Question, "id" | "createdAt" | "updatedAt" | "createdBy">,
   actorId: string
@@ -762,8 +833,68 @@ export async function createQuestion(
     return question;
   }
 
-  await setDoc(doc(db, COLLECTIONS.questions, id), question);
+  try {
+    await setDoc(doc(db, COLLECTIONS.questions, id), question);
+    try {
+      const bankSnap = await getDoc(doc(db, COLLECTIONS.questionBanks, question.bankId));
+      if (bankSnap.exists()) {
+        const count =
+          (
+            await getDocs(
+              query(
+                collection(db, COLLECTIONS.questions),
+                where("bankId", "==", question.bankId),
+                where("isActive", "==", true)
+              )
+            )
+          ).size || 0;
+        await updateDoc(doc(db, COLLECTIONS.questionBanks, question.bankId), {
+          questionCount: count,
+          updatedAt: now,
+        });
+      }
+    } catch {
+      /* count update non-blocking */
+    }
+  } catch {
+    const store = readAssessmentStore();
+    store.questions.push(question);
+    store.banks = store.banks.map((b) =>
+      b.id === question.bankId
+        ? {
+            ...b,
+            questionCount: store.questions.filter((q) => q.bankId === b.id && q.isActive).length,
+          }
+        : b
+    );
+    writeAssessmentStore(store);
+  }
   return question;
+}
+
+export async function createExam(
+  data: Omit<Exam, "id" | "createdAt" | "updatedAt" | "createdBy">,
+  actorId: string
+): Promise<Exam> {
+  const id = generateId("exam");
+  const now = nowISO();
+  const exam: Exam = {
+    ...data,
+    id,
+    createdAt: now,
+    updatedAt: now,
+    createdBy: actorId,
+  };
+
+  if (await preferLocalData()) {
+    const store = readAssessmentStore();
+    store.exams.push(exam);
+    writeAssessmentStore(store);
+    return exam;
+  }
+
+  await setDoc(doc(db, COLLECTIONS.exams, id), stripUndefined(exam));
+  return exam;
 }
 
 /** Super Admin only — delete a question from the bank. */

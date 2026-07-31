@@ -5,6 +5,7 @@ import { AuthGuard } from "@/components/auth/auth-guard";
 import { AppProviders } from "@/components/providers/app-providers";
 import { Sidebar } from "@/components/layout/sidebar";
 import { Header } from "@/components/layout/header";
+import { AiTrainingChatbot } from "@/components/ai/ai-training-chatbot";
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -20,6 +21,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               <div className="mx-auto max-w-7xl">{children}</div>
             </main>
           </div>
+          <AiTrainingChatbot />
         </div>
       </AuthGuard>
     </AppProviders>

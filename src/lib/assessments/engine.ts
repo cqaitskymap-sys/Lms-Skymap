@@ -93,10 +93,10 @@ export function toAttemptQuestions(
       earnedMarks: 0,
       isCorrect: false,
       isAnswered: false,
-      explanation: q.explanation,
-      scenario: q.scenario,
-      media: q.media,
       difficulty: q.difficulty,
+      ...(q.explanation ? { explanation: q.explanation } : {}),
+      ...(q.scenario ? { scenario: q.scenario } : {}),
+      ...(q.media ? { media: q.media } : {}),
     };
   });
 }
@@ -107,11 +107,13 @@ export function sanitizeAttemptForClient(
   revealAnswers: boolean
 ): AttemptQuestion[] {
   if (revealAnswers) return questions;
-  return questions.map((q) => ({
-    ...q,
-    correctOptionIds: [],
-    explanation: undefined,
-  }));
+  return questions.map((q) => {
+    const { explanation: _e, ...rest } = q;
+    return {
+      ...rest,
+      correctOptionIds: [],
+    };
+  });
 }
 
 export function evaluateAttempt(

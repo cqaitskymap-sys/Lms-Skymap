@@ -65,11 +65,11 @@ async function notifyUser(params: {
     type: params.type,
     title: params.title,
     message: params.message,
-    link: params.link,
     isRead: false,
     createdAt: now,
     updatedAt: now,
     createdBy: params.actorId,
+    ...(params.link ? { link: params.link } : {}),
   };
 
   if (isDemoMode()) {

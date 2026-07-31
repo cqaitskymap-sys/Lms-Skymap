@@ -38,6 +38,33 @@ const APP_URL =
     ? window.location.origin
     : process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
 
+/** Default certificate signatory — never use legacy demo names. */
+export const CERTIFICATE_SIGNED_BY = "ONS SIR";
+export const CERTIFICATE_SIGNED_BY_TITLE = "Head of Quality Assurance";
+
+const LEGACY_SIGNATORIES = new Set([
+  "dr. meera iyer",
+  "meera iyer",
+  "authorized signatory",
+]);
+
+export function resolveCertificateSignatory(signedBy?: string | null): string {
+  const name = (signedBy || "").trim();
+  if (!name || LEGACY_SIGNATORIES.has(name.toLowerCase())) {
+    return CERTIFICATE_SIGNED_BY;
+  }
+  return name;
+}
+
+function normalizeCertificate(cert: Certificate): Certificate {
+  return {
+    ...cert,
+    signedBy: resolveCertificateSignatory(cert.signedBy),
+    signedByTitle: cert.signedByTitle || CERTIFICATE_SIGNED_BY_TITLE,
+    digitalSignatureUrl: cert.digitalSignatureUrl || "/brand/qa-signature.svg",
+  };
+}
+
 const STORAGE_UNAVAILABLE_KEY = "pharma_lms_storage_unavailable";
 
 function isStorageMarkedUnavailable(): boolean {
@@ -188,10 +215,10 @@ export async function issueTrainingCertificate(
     trainerId: input.trainerId,
     trainerName,
     companyName: COMPANY_NAME,
-    companyLogoUrl: "/brand/skymap-logo.svg",
+    companyLogoUrl: "/brand/skymap-logo.png",
     digitalSignatureUrl: "/brand/qa-signature.svg",
-    signedBy: input.signedBy || "Dr. Meera Iyer",
-    signedByTitle: input.signedByTitle || "Head of Quality Assurance",
+    signedBy: resolveCertificateSignatory(input.signedBy),
+    signedByTitle: input.signedByTitle || CERTIFICATE_SIGNED_BY_TITLE,
     qrCodeData: verifyUrl,
     qrCodeImageUrl,
     verificationHash,
@@ -231,7 +258,7 @@ export async function issueTrainingCertificate(
     }
   }
 
-  return certificate;
+  return normalizeCertificate(certificate);
 }
 
 function blobToDataUrl(blob: Blob): Promise<string> {
@@ -251,7 +278,7 @@ export async function listCertificates(filters?: {
     if (filters?.employeeId) {
       rows = rows.filter((c) => c.employeeId === filters.employeeId);
     }
-    return rows;
+    return rows.map(normalizeCertificate);
   }
 
   try {
@@ -263,27 +290,35 @@ export async function listCertificates(filters?: {
       );
     }
     const snap = await getDocs(q);
-    const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Certificate);
+    const rows = snap.docs.map((d) =>
+      normalizeCertificate({ id: d.id, ...d.data() } as Certificate)
+    );
     if (rows.length) return rows;
   } catch {
     /* fall through */
   }
-  return readCertificateStore().certificates.filter((c) =>
-    filters?.employeeId ? c.employeeId === filters.employeeId : true
-  );
+  return readCertificateStore()
+    .certificates.filter((c) =>
+      filters?.employeeId ? c.employeeId === filters.employeeId : true
+    )
+    .map(normalizeCertificate);
 }
 
 export async function getCertificate(id: string): Promise<Certificate | null> {
   if (await preferLocal()) {
-    return readCertificateStore().certificates.find((c) => c.id === id) || null;
+    const found = readCertificateStore().certificates.find((c) => c.id === id);
+    return found ? normalizeCertificate(found) : null;
   }
   try {
     const snap = await getDoc(doc(db, COLLECTIONS.certificates, id));
-    if (snap.exists()) return { id: snap.id, ...snap.data() } as Certificate;
+    if (snap.exists()) {
+      return normalizeCertificate({ id: snap.id, ...snap.data() } as Certificate);
+    }
   } catch {
     /* fall through */
   }
-  return readCertificateStore().certificates.find((c) => c.id === id) || null;
+  const found = readCertificateStore().certificates.find((c) => c.id === id);
+  return found ? normalizeCertificate(found) : null;
 }
 
 export async function getCertificateByNumber(
@@ -291,11 +326,10 @@ export async function getCertificateByNumber(
 ): Promise<Certificate | null> {
   const normalized = certificateNumber.trim().toUpperCase();
   if (await preferLocal()) {
-    return (
-      readCertificateStore().certificates.find(
-        (c) => c.certificateNumber.toUpperCase() === normalized
-      ) || null
+    const found = readCertificateStore().certificates.find(
+      (c) => c.certificateNumber.toUpperCase() === normalized
     );
+    return found ? normalizeCertificate(found) : null;
   }
   try {
     const snap = await getDocs(
@@ -307,16 +341,15 @@ export async function getCertificateByNumber(
     );
     if (!snap.empty) {
       const d = snap.docs[0];
-      return { id: d.id, ...d.data() } as Certificate;
+      return normalizeCertificate({ id: d.id, ...d.data() } as Certificate);
     }
   } catch {
     /* fall through */
   }
-  return (
-    readCertificateStore().certificates.find(
-      (c) => c.certificateNumber.toUpperCase() === normalized
-    ) || null
+  const found = readCertificateStore().certificates.find(
+    (c) => c.certificateNumber.toUpperCase() === normalized
   );
+  return found ? normalizeCertificate(found) : null;
 }
 
 export async function verifyCertificate(

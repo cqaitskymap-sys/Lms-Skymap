@@ -152,6 +152,9 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     "induction:write",
     "induction:assign",
     "departments:read",
+    "jd:read",
+    "tni:read",
+    "trainers:read",
     "assessments:read",
     "assessments:write",
     "questions:read",
@@ -166,6 +169,7 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     "dashboard:hr",
     "users:read",
     "training:read",
+    "settings:write",
   ],
   qa: [
     "sops:read",
@@ -175,6 +179,7 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     "departments:read",
     "employees:read",
     "training:read",
+    "trainers:read",
     "assessments:read",
     "questions:read",
     "questions:write",
@@ -186,6 +191,7 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     "notifications:read",
     "audit:read",
     "dashboard:qa",
+    "settings:write",
   ],
   department_head: [
     "employees:read",
@@ -207,6 +213,7 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     "reports:export",
     "notifications:read",
     "dashboard:dept",
+    "settings:write",
   ],
   trainer: [
     "employees:read",
@@ -218,6 +225,7 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     "certificates:read",
     "notifications:read",
     "dashboard:trainer",
+    "settings:write",
   ],
   employee: [
     "induction:read",
@@ -229,6 +237,7 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     "notifications:read",
     "jd:read",
     "dashboard:employee",
+    "settings:write",
   ],
 };
 

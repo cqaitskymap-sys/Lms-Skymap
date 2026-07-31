@@ -1,10 +1,10 @@
 "use client";
 
-import { use, useMemo, useState } from "react";
+import { use, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
 import { KeyRound, Loader2, ArrowRight } from "lucide-react";
-import { DEMO_DEPARTMENTS } from "@/lib/demo/data";
+import { listDepartments, departmentLabel } from "@/lib/services/departments";
 import { useAuth } from "@/contexts/auth-context";
 import { useEmployeeLifecycle } from "@/hooks/use-employee-lifecycle";
 import { useInductionCatalog } from "@/hooks/use-induction";
@@ -38,7 +38,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { formatDate } from "@/lib/utils";
-import type { UserRole } from "@/types";
+import type { Department, UserRole } from "@/types";
 
 export default function EmployeeDetailPage({
   params,
@@ -51,11 +51,16 @@ export default function EmployeeDetailPage({
   const { modules: inductionModules } = useInductionCatalog();
   const [selectedModules, setSelectedModules] = useState<string[]>([]);
   const [handoverDept, setHandoverDept] = useState("");
+  const [departments, setDepartments] = useState<Department[]>([]);
   const [busy, setBusy] = useState(false);
   const [credentials, setCredentials] = useState<{
     creds: OnboardingCredentials;
     email: { sent: boolean; reason?: string };
   } | null>(null);
+
+  useEffect(() => {
+    void listDepartments().then(setDepartments);
+  }, []);
 
   const actor: LifecycleActor = useMemo(
     () => ({
@@ -82,7 +87,7 @@ export default function EmployeeDetailPage({
   const stage = employee.lifecycleStage || "created";
   const stageDef = getStageDefinition(stage);
   const nxt = nextStage(stage);
-  const deptId = handoverDept || employee.departmentId || DEMO_DEPARTMENTS[0]?.id || "";
+  const deptId = handoverDept || employee.departmentId || departments[0]?.id || "";
 
   const run = async (fn: () => Promise<unknown>, success: string) => {
     setBusy(true);
@@ -187,7 +192,7 @@ export default function EmployeeDetailPage({
                 <p className="text-muted-foreground">Department</p>
                 <p className="font-medium">
                   {employee.departmentName ||
-                    DEMO_DEPARTMENTS.find((d) => d.id === employee.departmentId)?.name ||
+                    departmentLabel(departments, employee.departmentId) ||
                     "Unassigned"}
                 </p>
               </div>
@@ -300,7 +305,8 @@ export default function EmployeeDetailPage({
                     <p className="text-sm font-medium">Assign induction modules</p>
                     {inductionModules.length === 0 ? (
                       <p className="text-sm text-muted-foreground">
-                        No induction modules yet. Create them under Induction → Catalog.
+                        No induction modules yet. Create them under Induction → Catalog → Create
+                        module.
                       </p>
                     ) : (
                       inductionModules.map((m) => (
@@ -359,7 +365,7 @@ export default function EmployeeDetailPage({
                       <SelectValue placeholder="Select department" />
                     </SelectTrigger>
                     <SelectContent>
-                      {DEMO_DEPARTMENTS.map((d) => (
+                      {departments.map((d) => (
                         <SelectItem key={d.id} value={d.id}>
                           {d.name}
                         </SelectItem>

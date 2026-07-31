@@ -7,10 +7,12 @@ export default function HomePage() {
     <div className="min-h-screen bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-cyan-50 via-slate-50 to-slate-100 dark:from-slate-900 dark:via-slate-950 dark:to-black">
       <header className="mx-auto flex max-w-6xl items-center justify-between px-6 py-5">
         <div className="flex items-center gap-2 font-semibold tracking-tight">
-          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary text-sm font-bold text-primary-foreground">
-            PL
-          </div>
-          PharmaLMS
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/brand/skymap-logo.png"
+            alt="SKYMAP"
+            className="h-10 w-auto max-w-[180px] object-contain"
+          />
         </div>
         <Button asChild>
           <Link href="/login">

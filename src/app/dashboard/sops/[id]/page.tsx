@@ -27,6 +27,7 @@ import { StatusBadge } from "@/components/shared/status-badge";
 import { SopMediaPreview, SopFileDropzone, SopLoading, ViewerBadge } from "@/components/sops/sop-media-preview";
 import { SopVersionHistory } from "@/components/sops/sop-version-history";
 import { SopAcknowledgementPanel } from "@/components/sops/sop-acknowledgement";
+import { AiExplainSopPanel } from "@/components/ai/ai-explain-sop-panel";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -361,6 +362,12 @@ export default function SopDetailPage({ params }: { params: Promise<{ id: string
                 <Meta label="Change summary" value={activeVersion.changeSummary} />
               </CardContent>
             </Card>
+
+            <AiExplainSopPanel
+              title={`${sop.sopNumber} — ${sop.title}`}
+              description={sop.description}
+              changeSummary={activeVersion.changeSummary}
+            />
 
             <Card>
               <CardHeader>

@@ -67,23 +67,26 @@ export async function buildCertificatePdf(
     null;
   if (logo) {
     try {
-      doc.addImage(logo, "PNG", w / 2 - 10, 18, 20, 20);
+      // Landscape wordmark (~2.1:1)
+      const logoW = 36;
+      const logoH = 17;
+      doc.addImage(logo, "PNG", w / 2 - logoW / 2, 16, logoW, logoH);
     } catch {
-      /* svg may fail in jspdf — skip */
+      /* image may fail in jspdf — skip */
     }
   }
 
   doc.setTextColor(11, 61, 74);
   doc.setFont("times", "bold");
   doc.setFontSize(14);
-  doc.text(certificate.companyName.toUpperCase(), w / 2, logo ? 42 : 28, {
+  doc.text(certificate.companyName.toUpperCase(), w / 2, logo ? 40 : 28, {
     align: "center",
   });
 
   doc.setFont("times", "normal");
   doc.setFontSize(10);
   doc.setTextColor(184, 148, 74);
-  doc.text("TRAINING CERTIFICATE", w / 2, logo ? 49 : 35, { align: "center" });
+  doc.text("TRAINING CERTIFICATE", w / 2, logo ? 47 : 35, { align: "center" });
 
   doc.setTextColor(11, 61, 74);
   doc.setFont("times", "bold");
@@ -155,7 +158,7 @@ export async function buildCertificatePdf(
   doc.setFont("times", "bold");
   doc.setFontSize(10);
   doc.setTextColor(11, 61, 74);
-  doc.text(certificate.signedBy || "Authorized Signatory", sigX + 22, sigY + 6, {
+  doc.text(certificate.signedBy || "ONS SIR", sigX + 22, sigY + 6, {
     align: "center",
   });
   doc.setFont("times", "normal");

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { cn } from "@/lib/utils";
 import { RequirePermission } from "@/components/auth/require-permission";
 import { ReportFiltersBar } from "@/components/reports/report-filters";
@@ -21,8 +21,26 @@ const TONE: Record<string, string> = {
 export default function ReportsPage() {
   const [type, setType] = useState<ReportType>("employee_training");
   const [filters, setFilters] = useState<ReportFilters>(emptyFilters);
+  const [tick, setTick] = useState(0);
 
-  const dataset = useMemo(() => buildReport(type, filters), [type, filters]);
+  useEffect(() => {
+    const refresh = () => setTick((t) => t + 1);
+    window.addEventListener("pharma-training-updated", refresh);
+    window.addEventListener("pharma-lifecycle-updated", refresh);
+    window.addEventListener("pharma-sops-updated", refresh);
+    window.addEventListener("pharma-assessments-updated", refresh);
+    return () => {
+      window.removeEventListener("pharma-training-updated", refresh);
+      window.removeEventListener("pharma-lifecycle-updated", refresh);
+      window.removeEventListener("pharma-sops-updated", refresh);
+      window.removeEventListener("pharma-assessments-updated", refresh);
+    };
+  }, []);
+
+  const dataset = useMemo(() => {
+    void tick;
+    return buildReport(type, filters);
+  }, [type, filters, tick]);
 
   return (
     <RequirePermission permission="reports:read">

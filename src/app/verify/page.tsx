@@ -66,8 +66,9 @@ function VerifyInner() {
     >
       <div className="mx-auto max-w-4xl space-y-6">
         <div className="text-center">
-          <Link href="/" className="text-sm text-muted-foreground hover:text-foreground">
-            ← PharmaLMS
+          <Link href="/" className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/brand/skymap-logo.png" alt="SKYMAP" className="h-8 w-auto object-contain" />
           </Link>
           <div className="mt-4 flex items-center justify-center gap-2">
             <ShieldCheck className="h-7 w-7" style={{ color: "#0b3d4a" }} />

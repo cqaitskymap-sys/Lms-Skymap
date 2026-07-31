@@ -150,7 +150,7 @@ const NAV_ITEMS: NavItem[] = [
     title: "Settings",
     href: "/dashboard/settings",
     icon: Settings,
-    roles: ["super_admin"],
+    roles: ["super_admin", "hr", "qa", "department_head", "trainer", "employee"],
   },
 ];
 
@@ -163,18 +163,24 @@ export function Sidebar({ open, onClose }: SidebarProps) {
   const pathname = usePathname();
   const { role, user } = useAuth();
 
-  // If profile/role hasn't loaded yet, still show full admin menu so sidebar isn't blank
-  const effectiveRole: UserRole = role ?? (user ? "super_admin" : "employee");
-  const items = NAV_ITEMS.filter((item) => item.roles.includes(effectiveRole));
+  // Avoid privilege flash: while role loads, show minimal nav only
+  const effectiveRole: UserRole | null = role ?? null;
+  const items = effectiveRole
+    ? NAV_ITEMS.filter((item) => item.roles.includes(effectiveRole))
+    : user
+      ? NAV_ITEMS.filter((item) => item.href === "/dashboard" || item.href === "/dashboard/settings")
+      : [];
 
   const content = (
     <div className="flex h-full flex-col bg-sidebar text-sidebar-foreground">
       <div className="flex h-14 items-center justify-between border-b border-sidebar-border px-4">
         <Link href="/dashboard" className="flex items-center gap-2 font-semibold tracking-tight">
-          <div className="flex h-8 w-8 items-center justify-center rounded-md bg-sidebar-accent text-white text-xs font-bold">
-            PL
-          </div>
-          <span className="text-sm">PharmaLMS</span>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/brand/skymap-logo.png"
+            alt="SKYMAP"
+            className="h-8 w-auto max-w-[140px] object-contain"
+          />
         </Link>
         {onClose && (
           <Button variant="ghost" size="icon" className="lg:hidden text-sidebar-foreground" onClick={onClose}>

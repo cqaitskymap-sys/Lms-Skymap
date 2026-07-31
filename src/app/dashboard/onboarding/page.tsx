@@ -38,6 +38,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
+import { AiExplainInline } from "@/components/ai/ai-explain-inline";
 import type { CompanyPolicy } from "@/types";
 
 type Step = "password" | "profile" | "policies" | "done";
@@ -496,6 +497,13 @@ function PoliciesStep({
               {p.isRequired && <Badge variant="secondary">Required</Badge>}
             </div>
             <p className="text-sm leading-relaxed text-slate-700 dark:text-slate-300">{p.content}</p>
+            <AiExplainInline
+              kind="policy"
+              title={p.title}
+              description={p.summary}
+              content={p.content}
+              buttonLabel="Explain in simple words"
+            />
             <div className="flex items-center gap-2">
               <Checkbox
                 id={p.id}

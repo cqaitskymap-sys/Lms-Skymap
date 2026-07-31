@@ -6,7 +6,7 @@ import Link from "next/link";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
-import { Eye, EyeOff, Loader2, Shield } from "lucide-react";
+import { Eye, EyeOff, Loader2 } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
 import { loginSchema, type LoginInput } from "@/lib/auth/schemas";
 import { ROLE_DASHBOARD_ROUTES } from "@/lib/rbac/permissions";
@@ -80,10 +80,12 @@ function LoginForm() {
         <div className="absolute inset-0 opacity-30 [background-image:linear-gradient(rgba(255,255,255,0.05)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.05)_1px,transparent_1px)] [background-size:48px_48px]" />
         <div className="relative flex h-full flex-col justify-between p-12 text-white">
           <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-cyan-600 font-bold">
-              PL
-            </div>
-            <span className="text-lg font-semibold tracking-tight">PharmaLMS</span>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/brand/skymap-logo.png"
+              alt="SKYMAP"
+              className="h-12 w-auto max-w-[180px] object-contain"
+            />
           </div>
           <div className="space-y-4">
             <h1 className="max-w-md text-4xl font-bold leading-tight tracking-tight">
@@ -94,15 +96,19 @@ function LoginForm() {
               activity trails.
             </p>
           </div>
-          <p className="text-sm text-slate-500">© 2026 PharmaLMS · SkyMap</p>
+          <p className="text-sm text-slate-500">© 2026 SKYMAP · PharmaLMS</p>
         </div>
       </div>
 
       <div className="flex w-full flex-col justify-center px-6 py-12 lg:w-1/2">
         <div className="mx-auto w-full max-w-md space-y-6">
           <div className="mb-4 flex items-center gap-2 lg:hidden">
-            <Shield className="h-6 w-6 text-primary" />
-            <span className="font-semibold">PharmaLMS</span>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/brand/skymap-logo.png"
+              alt="SKYMAP"
+              className="h-10 w-auto max-w-[160px] object-contain"
+            />
           </div>
 
           {deactivated && (

@@ -1,11 +1,14 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Loader2 } from "lucide-react";
+import { BookOpen, Loader2 } from "lucide-react";
 import { useQuestionBank } from "@/hooks/use-assessment";
 import { deleteQuestion } from "@/lib/services/assessments";
-import { RequirePermission } from "@/components/auth/require-permission";
+import { RequirePermission, Can } from "@/components/auth/require-permission";
 import { AdminDeleteButton } from "@/components/auth/admin-delete-button";
+import { AiGenerateQuestionsDialog } from "@/components/ai/ai-generate-questions-dialog";
+import { CreateQuestionBankDialog } from "@/components/exams/create-question-bank-dialog";
+import { CreateQuestionDialog } from "@/components/exams/create-question-dialog";
 import { QuestionTypeBadge } from "@/components/exams/question-renderer";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -45,26 +48,68 @@ export default function QuestionsPage() {
   return (
     <RequirePermission permission="questions:read">
       <div className="space-y-6">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">Question Bank</h1>
-          <p className="text-muted-foreground">
-            MCQ · True/False · Multi-select · Scenario · Image · difficulty levels
-          </p>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight">Question Bank</h1>
+            <p className="text-muted-foreground">
+              MCQ · True/False · Multi-select · Scenario · Image · difficulty levels
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <CreateQuestionBankDialog
+              onCreated={(id) => {
+                void refresh();
+                setBankId(id);
+              }}
+            />
+            <CreateQuestionDialog
+              banks={banks}
+              defaultBankId={bankId !== "all" ? bankId : banks[0]?.id}
+              onCreated={() => void refresh()}
+            />
+            <AiGenerateQuestionsDialog banks={banks} onSaved={refresh} />
+          </div>
         </div>
 
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          {banks.map((b) => (
-            <Card key={b.id}>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-base">{b.name}</CardTitle>
-                <CardDescription className="line-clamp-2">{b.description}</CardDescription>
-              </CardHeader>
-              <CardContent className="text-sm text-muted-foreground">
-                {b.questionCount} active questions
-              </CardContent>
-            </Card>
-          ))}
-        </div>
+        {banks.length === 0 ? (
+          <Card>
+            <CardContent className="flex flex-col items-center gap-3 py-12 text-center">
+              <BookOpen className="h-10 w-10 text-muted-foreground" />
+              <p className="font-medium">No question banks yet</p>
+              <p className="text-sm text-muted-foreground">
+                Pehle bank banao, phir questions add karo (manual ya AI).
+              </p>
+              <Can permission="questions:write">
+                <CreateQuestionBankDialog
+                  onCreated={(id) => {
+                    void refresh();
+                    setBankId(id);
+                  }}
+                />
+              </Can>
+            </CardContent>
+          </Card>
+        ) : (
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            {banks.map((b) => (
+              <Card
+                key={b.id}
+                className={
+                  bankId === b.id ? "cursor-pointer ring-1 ring-primary/40" : "cursor-pointer"
+                }
+                onClick={() => setBankId(b.id)}
+              >
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-base">{b.name}</CardTitle>
+                  <CardDescription className="line-clamp-2">{b.description}</CardDescription>
+                </CardHeader>
+                <CardContent className="text-sm text-muted-foreground">
+                  {b.questionCount} active questions
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        )}
 
         <Card>
           <CardHeader>
@@ -124,6 +169,21 @@ export default function QuestionsPage() {
             {loading ? (
               <div className="flex items-center gap-2 text-muted-foreground">
                 <Loader2 className="h-4 w-4 animate-spin" /> Loading…
+              </div>
+            ) : questions.length === 0 ? (
+              <div className="flex flex-col items-center gap-3 py-10 text-center">
+                <p className="text-sm text-muted-foreground">
+                  {banks.length
+                    ? "Is bank mein abhi koi question nahi hai."
+                    : "Pehle ek question bank create karo."}
+                </p>
+                {banks.length > 0 && (
+                  <CreateQuestionDialog
+                    banks={banks}
+                    defaultBankId={bankId !== "all" ? bankId : banks[0]?.id}
+                    onCreated={() => void refresh()}
+                  />
+                )}
               </div>
             ) : (
               <Table>

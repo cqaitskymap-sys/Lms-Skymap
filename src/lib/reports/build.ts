@@ -1,19 +1,16 @@
 /**
- * Build filtered report datasets from demo / local LMS stores.
+ * Build filtered report datasets from live LMS stores (lifecycle, training, SOPs, assessments).
  */
 
-import {
-  DEMO_ASSIGNMENTS,
-  DEMO_AUDIT,
-  DEMO_DEPARTMENTS,
-  DEMO_EMPLOYEES,
-  DEMO_SOPS,
-  DEMO_USERS,
-} from "@/lib/demo/data";
+import { DEMO_USERS } from "@/lib/demo/data";
 import { readCertificateStore } from "@/lib/certificates/demo-store";
 import { readAssessmentStore } from "@/lib/assessments/demo-store";
 import { readLifecycleStore } from "@/lib/lifecycle/demo-store";
+import { readSopStore } from "@/lib/sops/demo-store";
+import { readTrainingStore } from "@/lib/training/demo-store";
+import { getDepartmentsSync } from "@/lib/services/departments";
 import { formatDate } from "@/lib/utils";
+import type { TrainingAssignment } from "@/types";
 import type {
   ChartPoint,
   ReportDataset,
@@ -22,39 +19,66 @@ import type {
 } from "@/lib/reports/types";
 import { REPORT_CATALOG } from "@/lib/reports/types";
 
-const TODAY = new Date("2026-07-23T12:00:00.000Z");
+const TODAY = new Date();
+
+function allEmployees() {
+  return readLifecycleStore().employees;
+}
+
+function allDepartments() {
+  return getDepartmentsSync();
+}
+
+function allSops() {
+  return readSopStore().sops;
+}
+
+function allAssignments(): TrainingAssignment[] {
+  const fromTraining = readTrainingStore().assignments;
+  const fromSops = readSopStore().trainingAssignments || [];
+  const byId = new Map<string, TrainingAssignment>();
+  for (const a of [...fromSops, ...fromTraining]) byId.set(a.id, a);
+  return [...byId.values()];
+}
+
+function allAudit() {
+  return readLifecycleStore().events.map((e) => ({
+    id: e.id,
+    timestamp: e.createdAt,
+    actorEmail: e.actorName || e.actorId || "system",
+    action: "update",
+    resourceType: "employee_lifecycle",
+    resourceId: e.employeeId,
+    description: e.description || e.title,
+  }));
+}
 
 function empName(id: string) {
-  const e =
-    readLifecycleStore().employees.find((x) => x.id === id) ||
-    DEMO_EMPLOYEES.find((x) => x.id === id);
+  const e = allEmployees().find((x) => x.id === id);
   return e ? `${e.firstName} ${e.lastName}` : id;
 }
 
 function empCode(id: string) {
-  const e =
-    readLifecycleStore().employees.find((x) => x.id === id) ||
-    DEMO_EMPLOYEES.find((x) => x.id === id);
-  return e?.employeeCode || "—";
+  return allEmployees().find((x) => x.id === id)?.employeeCode || "—";
 }
 
 function deptName(id: string | undefined) {
   if (!id) return "—";
-  return DEMO_DEPARTMENTS.find((d) => d.id === id)?.name || id;
+  return allDepartments().find((d) => d.id === id)?.name || id;
 }
 
 function deptCode(id: string | undefined) {
   if (!id) return "—";
-  return DEMO_DEPARTMENTS.find((d) => d.id === id)?.code || id;
+  return allDepartments().find((d) => d.id === id)?.code || id;
 }
 
 function sopLabel(id: string) {
-  const s = DEMO_SOPS.find((x) => x.id === id);
+  const s = allSops().find((x) => x.id === id);
   return s ? `${s.sopNumber}` : id;
 }
 
 function sopTitle(id: string) {
-  return DEMO_SOPS.find((x) => x.id === id)?.title || "—";
+  return allSops().find((x) => x.id === id)?.title || "—";
 }
 
 function trainerName(id?: string) {
@@ -62,6 +86,10 @@ function trainerName(id?: string) {
   for (const u of Object.values(DEMO_USERS)) {
     if (u.profile.uid === id) return u.profile.displayName;
   }
+  const local = readTrainingStore().trainers.find(
+    (t) => t.id === id || t.userId === id
+  );
+  if (local) return local.userId;
   return id;
 }
 
@@ -86,7 +114,7 @@ function matchesSearch(haystack: string, search: string) {
 }
 
 function assignments(filters: ReportFilters) {
-  return DEMO_ASSIGNMENTS.filter((a) => {
+  return allAssignments().filter((a) => {
     if (filters.departmentId !== "all" && a.departmentId !== filters.departmentId) {
       return false;
     }
@@ -98,11 +126,10 @@ function assignments(filters: ReportFilters) {
   });
 }
 
-function isOverdue(a: (typeof DEMO_ASSIGNMENTS)[0]) {
+function isOverdue(a: TrainingAssignment) {
   if (!a.dueDate) return false;
-  if (["passed", "training_completed"].includes(a.status) && a.passed) return false;
   if (a.status === "passed") return false;
-  return new Date(a.dueDate) < TODAY && !["passed"].includes(a.status);
+  return new Date(a.dueDate) < TODAY;
 }
 
 function catalogMeta(type: ReportType) {
@@ -176,7 +203,7 @@ function buildDepartmentCompliance(filters: ReportFilters): ReportDataset {
       filters.departmentId === "all" || a.departmentId === filters.departmentId
   );
 
-  const byDept = DEMO_DEPARTMENTS.filter(
+  const byDept = allDepartments().filter(
     (d) => filters.departmentId === "all" || d.id === filters.departmentId
   ).map((d) => {
     const list = asg.filter((a) => a.departmentId === d.id);
@@ -299,12 +326,14 @@ function buildTrainerPerformance(filters: ReportFilters): ReportDataset {
 function buildExamResults(filters: ReportFilters): ReportDataset {
   let results = readAssessmentStore().results;
   if (!results.length) {
-    // Seed synthetic rows from assignments with scores
-    results = DEMO_ASSIGNMENTS.filter((a) => a.score != null).map((a, i) => ({
-      id: `res_demo_${i}`,
-      attemptId: `att_demo_${i}`,
-      examId: "exam_001",
-      examTitle: "Document Control Assessment",
+    // Fallback rows from assignments with scores
+    results = allAssignments()
+      .filter((a) => a.score != null)
+      .map((a, i) => ({
+      id: `res_asg_${i}`,
+      attemptId: `att_asg_${i}`,
+      examId: "exam_from_assignment",
+      examTitle: `${sopLabel(a.sopId)} Assessment`,
       employeeId: a.employeeId,
       employeeName: empName(a.employeeId),
       percentage: a.score!,
@@ -324,9 +353,7 @@ function buildExamResults(filters: ReportFilters): ReportDataset {
     .filter((r) => inDateRange(r.createdAt, filters))
     .filter((r) => {
       if (filters.departmentId === "all") return true;
-      const emp =
-        readLifecycleStore().employees.find((e) => e.id === r.employeeId) ||
-        DEMO_EMPLOYEES.find((e) => e.id === r.employeeId);
+      const emp = allEmployees().find((e) => e.id === r.employeeId);
       return emp?.departmentId === filters.departmentId;
     })
     .filter((r) =>
@@ -408,7 +435,7 @@ function buildPassFail(filters: ReportFilters): ReportDataset {
   const fail = decided.filter((a) => a.status === "failed").length;
   const total = decided.length || 1;
 
-  const byDept = DEMO_DEPARTMENTS.map((d) => {
+  const byDept = allDepartments().map((d) => {
     const list = decided.filter((a) => a.departmentId === d.id);
     const p = list.filter((a) => a.status === "passed").length;
     const f = list.filter((a) => a.status === "failed").length;
@@ -540,7 +567,7 @@ function buildUpcomingExpiry(filters: ReportFilters): ReportDataset {
     ),
   }));
 
-  const sops = DEMO_SOPS.filter((s) => s.reviewDate).map((s) => ({
+  const sops = allSops().filter((s) => s.reviewDate).map((s) => ({
     type: "SOP review",
     reference: s.sopNumber,
     subject: s.title,
@@ -582,7 +609,7 @@ function buildUpcomingExpiry(filters: ReportFilters): ReportDataset {
     kpis: [
       { label: "Within 180 days", value: rows.length, tone: "warning" },
       {
-        label: "â‰¤ 30 days",
+        label: "≤ 30 days",
         value: rows.filter((r) => r.daysLeft <= 30).length,
         tone: "danger",
       },
@@ -593,7 +620,7 @@ function buildUpcomingExpiry(filters: ReportFilters): ReportDataset {
         title: "Expiry window",
         kind: "bar",
         data: [
-          { name: "â‰¤30d", value: rows.filter((r) => r.daysLeft <= 30).length },
+          { name: "≤30d", value: rows.filter((r) => r.daysLeft <= 30).length },
           {
             name: "31-90d",
             value: rows.filter((r) => r.daysLeft > 30 && r.daysLeft <= 90).length,
@@ -686,7 +713,7 @@ function buildCertificateStatus(filters: ReportFilters): ReportDataset {
 
 function buildSopCoverage(filters: ReportFilters): ReportDataset {
   const asg = assignments({ ...filters, departmentId: "all" });
-  const rows = DEMO_SOPS.filter((s) => s.status === "approved" || s.status === "under_review")
+  const rows = allSops().filter((s) => s.status === "approved" || s.status === "under_review")
     .filter((s) =>
       filters.departmentId === "all"
         ? true
@@ -696,9 +723,12 @@ function buildSopCoverage(filters: ReportFilters): ReportDataset {
     .map((s) => {
       const related = asg.filter((a) => a.sopId === s.id);
       const trained = related.filter((a) => a.status === "passed").length;
-      const required = Math.max(related.length, DEMO_EMPLOYEES.filter((e) =>
-        Boolean(e.departmentId && s.departmentIds.includes(e.departmentId))
-      ).length);
+      const required = Math.max(
+        related.length,
+        allEmployees().filter((e) =>
+          Boolean(e.departmentId && s.departmentIds.includes(e.departmentId))
+        ).length
+      );
       const coverage = required ? Math.round((trained / required) * 100) : 0;
       return {
         sop: s.sopNumber,
@@ -747,14 +777,11 @@ function buildSopCoverage(filters: ReportFilters): ReportDataset {
 }
 
 function buildTrainingMatrix(filters: ReportFilters): ReportDataset {
-  const employees = (
-    readLifecycleStore().employees.length
-      ? readLifecycleStore().employees
-      : DEMO_EMPLOYEES
-  ).filter(
+  const employees = allEmployees().filter(
     (e) => filters.departmentId === "all" || e.departmentId === filters.departmentId
   );
-  const sops = DEMO_SOPS.filter((s) => s.status === "approved");
+  const sops = allSops().filter((s) => s.status === "approved");
+  const asg = allAssignments();
 
   const rows = employees
     .filter((e) =>
@@ -767,15 +794,13 @@ function buildTrainingMatrix(filters: ReportFilters): ReportDataset {
         department: deptName(e.departmentId),
       };
       for (const s of sops) {
-        const a = DEMO_ASSIGNMENTS.find(
-          (x) => x.employeeId === e.id && x.sopId === s.id
-        );
+        const a = asg.find((x) => x.employeeId === e.id && x.sopId === s.id);
         row[s.sopNumber] = a
           ? a.status === "passed"
-            ? "âœ“"
+            ? "Pass"
             : a.status === "failed"
-              ? "âœ—"
-              : "…"
+              ? "Fail"
+              : "In progress"
           : "—";
       }
       return row;
@@ -797,7 +822,7 @@ function buildTrainingMatrix(filters: ReportFilters): ReportDataset {
       {
         label: "Cells trained",
         value: rows.reduce(
-          (acc, r) => acc + sops.filter((s) => r[s.sopNumber] === "âœ“").length,
+          (acc, r) => acc + sops.filter((s) => r[s.sopNumber] === "Pass").length,
           0
         ),
         tone: "success",
@@ -810,7 +835,7 @@ function buildTrainingMatrix(filters: ReportFilters): ReportDataset {
         kind: "bar",
         data: sops.map((s) => ({
           name: s.sopNumber,
-          value: rows.filter((r) => r[s.sopNumber] === "âœ“").length,
+          value: rows.filter((r) => r[s.sopNumber] === "Pass").length,
         })),
       },
     ],
@@ -818,7 +843,8 @@ function buildTrainingMatrix(filters: ReportFilters): ReportDataset {
 }
 
 function buildAuditReport(filters: ReportFilters): ReportDataset {
-  const rows = DEMO_AUDIT.filter((a) => inDateRange(a.timestamp, filters))
+  const rows = allAudit()
+    .filter((a) => inDateRange(a.timestamp, filters))
     .filter((a) =>
       matchesSearch(
         `${a.actorEmail} ${a.action} ${a.resourceType} ${a.description}`,
@@ -828,7 +854,7 @@ function buildAuditReport(filters: ReportFilters): ReportDataset {
     .map((a) => ({
       timestamp: formatDate(a.timestamp),
       actor: a.actorEmail,
-      role: a.actorRole,
+      role: "—",
       action: a.action,
       resource: a.resourceType,
       resourceId: a.resourceId,

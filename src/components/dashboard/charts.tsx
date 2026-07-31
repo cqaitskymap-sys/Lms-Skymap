@@ -17,12 +17,6 @@ import {
 } from "recharts";
 import { GlassCard, GlassCardHeader } from "@/components/dashboard/glass-card";
 import { MotionItem } from "@/components/dashboard/motion";
-import {
-  COMPLIANCE_TREND,
-  DEPT_COMPLIANCE,
-  STATUS_DISTRIBUTION,
-  TRAINING_PROGRESS_SERIES,
-} from "@/lib/dashboard/data";
 
 const tooltipStyle = {
   borderRadius: 10,
@@ -32,17 +26,21 @@ const tooltipStyle = {
   fontSize: 12,
 };
 
-export function ComplianceTrendChart() {
+export function ComplianceTrendChart({
+  data = [],
+}: {
+  data?: { month: string; rate: number }[];
+}) {
   return (
     <MotionItem className="h-full">
       <GlassCard className="flex h-full flex-col">
         <GlassCardHeader
           title="Compliance trend"
-          description="Organization pass rate over 6 months"
+          description="Organization pass rate (live)"
         />
         <div className="h-56 w-full min-h-[14rem] flex-1 sm:h-64">
           <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={COMPLIANCE_TREND} margin={{ top: 8, right: 8, left: -18, bottom: 0 }}>
+            <AreaChart data={data} margin={{ top: 8, right: 8, left: -18, bottom: 0 }}>
               <defs>
                 <linearGradient id="complianceFill" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="0%" stopColor="hsl(199, 89%, 40%)" stopOpacity={0.35} />
@@ -51,7 +49,7 @@ export function ComplianceTrendChart() {
               </defs>
               <CartesianGrid strokeDasharray="3 3" className="stroke-border/60" />
               <XAxis dataKey="month" tick={{ fontSize: 11 }} stroke="hsl(var(--muted-foreground))" />
-              <YAxis domain={[70, 100]} tick={{ fontSize: 11 }} stroke="hsl(var(--muted-foreground))" />
+              <YAxis domain={[0, 100]} tick={{ fontSize: 11 }} stroke="hsl(var(--muted-foreground))" />
               <Tooltip contentStyle={tooltipStyle} />
               <Area
                 type="monotone"
@@ -69,17 +67,21 @@ export function ComplianceTrendChart() {
   );
 }
 
-export function TrainingProgressChart() {
+export function TrainingProgressChart({
+  data = [],
+}: {
+  data?: { name: string; completed: number; inProgress: number; overdue: number }[];
+}) {
   return (
     <MotionItem className="h-full">
       <GlassCard className="flex h-full flex-col">
         <GlassCardHeader
           title="Training progress"
-          description="Weekly completed vs in-progress vs overdue"
+          description="Completed vs in-progress vs overdue"
         />
         <div className="h-56 w-full min-h-[14rem] flex-1 sm:h-64">
           <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={TRAINING_PROGRESS_SERIES} margin={{ top: 8, right: 8, left: -18, bottom: 0 }}>
+            <BarChart data={data} margin={{ top: 8, right: 8, left: -18, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" className="stroke-border/60" />
               <XAxis dataKey="name" tick={{ fontSize: 11 }} stroke="hsl(var(--muted-foreground))" />
               <YAxis tick={{ fontSize: 11 }} stroke="hsl(var(--muted-foreground))" />
@@ -96,7 +98,11 @@ export function TrainingProgressChart() {
   );
 }
 
-export function DepartmentComplianceChart() {
+export function DepartmentComplianceChart({
+  data = [],
+}: {
+  data?: { name: string; rate: number }[];
+}) {
   return (
     <MotionItem className="h-full">
       <GlassCard className="flex h-full flex-col">
@@ -104,7 +110,7 @@ export function DepartmentComplianceChart() {
         <div className="h-56 w-full min-h-[14rem] flex-1 sm:h-64">
           <ResponsiveContainer width="100%" height="100%">
             <BarChart
-              data={DEPT_COMPLIANCE}
+              data={data}
               layout="vertical"
               margin={{ top: 8, right: 16, left: 8, bottom: 0 }}
             >
@@ -121,7 +127,11 @@ export function DepartmentComplianceChart() {
   );
 }
 
-export function StatusDonutChart() {
+export function StatusDonutChart({
+  data = [],
+}: {
+  data?: { name: string; value: number; color: string }[];
+}) {
   return (
     <MotionItem className="h-full">
       <GlassCard className="flex h-full flex-col">
@@ -130,7 +140,7 @@ export function StatusDonutChart() {
           <ResponsiveContainer width="100%" height="100%">
             <PieChart>
               <Pie
-                data={STATUS_DISTRIBUTION}
+                data={data}
                 dataKey="value"
                 nameKey="name"
                 cx="50%"
@@ -139,7 +149,7 @@ export function StatusDonutChart() {
                 outerRadius={78}
                 paddingAngle={3}
               >
-                {STATUS_DISTRIBUTION.map((entry) => (
+                {data.map((entry) => (
                   <Cell key={entry.name} fill={entry.color} />
                 ))}
               </Pie>
@@ -153,7 +163,7 @@ export function StatusDonutChart() {
   );
 }
 
-export function ComplianceRing({ value = 87.5 }: { value?: number }) {
+export function ComplianceRing({ value = 0 }: { value?: number }) {
   const data = [
     { name: "Compliant", value },
     { name: "Gap", value: Math.max(0, 100 - value) },

@@ -4,9 +4,16 @@ import { ThemeProvider } from "@/components/providers/theme-provider";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "PharmaLMS — Enterprise Learning Management System",
+  title: "SKYMAP PharmaLMS — Enterprise Learning Management System",
   description:
     "GMP-compliant pharmaceutical training LMS with SOP version control, assessments, and audit trails.",
+  icons: {
+    icon: [
+      { url: "/favicon.ico", sizes: "any" },
+      { url: "/favicon.png", type: "image/png", sizes: "32x32" },
+    ],
+    apple: "/apple-icon.png",
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

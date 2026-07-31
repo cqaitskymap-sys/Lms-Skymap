@@ -88,9 +88,9 @@ export const TrainingCertificate = forwardRef<HTMLDivElement, TrainingCertificat
             <div className="flex w-full flex-col items-center gap-2 pt-2">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
-                src={certificate.companyLogoUrl || "/brand/skymap-logo.svg"}
+                src={certificate.companyLogoUrl || "/brand/skymap-logo.png"}
                 alt={certificate.companyName}
-                className="h-14 w-14 object-contain"
+                className="h-14 w-auto max-w-[160px] object-contain"
               />
               <p
                 className="text-sm font-semibold tracking-[0.35em] uppercase"
@@ -180,7 +180,7 @@ export const TrainingCertificate = forwardRef<HTMLDivElement, TrainingCertificat
                 />
                 <div className="mt-1 h-px w-44" style={{ background: "#0b3d4a" }} />
                 <p className="mt-1 text-sm font-semibold">
-                  {certificate.signedBy || "Authorized Signatory"}
+                  {certificate.signedBy || "ONS SIR"}
                 </p>
                 <p className="text-[10px]" style={{ color: "#8a9498" }}>
                   {certificate.signedByTitle || "Digitally signed"} · e-Sign

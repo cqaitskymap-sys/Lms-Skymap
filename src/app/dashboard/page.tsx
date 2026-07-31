@@ -1,12 +1,16 @@
 "use client";
 
-import { useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { Loader2 } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
 import { ROLE_DASHBOARD_ROUTES } from "@/lib/rbac/permissions";
+import { listTrainingAssignments } from "@/lib/services/training";
+import { listEmployeesForLifecycle } from "@/lib/services/lifecycle";
 import { DashboardShell } from "@/components/dashboard/dashboard-shell";
 import { MotionItem } from "@/components/dashboard/motion";
 import { GlassCard, GlassCardHeader } from "@/components/dashboard/glass-card";
+import { StatusBadge } from "@/components/shared/status-badge";
 import {
   Table,
   TableBody,
@@ -15,10 +19,14 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import type { Employee, TrainingAssignment } from "@/types";
 
 export default function DashboardPage() {
   const { role, profile, isDemo } = useAuth();
   const router = useRouter();
+  const [assignments, setAssignments] = useState<TrainingAssignment[]>([]);
+  const [employees, setEmployees] = useState<Employee[]>([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (role && role !== "super_admin") {
@@ -26,6 +34,32 @@ export default function DashboardPage() {
       if (route && route !== "/dashboard") router.replace(route);
     }
   }, [role, router]);
+
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [asg, emps] = await Promise.all([
+        listTrainingAssignments(),
+        listEmployeesForLifecycle(),
+      ]);
+      setAssignments(asg);
+      setEmployees(emps);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refresh();
+    const onUpdate = () => void refresh();
+    window.addEventListener("pharma-training-updated", onUpdate);
+    return () => window.removeEventListener("pharma-training-updated", onUpdate);
+  }, [refresh]);
+
+  const empName = (id: string) => {
+    const e = employees.find((x) => x.id === id);
+    return e ? `${e.firstName} ${e.lastName}` : id;
+  };
 
   return (
     <DashboardShell
@@ -40,23 +74,42 @@ export default function DashboardPage() {
             description="Latest SOP training status across the org"
           />
           <div className="overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Assignment</TableHead>
-                  <TableHead>Employee</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Score</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                <TableRow>
-                  <TableCell colSpan={4} className="text-center text-muted-foreground">
-                    No training assignments yet.
-                  </TableCell>
-                </TableRow>
-              </TableBody>
-            </Table>
+            {loading ? (
+              <div className="flex items-center gap-2 py-6 text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" /> Loading…
+              </div>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Assignment</TableHead>
+                    <TableHead>Employee</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Score</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {assignments.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={4} className="text-center text-muted-foreground">
+                        No training assignments yet.
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    assignments.slice(0, 8).map((a) => (
+                      <TableRow key={a.id}>
+                        <TableCell className="font-mono text-xs">{a.id}</TableCell>
+                        <TableCell>{empName(a.employeeId)}</TableCell>
+                        <TableCell>
+                          <StatusBadge status={a.status} />
+                        </TableCell>
+                        <TableCell>{a.score != null ? `${a.score}%` : "—"}</TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            )}
           </div>
         </GlassCard>
       </MotionItem>

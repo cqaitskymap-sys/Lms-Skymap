@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { Search } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -11,7 +12,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import type { ReportFilters } from "@/lib/reports/types";
-import { DEMO_DEPARTMENTS } from "@/lib/demo/data";
+import { listDepartments } from "@/lib/services/departments";
+import type { Department } from "@/types";
 
 interface ReportFiltersBarProps {
   filters: ReportFilters;
@@ -19,7 +21,12 @@ interface ReportFiltersBarProps {
 }
 
 export function ReportFiltersBar({ filters, onChange }: ReportFiltersBarProps) {
+  const [departments, setDepartments] = useState<Department[]>([]);
   const set = (patch: Partial<ReportFilters>) => onChange({ ...filters, ...patch });
+
+  useEffect(() => {
+    void listDepartments().then(setDepartments);
+  }, []);
 
   return (
     <div className="grid gap-3 rounded-lg border bg-card p-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -46,7 +53,7 @@ export function ReportFiltersBar({ filters, onChange }: ReportFiltersBarProps) {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All departments</SelectItem>
-            {DEMO_DEPARTMENTS.map((d) => (
+            {departments.map((d) => (
               <SelectItem key={d.id} value={d.id}>
                 {d.code} — {d.name}
               </SelectItem>

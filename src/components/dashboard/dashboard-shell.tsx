@@ -1,5 +1,8 @@
 "use client";
 
+import { useCallback, useEffect, useState } from "react";
+import { Loader2 } from "lucide-react";
+import { useAuth } from "@/contexts/auth-context";
 import { MotionItem, MotionSection } from "@/components/dashboard/motion";
 import { GlassStatCard } from "@/components/dashboard/glass-stat-card";
 import {
@@ -18,42 +21,73 @@ import {
   TodaysTasks,
 } from "@/components/dashboard/panels";
 import { MiniCalendar } from "@/components/dashboard/mini-calendar";
+import { roleQuickActions } from "@/lib/dashboard/data";
 import {
-  AUDIT_ALERTS,
-  DASH_ACTIVITIES,
-  DASH_NOTIFICATIONS,
-  OVERDUE_TRAININGS,
-  SOP_REVISION_ALERTS,
-  TODAY_TASKS,
-  UPCOMING_TRAININGS,
-  roleQuickActions,
-  roleStats,
-} from "@/lib/dashboard/data";
+  buildDashboardView,
+  emptyDashboardSnapshot,
+  fetchDashboardSnapshot,
+} from "@/lib/dashboard/live";
 import type { UserRole } from "@/types";
 
 interface DashboardShellProps {
   role: UserRole | "super_admin";
   title: string;
   subtitle: string;
-  /** Optional role-specific middle band */
   children?: React.ReactNode;
 }
 
 export function DashboardShell({ role, title, subtitle, children }: DashboardShellProps) {
-  const stats = roleStats(role);
+  const { profile } = useAuth();
+  const [loading, setLoading] = useState(true);
+  const [view, setView] = useState(() =>
+    buildDashboardView(emptyDashboardSnapshot(), role)
+  );
+
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    try {
+      const snap = await fetchDashboardSnapshot(profile?.uid);
+      setView(buildDashboardView(snap, role));
+    } finally {
+      setLoading(false);
+    }
+  }, [profile?.uid, role]);
+
+  useEffect(() => {
+    void refresh();
+    const onUpdate = () => void refresh();
+    window.addEventListener("pharma-lifecycle-updated", onUpdate);
+    window.addEventListener("pharma-training-updated", onUpdate);
+    window.addEventListener("pharma-sops-updated", onUpdate);
+    window.addEventListener("pharma-assessments-updated", onUpdate);
+    return () => {
+      window.removeEventListener("pharma-lifecycle-updated", onUpdate);
+      window.removeEventListener("pharma-training-updated", onUpdate);
+      window.removeEventListener("pharma-sops-updated", onUpdate);
+      window.removeEventListener("pharma-assessments-updated", onUpdate);
+    };
+  }, [refresh]);
+
   const actions = roleQuickActions(role);
 
   return (
     <MotionSection className="space-y-5 md:space-y-6">
       <MotionItem>
         <div className="flex flex-col gap-1">
-          <h1 className="text-2xl font-bold tracking-tight md:text-3xl">{title}</h1>
+          <div className="flex flex-wrap items-center gap-3">
+            <h1 className="text-2xl font-bold tracking-tight md:text-3xl">{title}</h1>
+            {loading && (
+              <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" /> Updating…
+              </span>
+            )}
+          </div>
           <p className="text-sm text-muted-foreground md:text-base">{subtitle}</p>
         </div>
       </MotionItem>
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        {stats.map((s) => (
+        {view.roleStats.map((s) => (
           <GlassStatCard key={s.title} {...s} />
         ))}
       </div>
@@ -62,44 +96,44 @@ export function DashboardShell({ role, title, subtitle, children }: DashboardShe
 
       <div className="grid gap-4 lg:grid-cols-3">
         <div className="lg:col-span-2">
-          <ComplianceTrendChart />
+          <ComplianceTrendChart data={view.complianceTrend} />
         </div>
-        <ComplianceRing />
+        <ComplianceRing value={view.compliance} />
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <TrainingProgressChart />
+        <TrainingProgressChart data={view.trainingProgress} />
         {role === "qa" || role === "super_admin" || role === "department_head" ? (
-          <DepartmentComplianceChart />
+          <DepartmentComplianceChart data={view.deptCompliance} />
         ) : (
-          <StatusDonutChart />
+          <StatusDonutChart data={view.statusDistribution} />
         )}
       </div>
 
       {children}
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        <UpcomingTrainingList items={UPCOMING_TRAININGS} />
-        <OverdueTrainingList items={OVERDUE_TRAININGS} />
-        <TodaysTasks tasks={TODAY_TASKS} />
+        <UpcomingTrainingList items={view.upcoming} />
+        <OverdueTrainingList items={view.overdueItems} />
+        <TodaysTasks tasks={view.tasks} />
       </div>
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <MiniCalendar />
-        <NotificationsPanel items={DASH_NOTIFICATIONS} />
+        <NotificationsPanel items={view.notifications} />
         <AlertsPanel
           title="Audit alerts"
           description="Security & compliance signals"
-          alerts={AUDIT_ALERTS}
+          alerts={view.auditAlerts}
         />
         <AlertsPanel
           title="SOP revision alerts"
           description="Version control & retraining"
-          alerts={SOP_REVISION_ALERTS}
+          alerts={view.sopAlerts}
         />
       </div>
 
-      <RecentActivities items={DASH_ACTIVITIES} />
+      <RecentActivities items={view.activities} />
     </MotionSection>
   );
 }
