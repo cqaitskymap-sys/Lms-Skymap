@@ -23,6 +23,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { RequirePermission, Can } from "@/components/auth/require-permission";
+import { printHtml } from "@/lib/print";
 import {
   Select,
   SelectContent,
@@ -209,44 +210,273 @@ export default function JdPage() {
 
   function handlePrint(record: JobDescription) {
     const emp = employees.find((e) => e.id === record.employeeId);
-    const deptName = departmentLabel(departments, record.departmentId) || "—";
-    const printWindow = window.open("", "_blank", "noopener,noreferrer,width=1000,height=900");
-    if (!printWindow) {
-      toast.error("Allow popups to print JD");
-      return;
-    }
-    printWindow.document.write(`
+    const deptName =
+      emp?.departmentName ||
+      departmentLabel(departments, record.departmentId) ||
+      "—";
+    const fullName = emp
+      ? `${emp.firstName} ${emp.lastName}`.trim()
+      : record.employeeId;
+    const employeeCode = emp?.employeeCode || "—";
+    const joiningDate = formatDate(emp?.dateOfJoining);
+    const effectiveDate = formatDate(record.effectiveFrom);
+    const qualification =
+      record.qualifications.filter(Boolean).join(", ") || "—";
+    const experience =
+      emp?.employmentType === "intern" || emp?.employmentType === "temporary"
+        ? "Fresher"
+        : emp?.employmentType === "permanent"
+          ? "—"
+          : "—";
+    const reportingTo =
+      record.reportingTo || emp?.reportingManagerName || "—";
+    const revisionNo = String(record.version || 1);
+    const supersedesNo =
+      record.version && record.version > 1 ? String(record.version - 1) : "—";
+    const jdNo = record.id.toUpperCase();
+    const logoUrl = `${window.location.origin}/brand/skymap-logo.png`;
+
+    const responsibilityRows = (record.responsibilities.length
+      ? record.responsibilities
+      : ["—"]
+    )
+      .map(
+        (item, index) => `
+        <tr>
+          <td class="center">${index + 1}.</td>
+          <td>${item}</td>
+        </tr>`
+      )
+      .join("");
+
+    const headerBlock = `
+      <table class="header-table">
+        <tr>
+          <td class="logo-cell" rowspan="3">
+            <img src="${logoUrl}" alt="SkyMap logo" />
+          </td>
+          <td class="title-1">SKYMAP PHARMACEUTICALS PVT. LTD, ROORKEE</td>
+        </tr>
+        <tr>
+          <td class="title-2">QUALITY ASSURANCE</td>
+        </tr>
+        <tr>
+          <td class="title-3">JOB DESCRIPTION</td>
+        </tr>
+      </table>
+    `;
+
+    const html = `
       <!doctype html>
       <html>
         <head>
-          <title>JD - ${record.id}</title>
+          <title>JD - ${employeeCode}</title>
           <style>
-            body { font-family: Arial, sans-serif; padding: 24px; color: #111; }
-            h1 { margin-bottom: 8px; }
-            .meta { margin-bottom: 16px; line-height: 1.6; }
-            h3 { margin: 14px 0 8px; }
-            ul { margin-top: 0; }
+            @page { size: A4; margin: 12mm; }
+            * { box-sizing: border-box; }
+            body {
+              margin: 0;
+              color: #111;
+              font-family: "Times New Roman", Times, serif;
+              background: #fff;
+            }
+            .page {
+              width: 100%;
+              min-height: 250mm;
+              border: 3px double #222;
+              padding: 8px;
+              page-break-after: always;
+            }
+            .page:last-child { page-break-after: auto; }
+            .header-table {
+              width: 100%;
+              border-collapse: collapse;
+              margin-bottom: 8px;
+            }
+            .header-table td {
+              border: 1px solid #333;
+              padding: 4px 6px;
+              vertical-align: middle;
+            }
+            .logo-cell {
+              width: 90px;
+              text-align: center;
+            }
+            .logo-cell img {
+              width: 70px;
+              height: auto;
+            }
+            .title-1, .title-2, .title-3 {
+              text-align: center;
+              font-weight: 700;
+              letter-spacing: 0.2px;
+            }
+            .title-1 { font-size: 16px; }
+            .title-2 { font-size: 15px; }
+            .title-3 { font-size: 16px; }
+            .info-table, .resp-table, .sign-table {
+              width: 100%;
+              border-collapse: collapse;
+            }
+            .info-table td, .resp-table th, .resp-table td, .sign-table td {
+              border: 1px solid #333;
+              padding: 5px 7px;
+              vertical-align: top;
+              font-size: 13px;
+            }
+            .info-table .label {
+              font-weight: 700;
+              width: 22%;
+              white-space: nowrap;
+            }
+            .info-table .value {
+              width: 28%;
+            }
+            .intro {
+              margin: 10px 0;
+              font-size: 13px;
+              line-height: 1.45;
+              text-align: justify;
+            }
+            .resp-table th {
+              text-align: center;
+              font-weight: 700;
+              background: #f3f3f3;
+            }
+            .resp-table td.center,
+            .center {
+              text-align: center;
+              width: 70px;
+            }
+            .handover, .ack {
+              margin-top: 12px;
+              font-size: 13px;
+              line-height: 1.7;
+            }
+            .line {
+              display: inline-block;
+              min-width: 220px;
+              border-bottom: 1px solid #333;
+              margin: 0 4px;
+            }
+            .sign-table td {
+              height: 180px;
+              width: 50%;
+              font-size: 13px;
+            }
+            .sign-title {
+              font-weight: 700;
+              margin-bottom: 50px;
+            }
+            .sign-meta {
+              margin-top: 24px;
+              line-height: 1.8;
+            }
+            @media print {
+              .page {
+                min-height: auto;
+                border-width: 2px;
+              }
+            }
           </style>
         </head>
         <body>
-          <h1>Job Description</h1>
-          <div class="meta">
-            <div><b>Employee:</b> ${emp ? `${emp.firstName} ${emp.lastName} (${emp.employeeCode})` : record.employeeId}</div>
-            <div><b>Department:</b> ${deptName}</div>
-            <div><b>Title:</b> ${record.title}</div>
-            <div><b>Effective From:</b> ${formatDate(record.effectiveFrom)}</div>
+          <div class="page">
+            ${headerBlock}
+
+            <table class="info-table">
+              <tr>
+                <td class="label">Name of Employee</td>
+                <td class="value">${fullName}</td>
+                <td class="label">JD No.</td>
+                <td class="value">${jdNo}</td>
+              </tr>
+              <tr>
+                <td class="label">Department</td>
+                <td class="value">${deptName}</td>
+                <td class="label">Employee Code</td>
+                <td class="value">${employeeCode}</td>
+              </tr>
+              <tr>
+                <td class="label">Designation</td>
+                <td class="value">${record.title || "—"}</td>
+                <td class="label">Date of Joining</td>
+                <td class="value">${joiningDate}</td>
+              </tr>
+              <tr>
+                <td class="label">Qualification</td>
+                <td class="value">${qualification}</td>
+                <td class="label">Experience</td>
+                <td class="value">${experience}</td>
+              </tr>
+              <tr>
+                <td class="label">Revision Number</td>
+                <td class="value">${revisionNo}</td>
+                <td class="label">Supersedes No.</td>
+                <td class="value">${supersedesNo}</td>
+              </tr>
+              <tr>
+                <td class="label">Effective Date of JD</td>
+                <td class="value">${effectiveDate}</td>
+                <td class="label">Reporting To</td>
+                <td class="value">${reportingTo}</td>
+              </tr>
+            </table>
+
+            <p class="intro">
+              Your job responsibilities are listed below for your understanding and acceptance.
+              In case of any system up-gradation in future, you will be simultaneously re-trained
+              to understand the new implementation.
+            </p>
+
+            <table class="resp-table">
+              <thead>
+                <tr>
+                  <th style="width:12%">Sr. No.</th>
+                  <th>Responsible for</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${responsibilityRows}
+              </tbody>
+            </table>
+
+            <p class="handover">
+              In case of your absence; hand over your responsibility to
+              <span class="line">&nbsp;</span>
+              with intimation to the assignee.
+            </p>
+            <p class="ack">
+              Acknowledged by: <span class="line">&nbsp;</span>
+            </p>
           </div>
-          <h3>Responsibilities</h3>
-          <ul>${record.responsibilities.map((x) => `<li>${x}</li>`).join("")}</ul>
-          <h3>Qualifications</h3>
-          <ul>${record.qualifications.map((x) => `<li>${x}</li>`).join("")}</ul>
-          <h3>Skills</h3>
-          <ul>${record.skills.map((x) => `<li>${x}</li>`).join("")}</ul>
+
+          <div class="page">
+            ${headerBlock}
+            <table class="sign-table">
+              <tr>
+                <td>
+                  <div class="sign-title">Job Responsibility Assigned by:</div>
+                  <div class="sign-meta">(Name, Sign and Date)</div>
+                  <div class="sign-meta">Designation: <span class="line">&nbsp;</span></div>
+                </td>
+                <td>
+                  <div class="sign-title">Job Responsibility Accepted by:</div>
+                  <div class="sign-meta">(Name, Sign and Date)</div>
+                  <div class="sign-meta">Designation: <span class="line">&nbsp;</span></div>
+                </td>
+              </tr>
+            </table>
+          </div>
         </body>
       </html>
-    `);
-    printWindow.document.close();
-    printWindow.print();
+    `;
+
+    try {
+      printHtml(html, `JD - ${employeeCode}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to open print dialog");
+    }
   }
 
   return (

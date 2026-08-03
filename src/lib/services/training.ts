@@ -34,6 +34,11 @@ import {
 import { readLifecycleStore } from "@/lib/lifecycle/demo-store";
 import { isDemoMode } from "@/lib/demo/data";
 
+/** Firestore rejects `undefined` field values — strip them before writes. */
+function sanitizeForFirestore<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
 async function resolveNotifyUserId(employeeId: string): Promise<string> {
   const local = readLifecycleStore().employees.find((e) => e.id === employeeId);
   if (local?.userId) return local.userId;
@@ -406,35 +411,38 @@ export async function createJobDescription(
     createdBy: actorId,
   };
 
+  // Always keep a local copy so UI list stays reliable even if Firestore lags/fails
+  const store = readTrainingStore();
+  store.jobDescriptions = [jd, ...store.jobDescriptions.filter((j) => j.id !== id)];
+  writeTrainingStore(store);
+
   if (preferTrainingLocal()) {
-    const store = readTrainingStore();
-    store.jobDescriptions.unshift(jd);
-    writeTrainingStore(store);
     return jd;
   }
 
   try {
-    await setDoc(doc(db, COLLECTIONS.jobDescriptions, id), jd);
+    await setDoc(doc(db, COLLECTIONS.jobDescriptions, id), sanitizeForFirestore(jd));
   } catch {
-    const store = readTrainingStore();
-    store.jobDescriptions.unshift(jd);
-    writeTrainingStore(store);
+    /* local copy already saved */
   }
   return jd;
 }
 
 export async function listJobDescriptions(): Promise<JobDescription[]> {
+  const localRows = [...readTrainingStore().jobDescriptions];
   if (preferTrainingLocal()) {
-    return [...readTrainingStore().jobDescriptions];
+    return localRows.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }
   try {
     const snap = await getDocs(collection(db, COLLECTIONS.jobDescriptions));
     const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }) as JobDescription);
-    if (rows.length) return rows;
+    const byId = new Map<string, JobDescription>();
+    // Local last so offline/fallback creates are visible
+    for (const r of [...rows, ...localRows]) byId.set(r.id, r);
+    return [...byId.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   } catch {
-    /* fall through */
+    return localRows.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }
-  return [...readTrainingStore().jobDescriptions];
 }
 
 export async function updateJobDescription(
@@ -507,6 +515,18 @@ export async function createTNI(
   const now = nowISO();
   const tni: TrainingNeedIdentification = {
     ...data,
+    needs: data.needs.map((n) => {
+      const item: TrainingNeedIdentification["needs"][number] = {
+        id: n.id,
+        topic: n.topic,
+        priority: n.priority,
+        rationale: n.rationale || "",
+        status: n.status || "identified",
+      };
+      if (n.sopId) item.sopId = n.sopId;
+      if (n.targetCompletionDate) item.targetCompletionDate = n.targetCompletionDate;
+      return item;
+    }),
     id,
     version: 1,
     status: "submitted",
@@ -515,37 +535,39 @@ export async function createTNI(
     createdBy: actorId,
   };
 
+  // Always keep a local copy so Saved TNIs list updates immediately
+  const store = readTrainingStore();
+  store.tnis = [tni, ...store.tnis.filter((t) => t.id !== id)];
+  writeTrainingStore(store);
+
   if (preferTrainingLocal()) {
-    const store = readTrainingStore();
-    store.tnis.unshift(tni);
-    writeTrainingStore(store);
     return tni;
   }
 
   try {
-    await setDoc(doc(db, COLLECTIONS.tni, id), tni);
+    await setDoc(doc(db, COLLECTIONS.tni, id), sanitizeForFirestore(tni));
   } catch {
-    const store = readTrainingStore();
-    store.tnis.unshift(tni);
-    writeTrainingStore(store);
+    /* local copy already saved */
   }
   return tni;
 }
 
 export async function listTNIs(): Promise<TrainingNeedIdentification[]> {
+  const localRows = [...readTrainingStore().tnis];
   if (preferTrainingLocal()) {
-    return [...readTrainingStore().tnis];
+    return localRows.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }
   try {
     const snap = await getDocs(collection(db, COLLECTIONS.tni));
     const rows = snap.docs.map(
       (d) => ({ id: d.id, ...d.data() }) as TrainingNeedIdentification
     );
-    if (rows.length) return rows;
+    const byId = new Map<string, TrainingNeedIdentification>();
+    for (const r of [...rows, ...localRows]) byId.set(r.id, r);
+    return [...byId.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   } catch {
-    /* fall through */
+    return localRows.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }
-  return [...readTrainingStore().tnis];
 }
 
 export async function updateTNI(
@@ -556,54 +578,66 @@ export async function updateTNI(
   actorId: string
 ): Promise<TrainingNeedIdentification> {
   const now = nowISO();
+  const cleanedNeeds = updates.needs?.map((n) => {
+    const item: TrainingNeedIdentification["needs"][number] = {
+      id: n.id,
+      topic: n.topic,
+      priority: n.priority,
+      rationale: n.rationale || "",
+      status: n.status || "identified",
+    };
+    if (n.sopId) item.sopId = n.sopId;
+    if (n.targetCompletionDate) item.targetCompletionDate = n.targetCompletionDate;
+    return item;
+  });
+
   const localPayload = {
     ...updates,
+    ...(cleanedNeeds ? { needs: cleanedNeeds } : {}),
     updatedAt: now,
     updatedBy: actorId,
   };
 
+  const store = readTrainingStore();
+  const existingLocal = store.tnis.find((t) => t.id === id);
+  let updated: TrainingNeedIdentification | null = existingLocal
+    ? { ...existingLocal, ...localPayload }
+    : null;
+
   if (preferTrainingLocal()) {
-    const store = readTrainingStore();
-    const existing = store.tnis.find((t) => t.id === id);
-    if (!existing) throw new Error("TNI not found");
-    const updated: TrainingNeedIdentification = { ...existing, ...localPayload };
-    store.tnis = store.tnis.map((t) => (t.id === id ? updated : t));
+    if (!updated) throw new Error("TNI not found");
+    store.tnis = store.tnis.map((t) => (t.id === id ? updated! : t));
     writeTrainingStore(store);
     return updated;
   }
 
   try {
-    await updateDoc(doc(db, COLLECTIONS.tni, id), localPayload);
+    await updateDoc(doc(db, COLLECTIONS.tni, id), sanitizeForFirestore(localPayload));
     const snap = await getDoc(doc(db, COLLECTIONS.tni, id));
-    if (snap.exists()) return { id: snap.id, ...snap.data() } as TrainingNeedIdentification;
+    if (snap.exists()) {
+      updated = { id: snap.id, ...snap.data() } as TrainingNeedIdentification;
+    }
   } catch {
-    const store = readTrainingStore();
-    const existing = store.tnis.find((t) => t.id === id);
-    if (!existing) throw new Error("TNI not found");
-    const updated: TrainingNeedIdentification = { ...existing, ...localPayload };
-    store.tnis = store.tnis.map((t) => (t.id === id ? updated : t));
-    writeTrainingStore(store);
-    return updated;
+    if (!updated) throw new Error("TNI not found");
   }
 
-  const fallback = readTrainingStore().tnis.find((t) => t.id === id);
-  if (!fallback) throw new Error("TNI not found");
-  return fallback;
+  if (!updated) throw new Error("TNI not found");
+  store.tnis = [updated, ...store.tnis.filter((t) => t.id !== id)];
+  writeTrainingStore(store);
+  return updated;
 }
 
 export async function deleteTNI(id: string): Promise<void> {
-  if (preferTrainingLocal()) {
-    const store = readTrainingStore();
-    store.tnis = store.tnis.filter((t) => t.id !== id);
-    writeTrainingStore(store);
-    return;
-  }
+  const store = readTrainingStore();
+  store.tnis = store.tnis.filter((t) => t.id !== id);
+  writeTrainingStore(store);
+
+  if (preferTrainingLocal()) return;
+
   try {
     await deleteDoc(doc(db, COLLECTIONS.tni, id));
   } catch {
-    const store = readTrainingStore();
-    store.tnis = store.tnis.filter((t) => t.id !== id);
-    writeTrainingStore(store);
+    /* local already deleted */
   }
 }
 

@@ -31,6 +31,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { RequirePermission, Can } from "@/components/auth/require-permission";
+import { printHtml } from "@/lib/print";
 import type {
   Employee,
   JobDescription,
@@ -138,12 +139,7 @@ export default function TniPage() {
     selectedNeeds: NeedRow[];
   }) {
     if (typeof window === "undefined") return;
-    const { employee, tni, selectedJd, selectedNeeds } = args;
-    const printWindow = window.open("", "_blank", "noopener,noreferrer,width=1100,height=900");
-    if (!printWindow) {
-      toast.error("Allow popups to print TNI");
-      return;
-    }
+    const { employee, selectedJd, selectedNeeds } = args;
 
     const rowsHtml = selectedNeeds
       .map((need, index) => {
@@ -170,7 +166,7 @@ export default function TniPage() {
         ? "Fresher"
         : "Experienced";
 
-    printWindow.document.write(`
+    const html = `
       <!doctype html>
       <html>
         <head>
@@ -244,9 +240,32 @@ export default function TniPage() {
             .center {
               text-align: center;
             }
+            .signatures {
+              width: 100%;
+              margin-top: 48px;
+              border-collapse: collapse;
+            }
+            .signatures td {
+              width: 50%;
+              vertical-align: top;
+              border: none;
+              padding: 0;
+              font-size: 14px;
+              line-height: 1.55;
+            }
+            .signatures .right {
+              text-align: right;
+            }
+            .signatures .title {
+              font-weight: 700;
+              margin-bottom: 4px;
+            }
+            .signatures .role {
+              margin-bottom: 28px;
+            }
             .footer {
-              margin-top: 8px;
-              font-size: 16px;
+              margin-top: 28px;
+              font-size: 14px;
               display: flex;
               justify-content: space-between;
             }
@@ -265,7 +284,7 @@ export default function TniPage() {
             <table class="header-table">
               <tr>
                 <td class="logo-cell" rowspan="3">
-                  <img src="/brand/skymap-logo.png" alt="SkyMap logo" />
+                  <img src="${window.location.origin}/brand/skymap-logo.png" alt="SkyMap logo" />
                 </td>
                 <td class="title-1">SKYMAP PHARMACEUTICALS PVT. LTD, ROORKEE</td>
               </tr>
@@ -304,17 +323,36 @@ export default function TniPage() {
                 ${rowsHtml || '<tr><td class="center">1</td><td>—</td><td class="center">NA</td><td class="center">—</td><td></td></tr>'}
               </tbody>
             </table>
+
+            <table class="signatures">
+              <tr>
+                <td>
+                  <div class="title">Prepared By</div>
+                  <div class="role">Department Training Coordinator/HOD</div>
+                  <div>Sign/Date</div>
+                </td>
+                <td class="right">
+                  <div class="title">Approved By</div>
+                  <div class="role">Head-Quality Assurance/Designee</div>
+                  <div>Sign/Date</div>
+                </td>
+              </tr>
+            </table>
+
             <div class="footer">
               <span>FORMAT No.: SOP/QA/002/F08-03</span>
-              <span>TNI Ref: ${tni.id}</span>
+              <span>Page 1 of 1</span>
             </div>
           </div>
         </body>
       </html>
-    `);
-    printWindow.document.close();
-    printWindow.focus();
-    printWindow.print();
+    `;
+
+    try {
+      printHtml(html, `TNI - ${employee.employeeCode}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to open print dialog");
+    }
   }
 
   async function handleAiSuggest() {
@@ -372,39 +410,47 @@ export default function TniPage() {
         employeeId,
         departmentId: dept,
         jdId,
-        needs: needs.map((n) => ({
-          id: n.id,
-          topic: n.topic.trim(),
-          sopId: n.sopId || undefined,
-          priority: n.priority,
-          rationale: n.rationale.trim(),
-          status: "identified" as const,
-        })),
+        needs: needs.map((n) => {
+          const item: {
+            id: string;
+            topic: string;
+            sopId?: string;
+            priority: NeedRow["priority"];
+            rationale: string;
+            status: "identified";
+          } = {
+            id: n.id,
+            topic: n.topic.trim(),
+            priority: n.priority,
+            rationale: n.rationale.trim(),
+            status: "identified",
+          };
+          if (n.sopId) item.sopId = n.sopId;
+          return item;
+        }),
       };
 
       let tni: TrainingNeedIdentification;
       if (editingId) {
         tni = await updateTNI(editingId, payload, profile.uid);
-        toast.success(`TNI updated (${tni.id})`);
+        toast.success(`TNI updated (${tni.id}) — use Print from the list`);
       } else {
         tni = await createTNI(payload, profile.uid);
         await createTniLifecycle(employeeId, tni.id, actor);
-        toast.success(`TNI submitted (${tni.id})`);
+        toast.success(`TNI submitted (${tni.id}) — use Print from the list`);
       }
-      if (emp) {
-        const selectedJd = jds.find((j) => j.id === jdId);
-        printTniSheet({
-          employee: emp,
-          tni,
-          selectedJd,
-          selectedNeeds: needs,
-        });
-      }
+      // Optimistic UI update, then hard refresh from store
+      setRecords((prev) => {
+        const next = [tni, ...prev.filter((r) => r.id !== tni.id)];
+        return next.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+      });
       await loadData();
       setEditingId(null);
       setNeeds([]);
       setEmployeeId("");
       setJdId("");
+      setJobTitle("");
+      setResponsibilities("");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to submit TNI");
     } finally {
