@@ -1,6 +1,11 @@
 import { initializeApp, getApps, getApp, type FirebaseApp } from "firebase/app";
 import { getAuth, connectAuthEmulator, type Auth } from "firebase/auth";
-import { getFirestore, connectFirestoreEmulator, type Firestore } from "firebase/firestore";
+import {
+  getFirestore,
+  initializeFirestore,
+  connectFirestoreEmulator,
+  type Firestore,
+} from "firebase/firestore";
 import { getStorage, connectStorageEmulator, type FirebaseStorage } from "firebase/storage";
 import { getFunctions, connectFunctionsEmulator, type Functions } from "firebase/functions";
 import { firebaseConfig } from "@/lib/firebase/config";
@@ -10,9 +15,25 @@ function createFirebaseApp(): FirebaseApp {
   return initializeApp(firebaseConfig);
 }
 
+function createFirestore(firebaseApp: FirebaseApp): Firestore {
+  // Browser: auto-detect buffering proxies / AV that break WebChannel Listen
+  // (common source of Listen/channel HTTP 400 with t=1). Server keeps defaults.
+  if (typeof window !== "undefined") {
+    try {
+      return initializeFirestore(firebaseApp, {
+        experimentalAutoDetectLongPolling: true,
+      });
+    } catch {
+      // Already initialized in this runtime (HMR / duplicate import).
+      return getFirestore(firebaseApp);
+    }
+  }
+  return getFirestore(firebaseApp);
+}
+
 export const app = createFirebaseApp();
 export const auth: Auth = getAuth(app);
-export const db: Firestore = getFirestore(app);
+export const db: Firestore = createFirestore(app);
 export const storage: FirebaseStorage = getStorage(app);
 export const functions: Functions = getFunctions(app);
 
