@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Loader2, UserPlus } from "lucide-react";
+import { useAuth } from "@/contexts/auth-context";
+import { hasPermission } from "@/lib/rbac/permissions";
 import { listStaffUsers } from "@/lib/services/users";
 import { ensureTrainerProfilesFromUsers, listTrainers } from "@/lib/services/training";
 import { listDepartments, departmentLabel } from "@/lib/services/departments";
@@ -12,6 +14,8 @@ import { Button } from "@/components/ui/button";
 import type { Department, TrainerProfile, UserProfile } from "@/types";
 
 export default function TrainersPage() {
+  const { profile } = useAuth();
+  const canReadUsers = profile?.role ? hasPermission(profile.role, "users:read") : false;
   const [trainers, setTrainers] = useState<TrainerProfile[]>([]);
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
@@ -21,19 +25,22 @@ export default function TrainersPage() {
     void (async () => {
       setLoading(true);
       try {
-        const [staff, depts] = await Promise.all([
-          listStaffUsers().catch(() => [] as UserProfile[]),
-          listDepartments(),
-        ]);
+        const staffPromise = canReadUsers
+          ? listStaffUsers().catch(() => [] as UserProfile[])
+          : Promise.resolve([] as UserProfile[]);
+        const [staff, depts] = await Promise.all([staffPromise, listDepartments()]);
         setUsers(staff);
         setDepartments(depts);
-        const profiles = await ensureTrainerProfilesFromUsers(staff);
-        setTrainers(profiles.length ? profiles : await listTrainers());
+        const profiles =
+          staff.length > 0
+            ? await ensureTrainerProfilesFromUsers(staff)
+            : await listTrainers();
+        setTrainers(profiles);
       } finally {
         setLoading(false);
       }
     })();
-  }, []);
+  }, [canReadUsers]);
 
   return (
     <div className="space-y-6">

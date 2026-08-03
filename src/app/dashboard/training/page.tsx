@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
 import { RequirePermission } from "@/components/auth/require-permission";
 import { useAuth } from "@/contexts/auth-context";
+import { hasPermission } from "@/lib/rbac/permissions";
 import { listEmployeesForLifecycle, assignSopLifecycle, assignTrainerLifecycle } from "@/lib/services/lifecycle";
 import { listSopsDetailed } from "@/lib/services/sops";
 import { listStaffUsers } from "@/lib/services/users";
@@ -41,6 +42,7 @@ import type { Employee, SopDocument, TrainerProfile, TrainingAssignment, UserPro
 
 export default function TrainingPage() {
   const { profile, can } = useAuth();
+  const canReadUsers = profile?.role ? hasPermission(profile.role, "users:read") : false;
   const [sopId, setSopId] = useState("");
   const [trainerId, setTrainerId] = useState("");
   const [dueDate, setDueDate] = useState("");
@@ -56,22 +58,28 @@ export default function TrainingPage() {
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
+      const staffPromise = canReadUsers
+        ? listStaffUsers().catch(() => [] as UserProfile[])
+        : Promise.resolve([] as UserProfile[]);
       const [emps, sopList, staff, asg] = await Promise.all([
         listEmployeesForLifecycle(),
         listSopsDetailed({ status: "approved" }),
-        listStaffUsers().catch(() => [] as UserProfile[]),
+        staffPromise,
         listTrainingAssignments(),
       ]);
       setEmployees(emps);
       setSops(sopList);
       setUsers(staff);
       setAssignments(asg);
-      const trainerProfiles = await ensureTrainerProfilesFromUsers(staff);
-      setTrainers(trainerProfiles.length ? trainerProfiles : await listTrainers());
+      const trainerProfiles =
+        staff.length > 0
+          ? await ensureTrainerProfilesFromUsers(staff)
+          : await listTrainers();
+      setTrainers(trainerProfiles);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [canReadUsers]);
 
   useEffect(() => {
     void refresh();

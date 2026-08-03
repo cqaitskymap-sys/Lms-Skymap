@@ -217,6 +217,7 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
   ],
   trainer: [
     "employees:read",
+    "departments:read",
     "sops:read",
     "training:read",
     "training:conduct",
@@ -228,6 +229,7 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     "settings:write",
   ],
   employee: [
+    "departments:read",
     "induction:read",
     "sops:read",
     "training:read",

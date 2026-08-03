@@ -10,6 +10,7 @@ import {
   getDocs,
   setDoc,
   updateDoc,
+  deleteDoc,
   query,
   where,
   orderBy,
@@ -436,6 +437,65 @@ export async function listJobDescriptions(): Promise<JobDescription[]> {
   return [...readTrainingStore().jobDescriptions];
 }
 
+export async function updateJobDescription(
+  id: string,
+  updates: Partial<
+    Omit<JobDescription, "id" | "createdAt" | "createdBy" | "version">
+  >,
+  actorId: string
+): Promise<JobDescription> {
+  const now = nowISO();
+  const localPayload = {
+    ...updates,
+    updatedAt: now,
+    updatedBy: actorId,
+  };
+
+  if (preferTrainingLocal()) {
+    const store = readTrainingStore();
+    const existing = store.jobDescriptions.find((j) => j.id === id);
+    if (!existing) throw new Error("Job Description not found");
+    const updated: JobDescription = { ...existing, ...localPayload };
+    store.jobDescriptions = store.jobDescriptions.map((j) => (j.id === id ? updated : j));
+    writeTrainingStore(store);
+    return updated;
+  }
+
+  try {
+    await updateDoc(doc(db, COLLECTIONS.jobDescriptions, id), localPayload);
+    const snap = await getDoc(doc(db, COLLECTIONS.jobDescriptions, id));
+    if (snap.exists()) return { id: snap.id, ...snap.data() } as JobDescription;
+  } catch {
+    const store = readTrainingStore();
+    const existing = store.jobDescriptions.find((j) => j.id === id);
+    if (!existing) throw new Error("Job Description not found");
+    const updated: JobDescription = { ...existing, ...localPayload };
+    store.jobDescriptions = store.jobDescriptions.map((j) => (j.id === id ? updated : j));
+    writeTrainingStore(store);
+    return updated;
+  }
+
+  const fallback = readTrainingStore().jobDescriptions.find((j) => j.id === id);
+  if (!fallback) throw new Error("Job Description not found");
+  return fallback;
+}
+
+export async function deleteJobDescription(id: string): Promise<void> {
+  if (preferTrainingLocal()) {
+    const store = readTrainingStore();
+    store.jobDescriptions = store.jobDescriptions.filter((j) => j.id !== id);
+    writeTrainingStore(store);
+    return;
+  }
+  try {
+    await deleteDoc(doc(db, COLLECTIONS.jobDescriptions, id));
+  } catch {
+    const store = readTrainingStore();
+    store.jobDescriptions = store.jobDescriptions.filter((j) => j.id !== id);
+    writeTrainingStore(store);
+  }
+}
+
 export async function createTNI(
   data: Omit<
     TrainingNeedIdentification,
@@ -486,6 +546,65 @@ export async function listTNIs(): Promise<TrainingNeedIdentification[]> {
     /* fall through */
   }
   return [...readTrainingStore().tnis];
+}
+
+export async function updateTNI(
+  id: string,
+  updates: Partial<
+    Omit<TrainingNeedIdentification, "id" | "createdAt" | "createdBy" | "version">
+  >,
+  actorId: string
+): Promise<TrainingNeedIdentification> {
+  const now = nowISO();
+  const localPayload = {
+    ...updates,
+    updatedAt: now,
+    updatedBy: actorId,
+  };
+
+  if (preferTrainingLocal()) {
+    const store = readTrainingStore();
+    const existing = store.tnis.find((t) => t.id === id);
+    if (!existing) throw new Error("TNI not found");
+    const updated: TrainingNeedIdentification = { ...existing, ...localPayload };
+    store.tnis = store.tnis.map((t) => (t.id === id ? updated : t));
+    writeTrainingStore(store);
+    return updated;
+  }
+
+  try {
+    await updateDoc(doc(db, COLLECTIONS.tni, id), localPayload);
+    const snap = await getDoc(doc(db, COLLECTIONS.tni, id));
+    if (snap.exists()) return { id: snap.id, ...snap.data() } as TrainingNeedIdentification;
+  } catch {
+    const store = readTrainingStore();
+    const existing = store.tnis.find((t) => t.id === id);
+    if (!existing) throw new Error("TNI not found");
+    const updated: TrainingNeedIdentification = { ...existing, ...localPayload };
+    store.tnis = store.tnis.map((t) => (t.id === id ? updated : t));
+    writeTrainingStore(store);
+    return updated;
+  }
+
+  const fallback = readTrainingStore().tnis.find((t) => t.id === id);
+  if (!fallback) throw new Error("TNI not found");
+  return fallback;
+}
+
+export async function deleteTNI(id: string): Promise<void> {
+  if (preferTrainingLocal()) {
+    const store = readTrainingStore();
+    store.tnis = store.tnis.filter((t) => t.id !== id);
+    writeTrainingStore(store);
+    return;
+  }
+  try {
+    await deleteDoc(doc(db, COLLECTIONS.tni, id));
+  } catch {
+    const store = readTrainingStore();
+    store.tnis = store.tnis.filter((t) => t.id !== id);
+    writeTrainingStore(store);
+  }
 }
 
 export async function listTrainers(): Promise<TrainerProfile[]> {

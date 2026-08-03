@@ -2,9 +2,14 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { Loader2, Sparkles } from "lucide-react";
+import { Loader2, Pencil, Printer, Sparkles, Trash2 } from "lucide-react";
 import { draftJdWithAi } from "@/lib/services/ai";
-import { createJobDescription } from "@/lib/services/training";
+import {
+  createJobDescription,
+  deleteJobDescription,
+  listJobDescriptions,
+  updateJobDescription,
+} from "@/lib/services/training";
 import {
   createJdLifecycle,
   listEmployeesForLifecycle,
@@ -25,7 +30,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import type { Department, Employee, UserRole } from "@/types";
+import type { Department, Employee, JobDescription, UserRole } from "@/types";
+
+function formatDate(value?: string): string {
+  if (!value) return "—";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleDateString("en-GB");
+}
 
 export default function JdPage() {
   const { profile } = useAuth();
@@ -37,6 +49,8 @@ export default function JdPage() {
   const [responsibilities, setResponsibilities] = useState("");
   const [qualifications, setQualifications] = useState("");
   const [skills, setSkills] = useState("");
+  const [records, setRecords] = useState<JobDescription[]>([]);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [effectiveFrom, setEffectiveFrom] = useState(
     new Date().toISOString().slice(0, 10)
   );
@@ -51,13 +65,19 @@ export default function JdPage() {
     };
   }, [profile]);
 
+  async function loadData() {
+    const [emps, depts, jdRows] = await Promise.all([
+      listEmployeesForLifecycle(),
+      listDepartments(),
+      listJobDescriptions(),
+    ]);
+    setEmployees(emps);
+    setDepartments(depts);
+    setRecords(jdRows.sort((a, b) => b.createdAt.localeCompare(a.createdAt)));
+  }
+
   useEffect(() => {
-    void Promise.all([listEmployeesForLifecycle(), listDepartments()]).then(
-      ([emps, depts]) => {
-        setEmployees(emps);
-        setDepartments(depts);
-      }
-    );
+    void loadData();
   }, []);
 
   useEffect(() => {
@@ -113,29 +133,36 @@ export default function JdPage() {
 
     setBusy(true);
     try {
-      const jd = await createJobDescription(
-        {
-          employeeId,
-          departmentId: dept,
-          title: jobTitle.trim(),
-          responsibilities: responsibilities
-            .split("\n")
-            .map((l) => l.replace(/^\d+\.\s*/, "").trim())
-            .filter(Boolean),
-          qualifications: qualifications
-            .split("\n")
-            .map((l) => l.trim())
-            .filter(Boolean),
-          skills: skills
-            .split(",")
-            .map((s) => s.trim())
-            .filter(Boolean),
-          effectiveFrom: new Date(effectiveFrom).toISOString(),
-        },
-        profile.uid
-      );
-      await createJdLifecycle(employeeId, jd.id, actor);
-      toast.success(`Job Description saved (${jd.id})`);
+      const payload = {
+        employeeId,
+        departmentId: dept,
+        title: jobTitle.trim(),
+        responsibilities: responsibilities
+          .split("\n")
+          .map((l) => l.replace(/^\d+\.\s*/, "").trim())
+          .filter(Boolean),
+        qualifications: qualifications
+          .split("\n")
+          .map((l) => l.trim())
+          .filter(Boolean),
+        skills: skills
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean),
+        effectiveFrom: new Date(effectiveFrom).toISOString(),
+      };
+
+      if (editingId) {
+        await updateJobDescription(editingId, payload, profile.uid);
+        toast.success("Job Description updated");
+      } else {
+        const jd = await createJobDescription(payload, profile.uid);
+        await createJdLifecycle(employeeId, jd.id, actor);
+        toast.success(`Job Description saved (${jd.id})`);
+      }
+
+      await loadData();
+      setEditingId(null);
       setJobTitle("");
       setResponsibilities("");
       setQualifications("");
@@ -154,9 +181,77 @@ export default function JdPage() {
     ) || !e.jdId
   );
 
+  function handleEdit(record: JobDescription) {
+    setEditingId(record.id);
+    setEmployeeId(record.employeeId);
+    setDepartmentId(record.departmentId);
+    setJobTitle(record.title);
+    setResponsibilities(record.responsibilities.map((r, i) => `${i + 1}. ${r}`).join("\n"));
+    setQualifications(record.qualifications.join("\n"));
+    setSkills(record.skills.join(", "));
+    setEffectiveFrom(record.effectiveFrom.slice(0, 10));
+  }
+
+  async function handleDelete(id: string) {
+    if (!window.confirm("Delete this Job Description?")) return;
+    setBusy(true);
+    try {
+      await deleteJobDescription(id);
+      toast.success("Job Description deleted");
+      if (editingId === id) setEditingId(null);
+      await loadData();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to delete JD");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function handlePrint(record: JobDescription) {
+    const emp = employees.find((e) => e.id === record.employeeId);
+    const deptName = departmentLabel(departments, record.departmentId) || "—";
+    const printWindow = window.open("", "_blank", "noopener,noreferrer,width=1000,height=900");
+    if (!printWindow) {
+      toast.error("Allow popups to print JD");
+      return;
+    }
+    printWindow.document.write(`
+      <!doctype html>
+      <html>
+        <head>
+          <title>JD - ${record.id}</title>
+          <style>
+            body { font-family: Arial, sans-serif; padding: 24px; color: #111; }
+            h1 { margin-bottom: 8px; }
+            .meta { margin-bottom: 16px; line-height: 1.6; }
+            h3 { margin: 14px 0 8px; }
+            ul { margin-top: 0; }
+          </style>
+        </head>
+        <body>
+          <h1>Job Description</h1>
+          <div class="meta">
+            <div><b>Employee:</b> ${emp ? `${emp.firstName} ${emp.lastName} (${emp.employeeCode})` : record.employeeId}</div>
+            <div><b>Department:</b> ${deptName}</div>
+            <div><b>Title:</b> ${record.title}</div>
+            <div><b>Effective From:</b> ${formatDate(record.effectiveFrom)}</div>
+          </div>
+          <h3>Responsibilities</h3>
+          <ul>${record.responsibilities.map((x) => `<li>${x}</li>`).join("")}</ul>
+          <h3>Qualifications</h3>
+          <ul>${record.qualifications.map((x) => `<li>${x}</li>`).join("")}</ul>
+          <h3>Skills</h3>
+          <ul>${record.skills.map((x) => `<li>${x}</li>`).join("")}</ul>
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
+    printWindow.print();
+  }
+
   return (
     <RequirePermission permission={["jd:read", "jd:write"]}>
-      <div className="mx-auto max-w-2xl space-y-6">
+      <div className="mx-auto max-w-5xl space-y-6">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Job Description</h1>
           <p className="text-muted-foreground">
@@ -167,7 +262,7 @@ export default function JdPage() {
           <CardHeader>
             <div className="flex flex-wrap items-start justify-between gap-2">
               <div>
-                <CardTitle>Create / update JD</CardTitle>
+                <CardTitle>{editingId ? "Edit JD" : "Create / update JD"}</CardTitle>
                 <CardDescription>
                   Linked to employee after induction handover
                 </CardDescription>
@@ -266,10 +361,85 @@ export default function JdPage() {
               <Can permission="jd:write">
                 <Button type="submit" disabled={busy}>
                   {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                  Save JD
+                  {editingId ? "Update JD" : "Save JD"}
                 </Button>
               </Can>
+              {editingId && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setEditingId(null);
+                    setJobTitle("");
+                    setResponsibilities("");
+                    setQualifications("");
+                    setSkills("");
+                    setEmployeeId("");
+                  }}
+                >
+                  Cancel edit
+                </Button>
+              )}
             </form>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Saved Job Descriptions</CardTitle>
+            <CardDescription>
+              View, edit, delete and print previously created JD records
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {records.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No JD records yet.</p>
+            ) : (
+              records.map((record) => {
+                const emp = employees.find((e) => e.id === record.employeeId);
+                return (
+                  <div
+                    key={record.id}
+                    className="flex flex-wrap items-start justify-between gap-3 rounded-md border p-3"
+                  >
+                    <div className="space-y-1">
+                      <p className="text-sm font-semibold">{record.title}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {emp
+                          ? `${emp.firstName} ${emp.lastName} · ${emp.employeeCode}`
+                          : record.employeeId}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        Effective: {formatDate(record.effectiveFrom)}
+                      </p>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button type="button" variant="outline" size="sm" onClick={() => handlePrint(record)}>
+                        <Printer className="mr-1 h-3.5 w-3.5" />
+                        Print
+                      </Button>
+                      <Can permission="jd:write">
+                        <Button type="button" variant="outline" size="sm" onClick={() => handleEdit(record)}>
+                          <Pencil className="mr-1 h-3.5 w-3.5" />
+                          Edit
+                        </Button>
+                      </Can>
+                      <Can permission="jd:write">
+                        <Button
+                          type="button"
+                          variant="destructive"
+                          size="sm"
+                          onClick={() => void handleDelete(record.id)}
+                        >
+                          <Trash2 className="mr-1 h-3.5 w-3.5" />
+                          Delete
+                        </Button>
+                      </Can>
+                    </div>
+                  </div>
+                );
+              })
+            )}
           </CardContent>
         </Card>
       </div>
