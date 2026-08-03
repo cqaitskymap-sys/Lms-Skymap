@@ -30,7 +30,7 @@ export const TrainingCertificate = forwardRef<HTMLDivElement, TrainingCertificat
         }
         style={{
           aspectRatio: "1.414 / 1",
-          fontFamily: '"Cormorant Garamond", "Palatino Linotype", Palatino, serif',
+          fontFamily: 'var(--font-cormorant), "Palatino Linotype", Palatino, serif',
           background:
             "linear-gradient(145deg, #faf8f3 0%, #f3efe6 48%, #faf8f3 100%)",
           color: "#0b3d4a",

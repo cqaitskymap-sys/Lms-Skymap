@@ -131,7 +131,7 @@ function normalizeBlueprint(
   draft: Partial<ExamBlueprint>,
   topic: string
 ): ExamBlueprint {
-  let questionCount = clampInt(draft.questionCount, 5, 25, 10);
+  const questionCount = clampInt(draft.questionCount, 5, 25, 10);
   const durationMinutes = clampInt(
     draft.durationMinutes,
     10,

@@ -287,7 +287,7 @@ export async function completeTrainingSession(
   actorId: string
 ): Promise<void> {
   const now = nowISO();
-  let local =
+  const local =
     preferTrainingLocal() ||
     readTrainingStore().sessions.some((s) => s.id === sessionId);
 
