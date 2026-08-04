@@ -25,6 +25,9 @@ export function useExams() {
     setLoading(true);
     try {
       setExams(await listExams());
+    } catch (err) {
+      console.warn("[useExams] refresh failed:", err);
+      setExams([]);
     } finally {
       setLoading(false);
     }
@@ -58,6 +61,10 @@ export function useQuestionBank(filters?: {
       ]);
       setBanks(b);
       setQuestions(q);
+    } catch (err) {
+      console.warn("[useQuestionBank] refresh failed:", err);
+      setBanks([]);
+      setQuestions([]);
     } finally {
       setLoading(false);
     }
@@ -82,6 +89,9 @@ export function useExamLeaderboard(examId: string | undefined) {
     setLoading(true);
     try {
       setEntries(await getLeaderboard(examId));
+    } catch (err) {
+      console.warn("[useExamLeaderboard] refresh failed:", err);
+      setEntries([]);
     } finally {
       setLoading(false);
     }
@@ -106,6 +116,9 @@ export function useExamAnalytics(examId: string | undefined) {
     setLoading(true);
     try {
       setAnalytics(await getExamAnalytics(examId));
+    } catch (err) {
+      console.warn("[useExamAnalytics] refresh failed:", err);
+      setAnalytics(null);
     } finally {
       setLoading(false);
     }

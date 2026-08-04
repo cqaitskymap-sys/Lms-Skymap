@@ -46,9 +46,24 @@ export async function POST(request: NextRequest) {
     }
 
     const decoded = await adminAuth.verifyIdToken(idToken);
-    const sessionCookie = await adminAuth.createSessionCookie(idToken, {
-      expiresIn: SESSION_MAX_AGE_MS,
-    });
+    let sessionCookie: string;
+    try {
+      sessionCookie = await adminAuth.createSessionCookie(idToken, {
+        expiresIn: SESSION_MAX_AGE_MS,
+      });
+    } catch (err) {
+      // Common when client refreshes an ID token long after sign-in —
+      // createSessionCookie requires a recent authentication event.
+      console.warn("[auth/session] createSessionCookie rejected:", err);
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Session cookie requires a recent sign-in. Please sign in again.",
+          code: "session_cookie_requires_recent_signin",
+        },
+        { status: 401 }
+      );
+    }
 
     let role = "employee";
     let email = decoded.email || "";

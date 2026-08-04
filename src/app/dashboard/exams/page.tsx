@@ -79,6 +79,7 @@ function ExamsPageInner() {
           employeeId: profile.employeeId || profile.uid,
           employeeName: profile.displayName,
           inductionAssignmentId: inductionAssignmentId || undefined,
+          actorId: profile.uid,
         });
         setExam(examDoc);
         setAttempt(started);
@@ -113,6 +114,9 @@ function ExamsPageInner() {
       setSaving(true);
       void autoSaveAssessment(attempt.id, answers, profile.uid)
         .then(() => setLastSavedAt(new Date().toISOString()))
+        .catch((err) => {
+          console.warn("[exam] autosave failed:", err);
+        })
         .finally(() => setSaving(false));
     }, interval);
     return () => clearInterval(id);

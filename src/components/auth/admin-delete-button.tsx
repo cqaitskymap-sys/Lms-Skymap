@@ -70,7 +70,12 @@ export function AdminDeleteButton({
         type="button"
         size={size}
         variant={variant}
-        className={cn("text-destructive hover:text-destructive", className)}
+        className={cn(
+          // Ghost/outline: tint icon/label red. Destructive variant already has
+          // light foreground — do not override or text vanishes on red bg.
+          variant !== "destructive" && "text-destructive hover:text-destructive",
+          className
+        )}
         title="Delete (Super Admin)"
         aria-label={label || "Delete"}
         onClick={(e) => {

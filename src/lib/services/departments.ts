@@ -52,9 +52,9 @@ async function authHeaders(): Promise<HeadersInit> {
   };
 }
 
-/** Sync fallback for server-side or static imports — default pharma list. */
+/** Sync fallback — empty outside demo; demo reads localStorage seed. */
 export function getDepartmentsSync(): Department[] {
-  if (typeof window !== "undefined") {
+  if (isDemoMode() && typeof window !== "undefined") {
     return readDemoDepartments();
   }
   return toDefaultDepartments();

@@ -9,6 +9,7 @@ import {
   deleteTNI,
   listJobDescriptions,
   listTNIs,
+  syncLocalTnisToFirebase,
   updateTNI,
 } from "@/lib/services/training";
 import {
@@ -31,6 +32,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { RequirePermission, Can } from "@/components/auth/require-permission";
+import { AdminDeleteButton } from "@/components/auth/admin-delete-button";
 import { printHtml } from "@/lib/print";
 import type {
   Employee,
@@ -104,7 +106,17 @@ export default function TniPage() {
   }
 
   useEffect(() => {
-    void loadData();
+    void (async () => {
+      try {
+        const synced = await syncLocalTnisToFirebase();
+        if (synced > 0) {
+          toast.success(`Synced ${synced} local TNI(s) to Firebase`);
+        }
+      } catch {
+        /* ignore sync toast errors */
+      }
+      await loadData();
+    })();
   }, []);
 
   useEffect(() => {
@@ -477,18 +489,9 @@ export default function TniPage() {
   }
 
   async function handleDelete(id: string) {
-    if (!window.confirm("Delete this TNI?")) return;
-    setBusy(true);
-    try {
-      await deleteTNI(id);
-      toast.success("TNI deleted");
-      if (editingId === id) setEditingId(null);
-      await loadData();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to delete TNI");
-    } finally {
-      setBusy(false);
-    }
+    await deleteTNI(id);
+    if (editingId === id) setEditingId(null);
+    await loadData();
   }
 
   function handlePrintSaved(record: TrainingNeedIdentification) {
@@ -794,17 +797,15 @@ export default function TniPage() {
                           Edit
                         </Button>
                       </Can>
-                      <Can permission="tni:write">
-                        <Button
-                          type="button"
-                          variant="destructive"
-                          size="sm"
-                          onClick={() => void handleDelete(record.id)}
-                        >
-                          <Trash2 className="mr-1 h-3.5 w-3.5" />
-                          Delete
-                        </Button>
-                      </Can>
+                      <AdminDeleteButton
+                        label="Delete"
+                        size="sm"
+                        variant="destructive"
+                        confirmTitle="Delete this TNI?"
+                        confirmDescription="Only Super Admin can delete TNI records. This cannot be undone."
+                        successMessage="TNI deleted"
+                        onDelete={() => handleDelete(record.id)}
+                      />
                     </div>
                   </div>
                 );

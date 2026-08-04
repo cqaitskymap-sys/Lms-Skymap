@@ -8,8 +8,8 @@ import { AdminDeleteButton } from "@/components/auth/admin-delete-button";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { DataToolbar } from "@/components/shared/data-toolbar";
 import { useSopDirectory } from "@/hooks/use-sop";
+import { useDepartments } from "@/hooks/use-departments";
 import { deleteSop } from "@/lib/services/sops";
-import { DEMO_DEPARTMENTS } from "@/lib/demo/data";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -26,6 +26,7 @@ import type { SopStatus } from "@/types";
 
 export default function SopsPage() {
   const { sops, loading, refresh } = useSopDirectory();
+  const { departments } = useDepartments();
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("");
 
@@ -43,7 +44,7 @@ export default function SopsPage() {
 
   const deptLabel = (ids: string[]) =>
     ids
-      .map((id) => DEMO_DEPARTMENTS.find((d) => d.id === id)?.code || id)
+      .map((id) => departments.find((d) => d.id === id)?.code || id)
       .join(", ");
 
   if (loading) return <SopLoading />;

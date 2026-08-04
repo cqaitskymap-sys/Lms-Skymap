@@ -52,49 +52,36 @@ async function loadExam(examId: string): Promise<Exam | null> {
   if (await preferLocalData()) {
     return readAssessmentStore().exams.find((e) => e.id === examId) || null;
   }
-  try {
-    const snap = await getDoc(doc(db, COLLECTIONS.exams, examId));
-    if (snap.exists()) return { id: snap.id, ...snap.data() } as Exam;
-  } catch {
-    /* fall through */
-  }
-  return readAssessmentStore().exams.find((e) => e.id === examId) || null;
+  const snap = await getDoc(doc(db, COLLECTIONS.exams, examId));
+  if (!snap.exists()) return null;
+  return { id: snap.id, ...snap.data() } as Exam;
 }
 
 async function loadBankQuestions(exam: Exam): Promise<Question[]> {
   if (await preferLocalData()) {
     return readAssessmentStore().questions;
   }
-  try {
-    const bankIds = [exam.bankId, ...(exam.bankIds || [])];
-    const all: Question[] = [];
-    for (const bankId of bankIds) {
-      const snap = await getDocs(
-        query(
-          collection(db, COLLECTIONS.questions),
-          where("bankId", "==", bankId),
-          where("isActive", "==", true)
-        )
-      );
-      all.push(...snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Question));
-    }
-    if (all.length) return all;
-  } catch {
-    /* fall through */
+  const bankIds = [exam.bankId, ...(exam.bankIds || [])];
+  const all: Question[] = [];
+  for (const bankId of bankIds) {
+    const snap = await getDocs(
+      query(
+        collection(db, COLLECTIONS.questions),
+        where("bankId", "==", bankId),
+        where("isActive", "==", true)
+      )
+    );
+    all.push(...snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Question));
   }
-  return readAssessmentStore().questions;
+  return all;
 }
 
 export async function listQuestionBanks(): Promise<QuestionBank[]> {
   if (await preferLocalData()) return readAssessmentStore().banks.filter((b) => b.isActive);
-  try {
-    const snap = await getDocs(collection(db, COLLECTIONS.questionBanks));
-    const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }) as QuestionBank);
-    if (rows.length) return rows.filter((b) => b.isActive);
-  } catch {
-    /* fall through */
-  }
-  return readAssessmentStore().banks.filter((b) => b.isActive);
+  const snap = await getDocs(collection(db, COLLECTIONS.questionBanks));
+  return snap.docs
+    .map((d) => ({ id: d.id, ...d.data() }) as QuestionBank)
+    .filter((b) => b.isActive);
 }
 
 export async function listQuestions(filters?: {
@@ -102,18 +89,13 @@ export async function listQuestions(filters?: {
   difficulty?: string;
   type?: string;
 }): Promise<Question[]> {
-  let rows =
-    (await preferLocalData())
-      ? readAssessmentStore().questions
-      : await (async () => {
-          try {
-            const snap = await getDocs(collection(db, COLLECTIONS.questions));
-            const data = snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Question);
-            return data.length ? data : readAssessmentStore().questions;
-          } catch {
-            return readAssessmentStore().questions;
-          }
-        })();
+  let rows: Question[];
+  if (await preferLocalData()) {
+    rows = readAssessmentStore().questions;
+  } else {
+    const snap = await getDocs(collection(db, COLLECTIONS.questions));
+    rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Question);
+  }
 
   if (filters?.bankId) rows = rows.filter((q) => q.bankId === filters.bankId);
   if (filters?.difficulty) rows = rows.filter((q) => q.difficulty === filters.difficulty);
@@ -123,14 +105,10 @@ export async function listQuestions(filters?: {
 
 export async function listExams(): Promise<Exam[]> {
   if (await preferLocalData()) return readAssessmentStore().exams.filter((e) => e.isActive);
-  try {
-    const snap = await getDocs(collection(db, COLLECTIONS.exams));
-    const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Exam);
-    if (rows.length) return rows.filter((e) => e.isActive);
-  } catch {
-    /* fall through */
-  }
-  return readAssessmentStore().exams.filter((e) => e.isActive);
+  const snap = await getDocs(collection(db, COLLECTIONS.exams));
+  return snap.docs
+    .map((d) => ({ id: d.id, ...d.data() }) as Exam)
+    .filter((e) => e.isActive);
 }
 
 export async function getExam(id: string): Promise<Exam | null> {
@@ -172,6 +150,7 @@ export async function startAssessment(params: {
   employeeName?: string;
   assignmentId?: string;
   inductionAssignmentId?: string;
+  actorId?: string;
 }): Promise<AssessmentAttempt> {
   const exam = await loadExam(params.examId);
   if (!exam) throw new Error("Exam not found");
@@ -192,6 +171,7 @@ export async function startAssessment(params: {
   const now = new Date();
   const expiresAt = new Date(now.getTime() + exam.durationMinutes * 60 * 1000);
   const id = generateId("att");
+  const actorId = params.actorId || params.employeeId;
 
   const attemptQuestions = toAttemptQuestions(selected, exam);
 
@@ -209,7 +189,7 @@ export async function startAssessment(params: {
     maxScore: attemptQuestions.reduce((s, q) => s + q.marks, 0),
     createdAt: now.toISOString(),
     updatedAt: now.toISOString(),
-    createdBy: params.employeeId,
+    createdBy: actorId,
     ...(params.employeeName ? { employeeName: params.employeeName } : {}),
     ...(params.assignmentId ? { assignmentId: params.assignmentId } : {}),
     ...(params.inductionAssignmentId
@@ -220,11 +200,19 @@ export async function startAssessment(params: {
   if (await preferLocalData()) {
     pushAttemptLocal(attempt);
   } else {
-    // Store full keys server-side; client getAttempt strips until submit
-    await setDoc(
-      doc(db, COLLECTIONS.assessmentAttempts, id),
-      stripUndefined(attempt)
-    );
+    try {
+      await setDoc(
+        doc(db, COLLECTIONS.assessmentAttempts, id),
+        stripUndefined(attempt)
+      );
+    } catch (err) {
+      console.error("[startAssessment] Firestore write failed:", err);
+      // Keep local copy so the user can still continue offline/demo-style
+      pushAttemptLocal(attempt);
+      throw err instanceof Error
+        ? err
+        : new Error("Missing or insufficient permissions.");
+    }
   }
 
   return {

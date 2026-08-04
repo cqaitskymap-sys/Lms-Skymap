@@ -11,7 +11,6 @@ import {
 } from "react";
 import {
   onAuthStateChanged,
-  onIdTokenChanged,
   signInWithEmailAndPassword,
   signOut as firebaseSignOut,
   type User,
@@ -167,18 +166,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, [demo, user, signOut]);
 
-  // Keep session cookie fresh when ID token refreshes
+  // Keep client ID token warm. Do NOT recreate the httpOnly session cookie on
+  // every refresh — Firebase createSessionCookie requires a recent sign-in and
+  // otherwise returns 401 ("Invalid or expired token").
   useEffect(() => {
     if (demo) return;
-    const unsub = onIdTokenChanged(auth, async (firebaseUser) => {
-      if (!firebaseUser) return;
-      try {
-        const token = await firebaseUser.getIdToken();
-        await establishSession(token);
-      } catch {
-        /* non-blocking */
-      }
-    });
 
     const refresh = setInterval(async () => {
       if (!auth.currentUser) return;
@@ -190,7 +182,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }, SESSION_REFRESH_INTERVAL_MS);
 
     return () => {
-      unsub();
       clearInterval(refresh);
     };
   }, [demo]);
@@ -274,18 +265,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         throw new Error("Account is deactivated. Contact HR or your administrator.");
       }
 
-      const token = await cred.user.getIdToken();
-      const sessionRes = await fetch("/api/auth/session", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-      });
-      const sessionJson = await sessionRes.json().catch(() => ({}));
-      if (sessionRes.status === 403) {
+      const token = await cred.user.getIdToken(true);
+      const sessionResult = await establishSession(token);
+      if (sessionResult.status === 403) {
         await firebaseSignOut(auth);
-        throw new Error(sessionJson.error || "Account is deactivated");
+        throw new Error(sessionResult.error || "Account is deactivated");
       }
 
       const now = new Date().toISOString();

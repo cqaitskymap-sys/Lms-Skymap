@@ -52,6 +52,9 @@ export async function changeUserPassword(params: {
     updatedAt: now,
   });
 
+  // Password change counts as recent auth — refresh server session cookie
+  await refreshServerSession(true);
+
   await logActivity({
     userId: params.userId,
     verb: "password_changed",
@@ -90,14 +93,44 @@ export async function updateUserProfile(params: {
   });
 }
 
-export async function establishSession(idToken: string): Promise<void> {
-  await fetch("/api/auth/session", {
+export async function establishSession(idToken: string): Promise<{
+  ok: boolean;
+  status: number;
+  error?: string;
+}> {
+  const res = await fetch("/api/auth/session", {
     method: "POST",
     headers: {
       Authorization: `Bearer ${idToken}`,
       "Content-Type": "application/json",
     },
   });
+  const data = (await res.json().catch(() => ({}))) as {
+    success?: boolean;
+    error?: string;
+  };
+  return {
+    ok: res.ok && data.success !== false,
+    status: res.status,
+    error: data.error,
+  };
+}
+
+/**
+ * Create/refresh the httpOnly session cookie using a fresh ID token.
+ * Safe to call after login or password change. Ignores expected failures
+ * when Firebase rejects createSessionCookie for non-recent sign-ins.
+ */
+export async function refreshServerSession(force = true): Promise<boolean> {
+  const user = auth.currentUser;
+  if (!user) return false;
+  try {
+    const token = await user.getIdToken(force);
+    const result = await establishSession(token);
+    return result.ok;
+  } catch {
+    return false;
+  }
 }
 
 export async function clearSession(): Promise<void> {

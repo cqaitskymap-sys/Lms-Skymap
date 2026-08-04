@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
 import { useSopDetail } from "@/hooks/use-sop";
-import { DEMO_DEPARTMENTS } from "@/lib/demo/data";
+import { useDepartments } from "@/hooks/use-departments";
 import {
   approveSopVersionFull,
   archiveSopVersion,
@@ -41,6 +41,7 @@ import type { SopVersion, UserRole } from "@/types";
 export default function SopDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const { profile, can } = useAuth();
+  const { departments } = useDepartments();
   const { sop, versions, currentVersion, views, acknowledgements, loading, refresh } =
     useSopDetail(id);
 
@@ -96,7 +97,7 @@ export default function SopDetailPage({ params }: { params: Promise<{ id: string
   }
 
   const deptNames = sop.departmentIds
-    .map((d) => DEMO_DEPARTMENTS.find((x) => x.id === d)?.name || d)
+    .map((d) => departments.find((x) => x.id === d)?.name || d)
     .join(", ");
 
   const run = async (fn: () => Promise<unknown>, ok: string) => {

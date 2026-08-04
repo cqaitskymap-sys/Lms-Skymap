@@ -112,11 +112,7 @@ export async function onboardEmployee(
   }
 
   if (!auth.currentUser) {
-    return onboardLocally(
-      input,
-      actor,
-      "No Firebase Auth session — employee saved; Auth account was not created"
-    );
+    throw new Error("You must be signed in to onboard employees");
   }
 
   const res = await fetch("/api/employees/onboard", {
@@ -127,15 +123,13 @@ export async function onboardEmployee(
 
   const json = await res.json().catch(() => ({} as { success?: boolean; error?: string; data?: OnboardResult }));
 
-  // Admin SDK missing — still create the employee record for HR workflow
   if (
     res.status === 503 ||
     (typeof json.error === "string" && json.error.includes("Admin SDK"))
   ) {
-    return onboardLocally(
-      input,
-      actor,
-      `${json.error || "Admin SDK not configured"} — employee saved; configure Admin credentials to provision Auth accounts.`
+    throw new Error(
+      json.error ||
+        "Firebase Admin SDK is required to onboard employees. Configure Admin credentials."
     );
   }
 
@@ -152,7 +146,7 @@ export async function reissueCredentials(
   credentials: OnboardingCredentials;
   email: OnboardResult["email"];
 }> {
-  if (isDemoMode() || !auth.currentUser) {
+  if (isDemoMode()) {
     const temporaryPassword = localTempPassword();
     return {
       credentials: {
@@ -165,6 +159,10 @@ export async function reissueCredentials(
       },
       email: { sent: false, reason: "Demo / local mode" },
     };
+  }
+
+  if (!auth.currentUser) {
+    throw new Error("You must be signed in to re-issue credentials");
   }
 
   const res = await fetch(`/api/employees/${employeeId}/credentials`, {

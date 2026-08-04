@@ -614,13 +614,31 @@ export async function assignInductionLifecycle(
 
 export async function completeInductionLifecycle(
   employeeId: string,
-  actor: LifecycleActor
+  actor: LifecycleActor,
+  opts?: { requireSignedPaper?: boolean }
 ): Promise<Employee> {
+  const { employee } = await getEmployeeLifecycle(employeeId);
+  if (!employee) throw new Error("Employee not found");
+
+  if (opts?.requireSignedPaper !== false && !employee.inductionSignedPaper?.downloadUrl) {
+    throw new Error(
+      "Upload the signed induction paper (department heads signatures) before marking induction complete"
+    );
+  }
+
   return advanceLifecycle({
     employeeId,
     toStage: "induction_completed",
     actor,
-    description: "Induction completed and assessment passed",
+    description: employee.inductionSignedPaper
+      ? "Induction completed — signed paper uploaded by HR"
+      : "Induction completed and assessment passed",
+    metadata: employee.inductionSignedPaper
+      ? {
+          signedPaper: employee.inductionSignedPaper.fileName,
+          signedPaperUrl: employee.inductionSignedPaper.downloadUrl,
+        }
+      : undefined,
     employeePatch: {
       inductionStatus: "passed",
       inductionCompletedAt: nowISO(),

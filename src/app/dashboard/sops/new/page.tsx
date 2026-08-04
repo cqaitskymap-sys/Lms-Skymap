@@ -8,7 +8,7 @@ import { z } from "zod";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
 import { RequirePermission } from "@/components/auth/require-permission";
-import { DEMO_DEPARTMENTS } from "@/lib/demo/data";
+import { useDepartments } from "@/hooks/use-departments";
 import { useAuth } from "@/contexts/auth-context";
 import { createSopWithFiles, type SopActor } from "@/lib/services/sops";
 import { SopFileDropzone } from "@/components/sops/sop-media-preview";
@@ -36,6 +36,7 @@ type FormValues = z.infer<typeof schema>;
 export default function NewSopPage() {
   const router = useRouter();
   const { profile } = useAuth();
+  const { activeDepartments } = useDepartments();
   const [depts, setDepts] = useState<string[]>([]);
   const [files, setFiles] = useState<File[]>([]);
   const [loading, setLoading] = useState(false);
@@ -166,7 +167,7 @@ export default function NewSopPage() {
               <div className="space-y-2">
                 <Label>Assign departments</Label>
                 <div className="grid gap-2 sm:grid-cols-2">
-                  {DEMO_DEPARTMENTS.map((d) => (
+                  {activeDepartments.map((d) => (
                     <label key={d.id} className="flex items-center gap-2 text-sm">
                       <Checkbox
                         checked={depts.includes(d.id)}
@@ -180,6 +181,11 @@ export default function NewSopPage() {
                     </label>
                   ))}
                 </div>
+                {!activeDepartments.length && (
+                  <p className="text-xs text-muted-foreground">
+                    No departments found. Seed them from the Departments page.
+                  </p>
+                )}
               </div>
 
               <div className="grid gap-4 sm:grid-cols-2">

@@ -67,7 +67,7 @@ export async function assignSopTraining(params: {
 }): Promise<{ assignments: TrainingAssignment[]; session: TrainingSession }> {
   const now = nowISO();
   const assignments: TrainingAssignment[] = [];
-  let local = preferTrainingLocal();
+  const local = preferTrainingLocal();
 
   const session = await createTrainingSession(
     {
@@ -84,11 +84,6 @@ export async function assignSopTraining(params: {
     },
     params.actorId
   );
-
-  // If session landed in local store (Firestore fallback), keep writing locally
-  if (!local && readTrainingStore().sessions.some((s) => s.id === session.id)) {
-    local = true;
-  }
 
   for (const employeeId of params.employeeIds) {
     const id = generateId("ta");
@@ -124,14 +119,7 @@ export async function assignSopTraining(params: {
       if (!exists) store.assignments.push(assignment);
       writeTrainingStore(store);
     } else {
-      try {
-        await setDoc(doc(db, COLLECTIONS.trainingAssignments, id), assignment);
-      } catch {
-        local = true;
-        const store = readTrainingStore();
-        store.assignments.push(assignment);
-        writeTrainingStore(store);
-      }
+      await setDoc(doc(db, COLLECTIONS.trainingAssignments, id), assignment);
     }
 
     await createNotification({
@@ -156,23 +144,10 @@ export async function assignSopTraining(params: {
     );
     writeTrainingStore(store);
   } else {
-    try {
-      await updateDoc(doc(db, COLLECTIONS.trainingSessions, session.id), {
-        attendance: roster,
-        updatedAt: now,
-      });
-    } catch {
-      const store = readTrainingStore();
-      const existing = store.sessions.find((s) => s.id === session.id);
-      if (existing) {
-        store.sessions = store.sessions.map((s) =>
-          s.id === session.id ? { ...s, attendance: roster, updatedAt: now } : s
-        );
-      } else {
-        store.sessions.push({ ...session, attendance: roster });
-      }
-      writeTrainingStore(store);
-    }
+    await updateDoc(doc(db, COLLECTIONS.trainingSessions, session.id), {
+      attendance: roster,
+      updatedAt: now,
+    });
   }
 
   return { assignments, session: { ...session, attendance: roster } };
@@ -204,13 +179,7 @@ export async function createTrainingSession(
     return session;
   }
 
-  try {
-    await setDoc(doc(db, COLLECTIONS.trainingSessions, id), session);
-  } catch {
-    const store = readTrainingStore();
-    store.sessions.push(session);
-    writeTrainingStore(store);
-  }
+  await setDoc(doc(db, COLLECTIONS.trainingSessions, id), session);
   return session;
 }
 
@@ -218,47 +187,33 @@ export async function getTrainingSession(id: string): Promise<TrainingSession | 
   if (preferTrainingLocal()) {
     return readTrainingStore().sessions.find((s) => s.id === id) || null;
   }
-  try {
-    const snap = await getDoc(doc(db, COLLECTIONS.trainingSessions, id));
-    if (!snap.exists()) {
-      return readTrainingStore().sessions.find((s) => s.id === id) || null;
-    }
-    return { id: snap.id, ...snap.data() } as TrainingSession;
-  } catch {
-    return readTrainingStore().sessions.find((s) => s.id === id) || null;
-  }
+  const snap = await getDoc(doc(db, COLLECTIONS.trainingSessions, id));
+  if (!snap.exists()) return null;
+  return { id: snap.id, ...snap.data() } as TrainingSession;
 }
 
 export async function listTrainingSessions(): Promise<TrainingSession[]> {
-  const localRows = [...readTrainingStore().sessions];
   if (preferTrainingLocal()) {
-    return localRows.sort((a, b) => b.scheduledAt.localeCompare(a.scheduledAt));
+    return [...readTrainingStore().sessions].sort((a, b) =>
+      b.scheduledAt.localeCompare(a.scheduledAt)
+    );
   }
-  try {
-    const snap = await getDocs(collection(db, COLLECTIONS.trainingSessions));
-    const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }) as TrainingSession);
-    const byId = new Map<string, TrainingSession>();
-    for (const r of [...rows, ...localRows]) byId.set(r.id, r);
-    return [...byId.values()].sort((a, b) => b.scheduledAt.localeCompare(a.scheduledAt));
-  } catch {
-    return localRows.sort((a, b) => b.scheduledAt.localeCompare(a.scheduledAt));
-  }
+  const snap = await getDocs(collection(db, COLLECTIONS.trainingSessions));
+  return snap.docs
+    .map((d) => ({ id: d.id, ...d.data() }) as TrainingSession)
+    .sort((a, b) => b.scheduledAt.localeCompare(a.scheduledAt));
 }
 
 export async function listTrainingAssignments(): Promise<TrainingAssignment[]> {
-  const localRows = [...readTrainingStore().assignments];
   if (preferTrainingLocal()) {
-    return localRows.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    return [...readTrainingStore().assignments].sort((a, b) =>
+      b.createdAt.localeCompare(a.createdAt)
+    );
   }
-  try {
-    const snap = await getDocs(collection(db, COLLECTIONS.trainingAssignments));
-    const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }) as TrainingAssignment);
-    const byId = new Map<string, TrainingAssignment>();
-    for (const r of [...rows, ...localRows]) byId.set(r.id, r);
-    return [...byId.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  } catch {
-    return localRows.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  }
+  const snap = await getDocs(collection(db, COLLECTIONS.trainingAssignments));
+  return snap.docs
+    .map((d) => ({ id: d.id, ...d.data() }) as TrainingAssignment)
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
 export async function markAttendance(
@@ -267,8 +222,7 @@ export async function markAttendance(
   actorId: string
 ): Promise<void> {
   const now = nowISO();
-  const inLocal = readTrainingStore().sessions.some((s) => s.id === sessionId);
-  if (preferTrainingLocal() || inLocal) {
+  if (preferTrainingLocal()) {
     const store = readTrainingStore();
     store.sessions = store.sessions.map((s) =>
       s.id === sessionId
@@ -388,7 +342,15 @@ export async function getEmployeeAssignments(
     const snap = await getDocs(q);
     return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as TrainingAssignment);
   } catch {
-    return readTrainingStore().assignments.filter((a) => a.employeeId === employeeId);
+    // Fallback without orderBy if composite index is missing
+    const q = query(
+      collection(db, COLLECTIONS.trainingAssignments),
+      where("employeeId", "==", employeeId)
+    );
+    const snap = await getDocs(q);
+    return snap.docs
+      .map((d) => ({ id: d.id, ...d.data() }) as TrainingAssignment)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }
 }
 
@@ -411,38 +373,29 @@ export async function createJobDescription(
     createdBy: actorId,
   };
 
-  // Always keep a local copy so UI list stays reliable even if Firestore lags/fails
-  const store = readTrainingStore();
-  store.jobDescriptions = [jd, ...store.jobDescriptions.filter((j) => j.id !== id)];
-  writeTrainingStore(store);
+  const payload = sanitizeForFirestore(jd);
 
   if (preferTrainingLocal()) {
+    const store = readTrainingStore();
+    store.jobDescriptions = [jd, ...store.jobDescriptions.filter((j) => j.id !== id)];
+    writeTrainingStore(store);
     return jd;
   }
 
-  try {
-    await setDoc(doc(db, COLLECTIONS.jobDescriptions, id), sanitizeForFirestore(jd));
-  } catch {
-    /* local copy already saved */
-  }
+  await setDoc(doc(db, COLLECTIONS.jobDescriptions, id), payload);
   return jd;
 }
 
 export async function listJobDescriptions(): Promise<JobDescription[]> {
-  const localRows = [...readTrainingStore().jobDescriptions];
   if (preferTrainingLocal()) {
-    return localRows.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    return [...readTrainingStore().jobDescriptions].sort((a, b) =>
+      b.createdAt.localeCompare(a.createdAt)
+    );
   }
-  try {
-    const snap = await getDocs(collection(db, COLLECTIONS.jobDescriptions));
-    const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }) as JobDescription);
-    const byId = new Map<string, JobDescription>();
-    // Local last so offline/fallback creates are visible
-    for (const r of [...rows, ...localRows]) byId.set(r.id, r);
-    return [...byId.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  } catch {
-    return localRows.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  }
+  const snap = await getDocs(collection(db, COLLECTIONS.jobDescriptions));
+  return snap.docs
+    .map((d) => ({ id: d.id, ...d.data() }) as JobDescription)
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
 export async function updateJobDescription(
@@ -473,19 +426,13 @@ export async function updateJobDescription(
     await updateDoc(doc(db, COLLECTIONS.jobDescriptions, id), localPayload);
     const snap = await getDoc(doc(db, COLLECTIONS.jobDescriptions, id));
     if (snap.exists()) return { id: snap.id, ...snap.data() } as JobDescription;
-  } catch {
-    const store = readTrainingStore();
-    const existing = store.jobDescriptions.find((j) => j.id === id);
-    if (!existing) throw new Error("Job Description not found");
-    const updated: JobDescription = { ...existing, ...localPayload };
-    store.jobDescriptions = store.jobDescriptions.map((j) => (j.id === id ? updated : j));
-    writeTrainingStore(store);
-    return updated;
+    throw new Error("Job Description not found");
+  } catch (err) {
+    if (err instanceof Error && err.message === "Job Description not found") throw err;
+    throw new Error(
+      err instanceof Error ? err.message : "Failed to update job description in Firebase"
+    );
   }
-
-  const fallback = readTrainingStore().jobDescriptions.find((j) => j.id === id);
-  if (!fallback) throw new Error("Job Description not found");
-  return fallback;
 }
 
 export async function deleteJobDescription(id: string): Promise<void> {
@@ -495,13 +442,7 @@ export async function deleteJobDescription(id: string): Promise<void> {
     writeTrainingStore(store);
     return;
   }
-  try {
-    await deleteDoc(doc(db, COLLECTIONS.jobDescriptions, id));
-  } catch {
-    const store = readTrainingStore();
-    store.jobDescriptions = store.jobDescriptions.filter((j) => j.id !== id);
-    writeTrainingStore(store);
-  }
+  await deleteDoc(doc(db, COLLECTIONS.jobDescriptions, id));
 }
 
 export async function createTNI(
@@ -535,39 +476,57 @@ export async function createTNI(
     createdBy: actorId,
   };
 
-  // Always keep a local copy so Saved TNIs list updates immediately
-  const store = readTrainingStore();
-  store.tnis = [tni, ...store.tnis.filter((t) => t.id !== id)];
-  writeTrainingStore(store);
+  const payload = sanitizeForFirestore(tni);
 
   if (preferTrainingLocal()) {
+    const store = readTrainingStore();
+    store.tnis = [tni, ...store.tnis.filter((t) => t.id !== id)];
+    writeTrainingStore(store);
     return tni;
   }
 
-  try {
-    await setDoc(doc(db, COLLECTIONS.tni, id), sanitizeForFirestore(tni));
-  } catch {
-    /* local copy already saved */
-  }
+  await setDoc(doc(db, COLLECTIONS.tni, id), payload);
   return tni;
 }
 
-export async function listTNIs(): Promise<TrainingNeedIdentification[]> {
+/** Push any local-only TNI records that are missing from Firestore. */
+export async function syncLocalTnisToFirebase(): Promise<number> {
+  if (preferTrainingLocal()) return 0;
   const localRows = [...readTrainingStore().tnis];
-  if (preferTrainingLocal()) {
-    return localRows.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  }
+  if (!localRows.length) return 0;
+
+  let remoteIds = new Set<string>();
   try {
     const snap = await getDocs(collection(db, COLLECTIONS.tni));
-    const rows = snap.docs.map(
-      (d) => ({ id: d.id, ...d.data() }) as TrainingNeedIdentification
-    );
-    const byId = new Map<string, TrainingNeedIdentification>();
-    for (const r of [...rows, ...localRows]) byId.set(r.id, r);
-    return [...byId.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  } catch {
-    return localRows.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    remoteIds = new Set(snap.docs.map((d) => d.id));
+  } catch (err) {
+    console.error("[syncLocalTnisToFirebase] list failed:", err);
+    return 0;
   }
+
+  let synced = 0;
+  for (const tni of localRows) {
+    if (remoteIds.has(tni.id)) continue;
+    try {
+      await setDoc(doc(db, COLLECTIONS.tni, tni.id), sanitizeForFirestore(tni));
+      synced += 1;
+    } catch (err) {
+      console.error(`[syncLocalTnisToFirebase] failed for ${tni.id}:`, err);
+    }
+  }
+  return synced;
+}
+
+export async function listTNIs(): Promise<TrainingNeedIdentification[]> {
+  if (preferTrainingLocal()) {
+    return [...readTrainingStore().tnis].sort((a, b) =>
+      b.createdAt.localeCompare(a.createdAt)
+    );
+  }
+  const snap = await getDocs(collection(db, COLLECTIONS.tni));
+  return snap.docs
+    .map((d) => ({ id: d.id, ...d.data() }) as TrainingNeedIdentification)
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
 export async function updateTNI(
@@ -628,31 +587,23 @@ export async function updateTNI(
 }
 
 export async function deleteTNI(id: string): Promise<void> {
-  const store = readTrainingStore();
-  store.tnis = store.tnis.filter((t) => t.id !== id);
-  writeTrainingStore(store);
-
-  if (preferTrainingLocal()) return;
-
-  try {
-    await deleteDoc(doc(db, COLLECTIONS.tni, id));
-  } catch {
-    /* local already deleted */
+  if (preferTrainingLocal()) {
+    const store = readTrainingStore();
+    store.tnis = store.tnis.filter((t) => t.id !== id);
+    writeTrainingStore(store);
+    return;
   }
+  await deleteDoc(doc(db, COLLECTIONS.tni, id));
 }
 
 export async function listTrainers(): Promise<TrainerProfile[]> {
   if (preferTrainingLocal()) {
     return readTrainingStore().trainers.filter((t) => t.isActive);
   }
-  try {
-    const snap = await getDocs(collection(db, COLLECTIONS.trainers));
-    const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }) as TrainerProfile);
-    if (rows.length) return rows.filter((t) => t.isActive);
-  } catch {
-    /* fall through */
-  }
-  return readTrainingStore().trainers.filter((t) => t.isActive);
+  const snap = await getDocs(collection(db, COLLECTIONS.trainers));
+  return snap.docs
+    .map((d) => ({ id: d.id, ...d.data() }) as TrainerProfile)
+    .filter((t) => t.isActive);
 }
 
 /** Ensure trainer profiles exist for users with role=trainer (demo + first visit). */

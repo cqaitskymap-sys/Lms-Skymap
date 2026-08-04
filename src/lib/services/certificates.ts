@@ -20,11 +20,10 @@ import { db, storage, COLLECTIONS } from "@/lib/firebase/client";
 import type {
   Certificate,
   CertificateVerification,
-  Employee,
 } from "@/types";
 import { generateId, nowISO } from "@/lib/services/helpers";
 import { generateCertificateNumber } from "@/lib/utils";
-import { isDemoMode, DEMO_DEPARTMENTS, DEMO_EMPLOYEES, DEMO_SOPS, DEMO_USERS } from "@/lib/demo/data";
+import { isDemoMode } from "@/lib/demo/data";
 import {
   readCertificateStore,
   upsertCertificateLocal,
@@ -101,13 +100,7 @@ async function storeCertificatePdf(
 }
 
 async function preferLocal(): Promise<boolean> {
-  if (isDemoMode()) return true;
-  try {
-    const snap = await getDocs(query(collection(db, COLLECTIONS.certificates), limit(1)));
-    return false;
-  } catch {
-    return true;
-  }
+  return isDemoMode();
 }
 
 async function hashString(input: string): Promise<string> {
@@ -125,11 +118,9 @@ async function hashString(input: string): Promise<string> {
   return Math.abs(h).toString(16);
 }
 
-function resolveTrainerName(trainerId?: string): string {
+function resolveTrainerName(trainerId?: string, trainerName?: string): string {
+  if (trainerName) return trainerName;
   if (!trainerId) return "Assigned Trainer";
-  for (const u of Object.values(DEMO_USERS)) {
-    if (u.profile.uid === trainerId) return u.profile.displayName;
-  }
   return "Assigned Trainer";
 }
 
@@ -164,23 +155,12 @@ export async function issueTrainingCertificate(
   const id = generateId("cert");
   const certificateNumber = generateCertificateNumber();
 
-  const emp =
-    DEMO_EMPLOYEES.find((e) => e.id === input.employeeId) ||
-    (null as Employee | null);
-  const sop = DEMO_SOPS.find((s) => s.id === input.sopId);
-  const dept = DEMO_DEPARTMENTS.find(
-    (d) => d.id === (input.departmentId || emp?.departmentId)
-  );
-
-  const employeeName =
-    input.employeeName ||
-    (emp ? `${emp.firstName} ${emp.lastName}` : input.employeeId);
-  const employeeCode = input.employeeCode || emp?.employeeCode || input.employeeId;
-  const departmentName = input.departmentName || dept?.name || "—";
-  const sopNumber = input.sopNumber || sop?.sopNumber || "SOP";
-  const sopTitle = input.sopTitle || sop?.title || "Training";
-  const trainerName =
-    input.trainerName || resolveTrainerName(input.trainerId);
+  const employeeName = input.employeeName || input.employeeId;
+  const employeeCode = input.employeeCode || input.employeeId;
+  const departmentName = input.departmentName || "—";
+  const sopNumber = input.sopNumber || "SOP";
+  const sopTitle = input.sopTitle || "Training";
+  const trainerName = resolveTrainerName(input.trainerId, input.trainerName);
 
   const verifyUrl = `${APP_URL}/verify/${encodeURIComponent(certificateNumber)}`;
   const qrCodeImageUrl = await QRCode.toDataURL(verifyUrl, {
@@ -199,7 +179,7 @@ export async function issueTrainingCertificate(
     employeeId: input.employeeId,
     employeeName,
     employeeCode,
-    departmentId: input.departmentId || emp?.departmentId,
+    departmentId: input.departmentId,
     departmentName,
     trainingAssignmentId: input.trainingAssignmentId,
     sopId: input.sopId,
@@ -281,27 +261,17 @@ export async function listCertificates(filters?: {
     return rows.map(normalizeCertificate);
   }
 
-  try {
-    let q = query(collection(db, COLLECTIONS.certificates));
-    if (filters?.employeeId) {
-      q = query(
-        collection(db, COLLECTIONS.certificates),
-        where("employeeId", "==", filters.employeeId)
-      );
-    }
-    const snap = await getDocs(q);
-    const rows = snap.docs.map((d) =>
-      normalizeCertificate({ id: d.id, ...d.data() } as Certificate)
+  let q = query(collection(db, COLLECTIONS.certificates));
+  if (filters?.employeeId) {
+    q = query(
+      collection(db, COLLECTIONS.certificates),
+      where("employeeId", "==", filters.employeeId)
     );
-    if (rows.length) return rows;
-  } catch {
-    /* fall through */
   }
-  return readCertificateStore()
-    .certificates.filter((c) =>
-      filters?.employeeId ? c.employeeId === filters.employeeId : true
-    )
-    .map(normalizeCertificate);
+  const snap = await getDocs(q);
+  return snap.docs.map((d) =>
+    normalizeCertificate({ id: d.id, ...d.data() } as Certificate)
+  );
 }
 
 export async function getCertificate(id: string): Promise<Certificate | null> {
@@ -309,16 +279,9 @@ export async function getCertificate(id: string): Promise<Certificate | null> {
     const found = readCertificateStore().certificates.find((c) => c.id === id);
     return found ? normalizeCertificate(found) : null;
   }
-  try {
-    const snap = await getDoc(doc(db, COLLECTIONS.certificates, id));
-    if (snap.exists()) {
-      return normalizeCertificate({ id: snap.id, ...snap.data() } as Certificate);
-    }
-  } catch {
-    /* fall through */
-  }
-  const found = readCertificateStore().certificates.find((c) => c.id === id);
-  return found ? normalizeCertificate(found) : null;
+  const snap = await getDoc(doc(db, COLLECTIONS.certificates, id));
+  if (!snap.exists()) return null;
+  return normalizeCertificate({ id: snap.id, ...snap.data() } as Certificate);
 }
 
 export async function getCertificateByNumber(
@@ -331,25 +294,16 @@ export async function getCertificateByNumber(
     );
     return found ? normalizeCertificate(found) : null;
   }
-  try {
-    const snap = await getDocs(
-      query(
-        collection(db, COLLECTIONS.certificates),
-        where("certificateNumber", "==", certificateNumber.trim()),
-        limit(1)
-      )
-    );
-    if (!snap.empty) {
-      const d = snap.docs[0];
-      return normalizeCertificate({ id: d.id, ...d.data() } as Certificate);
-    }
-  } catch {
-    /* fall through */
-  }
-  const found = readCertificateStore().certificates.find(
-    (c) => c.certificateNumber.toUpperCase() === normalized
+  const snap = await getDocs(
+    query(
+      collection(db, COLLECTIONS.certificates),
+      where("certificateNumber", "==", certificateNumber.trim()),
+      limit(1)
+    )
   );
-  return found ? normalizeCertificate(found) : null;
+  if (snap.empty) return null;
+  const d = snap.docs[0];
+  return normalizeCertificate({ id: d.id, ...d.data() } as Certificate);
 }
 
 export async function verifyCertificate(

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { Loader2, Pencil, Printer, Sparkles, Trash2 } from "lucide-react";
+import { Loader2, Pencil, Printer, Sparkles } from "lucide-react";
 import { draftJdWithAi } from "@/lib/services/ai";
 import {
   createJobDescription,
@@ -23,6 +23,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { RequirePermission, Can } from "@/components/auth/require-permission";
+import { AdminDeleteButton } from "@/components/auth/admin-delete-button";
 import { printHtml } from "@/lib/print";
 import {
   Select,
@@ -194,18 +195,9 @@ export default function JdPage() {
   }
 
   async function handleDelete(id: string) {
-    if (!window.confirm("Delete this Job Description?")) return;
-    setBusy(true);
-    try {
-      await deleteJobDescription(id);
-      toast.success("Job Description deleted");
-      if (editingId === id) setEditingId(null);
-      await loadData();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to delete JD");
-    } finally {
-      setBusy(false);
-    }
+    await deleteJobDescription(id);
+    if (editingId === id) setEditingId(null);
+    await loadData();
   }
 
   function handlePrint(record: JobDescription) {
@@ -654,17 +646,15 @@ export default function JdPage() {
                           Edit
                         </Button>
                       </Can>
-                      <Can permission="jd:write">
-                        <Button
-                          type="button"
-                          variant="destructive"
-                          size="sm"
-                          onClick={() => void handleDelete(record.id)}
-                        >
-                          <Trash2 className="mr-1 h-3.5 w-3.5" />
-                          Delete
-                        </Button>
-                      </Can>
+                      <AdminDeleteButton
+                        label="Delete"
+                        size="sm"
+                        variant="destructive"
+                        confirmTitle="Delete this Job Description?"
+                        confirmDescription="Only Super Admin can delete JD records. This cannot be undone."
+                        successMessage="Job Description deleted"
+                        onDelete={() => handleDelete(record.id)}
+                      />
                     </div>
                   </div>
                 );

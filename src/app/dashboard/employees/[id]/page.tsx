@@ -1,9 +1,9 @@
 "use client";
 
-import { use, useEffect, useMemo, useState } from "react";
+import { use, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
-import { KeyRound, Loader2, ArrowRight } from "lucide-react";
+import { KeyRound, Loader2, ArrowRight, FileUp, ExternalLink } from "lucide-react";
 import { listDepartments, departmentLabel } from "@/lib/services/departments";
 import { useAuth } from "@/contexts/auth-context";
 import { useEmployeeLifecycle } from "@/hooks/use-employee-lifecycle";
@@ -16,6 +16,7 @@ import {
   verifyEmployee,
   type LifecycleActor,
 } from "@/lib/services/lifecycle";
+import { uploadSignedInductionPaper } from "@/lib/services/induction";
 import { reissueCredentials, type OnboardingCredentials } from "@/lib/services/onboarding";
 import { CredentialsCard } from "@/components/onboarding/credentials-card";
 import { getStageDefinition, nextStage } from "@/lib/lifecycle/stages";
@@ -29,6 +30,7 @@ import { LifecycleApprovals } from "@/components/lifecycle/lifecycle-approvals";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -53,6 +55,8 @@ export default function EmployeeDetailPage({
   const [handoverDept, setHandoverDept] = useState("");
   const [departments, setDepartments] = useState<Department[]>([]);
   const [busy, setBusy] = useState(false);
+  const [uploadingPaper, setUploadingPaper] = useState(false);
+  const paperInputRef = useRef<HTMLInputElement>(null);
   const [credentials, setCredentials] = useState<{
     creds: OnboardingCredentials;
     email: { sent: boolean; reason?: string };
@@ -209,6 +213,22 @@ export default function EmployeeDetailPage({
                 <p className="font-medium">{formatDate(employee.inductionCompletedAt)}</p>
               </div>
               <div>
+                <p className="text-muted-foreground">Signed induction paper</p>
+                {employee.inductionSignedPaper?.downloadUrl ? (
+                  <a
+                    href={employee.inductionSignedPaper.downloadUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1 font-medium text-primary hover:underline"
+                  >
+                    {employee.inductionSignedPaper.fileName}
+                    <ExternalLink className="h-3.5 w-3.5" />
+                  </a>
+                ) : (
+                  <p className="font-medium">Not uploaded</p>
+                )}
+              </div>
+              <div>
                 <p className="text-muted-foreground">Qualified</p>
                 <p className="font-medium">{formatDate(employee.qualifiedAt)}</p>
               </div>
@@ -342,9 +362,91 @@ export default function EmployeeDetailPage({
                 </p>
               )}
 
+              {can("induction:write") &&
+                (stage === "induction_assigned" ||
+                  stage === "hr_verification" ||
+                  Boolean(employee.verifiedAt)) &&
+                stage !== "qualified" && (
+                  <div className="space-y-3 rounded-md border p-3">
+                    <p className="text-sm font-medium">Signed induction paper (HR upload)</p>
+                    <p className="text-xs text-muted-foreground">
+                      Circulate the physical induction form to department heads for signatures,
+                      then upload the signed PDF or scan here. Induction can be marked complete
+                      only after upload.
+                    </p>
+                    {employee.inductionSignedPaper?.downloadUrl ? (
+                      <div className="flex flex-wrap items-center gap-2 text-sm">
+                        <a
+                          href={employee.inductionSignedPaper.downloadUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-1 font-medium text-primary hover:underline"
+                        >
+                          {employee.inductionSignedPaper.fileName}
+                          <ExternalLink className="h-3.5 w-3.5" />
+                        </a>
+                        <span className="text-xs text-muted-foreground">
+                          Uploaded {formatDate(employee.inductionSignedPaper.uploadedAt)}
+                        </span>
+                      </div>
+                    ) : (
+                      <p className="text-sm text-amber-700 dark:text-amber-400">
+                        Signed paper not uploaded yet.
+                      </p>
+                    )}
+                    <Input
+                      ref={paperInputRef}
+                      type="file"
+                      accept="application/pdf,image/png,image/jpeg,image/jpg,image/webp"
+                      className="hidden"
+                      disabled={busy || uploadingPaper}
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (!file) return;
+                        setUploadingPaper(true);
+                        void uploadSignedInductionPaper({
+                          employeeId: employee.id,
+                          file,
+                          actorId: actor.uid,
+                          actorName: actor.name,
+                        })
+                          .then(async () => {
+                            toast.success("Signed induction paper uploaded");
+                            await refresh();
+                          })
+                          .catch((err) => {
+                            toast.error(
+                              err instanceof Error ? err.message : "Upload failed"
+                            );
+                          })
+                          .finally(() => {
+                            setUploadingPaper(false);
+                            if (paperInputRef.current) paperInputRef.current.value = "";
+                          });
+                      }}
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={busy || uploadingPaper}
+                      onClick={() => paperInputRef.current?.click()}
+                    >
+                      {uploadingPaper ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <FileUp className="mr-2 h-4 w-4" />
+                      )}
+                      {employee.inductionSignedPaper
+                        ? "Replace signed paper"
+                        : "Upload signed paper"}
+                    </Button>
+                  </div>
+                )}
+
               {can("induction:write") && stage === "induction_assigned" && (
                 <Button
-                  disabled={busy}
+                  disabled={busy || !employee.inductionSignedPaper?.downloadUrl}
                   variant="secondary"
                   onClick={() =>
                     run(
@@ -353,9 +455,17 @@ export default function EmployeeDetailPage({
                     )
                   }
                 >
+                  {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                   Mark induction completed
                 </Button>
               )}
+              {can("induction:write") &&
+                stage === "induction_assigned" &&
+                !employee.inductionSignedPaper?.downloadUrl && (
+                  <p className="text-xs text-muted-foreground">
+                    Upload the signed induction paper first to enable complete.
+                  </p>
+                )}
 
               {can("employees:handover") && stage === "induction_completed" && (
                 <div className="space-y-3 rounded-md border p-3">

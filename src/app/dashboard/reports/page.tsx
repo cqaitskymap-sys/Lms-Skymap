@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
 import { RequirePermission } from "@/components/auth/require-permission";
 import { ReportFiltersBar } from "@/components/reports/report-filters";
@@ -8,8 +8,19 @@ import { ReportCharts } from "@/components/reports/report-charts";
 import { ReportTable } from "@/components/reports/report-table";
 import { ReportExportMenu } from "@/components/reports/report-export-menu";
 import { Card, CardContent } from "@/components/ui/card";
-import { buildReport, emptyFilters } from "@/lib/reports/build";
-import { REPORT_CATALOG, type ReportFilters, type ReportType } from "@/lib/reports/types";
+import {
+  buildReport,
+  emptyFilters,
+  loadReportSnapshot,
+  type ReportSnapshot,
+} from "@/lib/reports/build";
+import {
+  REPORT_CATALOG,
+  type ReportDataset,
+  type ReportFilters,
+  type ReportType,
+} from "@/lib/reports/types";
+import { Loader2 } from "lucide-react";
 
 const TONE: Record<string, string> = {
   default: "text-foreground",
@@ -21,10 +32,31 @@ const TONE: Record<string, string> = {
 export default function ReportsPage() {
   const [type, setType] = useState<ReportType>("employee_training");
   const [filters, setFilters] = useState<ReportFilters>(emptyFilters);
-  const [tick, setTick] = useState(0);
+  const [snapshot, setSnapshot] = useState<ReportSnapshot | null>(null);
+  const [dataset, setDataset] = useState<ReportDataset | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const refreshSnapshot = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const next = await loadReportSnapshot();
+      setSnapshot(next);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load report data");
+      setSnapshot(null);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
-    const refresh = () => setTick((t) => t + 1);
+    void refreshSnapshot();
+  }, [refreshSnapshot]);
+
+  useEffect(() => {
+    const refresh = () => void refreshSnapshot();
     window.addEventListener("pharma-training-updated", refresh);
     window.addEventListener("pharma-lifecycle-updated", refresh);
     window.addEventListener("pharma-sops-updated", refresh);
@@ -35,12 +67,21 @@ export default function ReportsPage() {
       window.removeEventListener("pharma-sops-updated", refresh);
       window.removeEventListener("pharma-assessments-updated", refresh);
     };
-  }, []);
+  }, [refreshSnapshot]);
 
-  const dataset = useMemo(() => {
-    void tick;
-    return buildReport(type, filters);
-  }, [type, filters, tick]);
+  useEffect(() => {
+    if (!snapshot) {
+      setDataset(null);
+      return;
+    }
+    let cancelled = false;
+    void buildReport(type, filters, snapshot).then((d) => {
+      if (!cancelled) setDataset(d);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [type, filters, snapshot]);
 
   return (
     <RequirePermission permission="reports:read">
@@ -53,7 +94,7 @@ export default function ReportsPage() {
               export
             </p>
           </div>
-          <ReportExportMenu dataset={dataset} />
+          {dataset ? <ReportExportMenu dataset={dataset} /> : null}
         </div>
 
         <div className="flex flex-col gap-6 lg:flex-row">
@@ -78,21 +119,41 @@ export default function ReportsPage() {
           <div className="min-w-0 flex-1 space-y-4">
             <ReportFiltersBar filters={filters} onChange={setFilters} />
 
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-              {dataset.kpis.map((k) => (
-                <Card key={k.label}>
-                  <CardContent className="pt-5">
-                    <p className={cn("text-2xl font-bold tracking-tight", TONE[k.tone || "default"])}>
-                      {k.value}
-                    </p>
-                    <p className="text-sm text-muted-foreground">{k.label}</p>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
+            {loading && (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground py-8">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Loading report data from Firebase…
+              </div>
+            )}
 
-            <ReportCharts dataset={dataset} />
-            <ReportTable dataset={dataset} />
+            {error && !loading && (
+              <p className="text-sm text-destructive py-4">{error}</p>
+            )}
+
+            {!loading && !error && dataset && (
+              <>
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  {dataset.kpis.map((k) => (
+                    <Card key={k.label}>
+                      <CardContent className="pt-5">
+                        <p
+                          className={cn(
+                            "text-2xl font-bold tracking-tight",
+                            TONE[k.tone || "default"]
+                          )}
+                        >
+                          {k.value}
+                        </p>
+                        <p className="text-sm text-muted-foreground">{k.label}</p>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+
+                <ReportCharts dataset={dataset} />
+                <ReportTable dataset={dataset} />
+              </>
+            )}
           </div>
         </div>
       </div>

@@ -1,16 +1,29 @@
 /**
- * Build filtered report datasets from live LMS stores (lifecycle, training, SOPs, assessments).
+ * Build filtered report datasets from Firestore-backed LMS services.
  */
 
-import { DEMO_USERS } from "@/lib/demo/data";
-import { readCertificateStore } from "@/lib/certificates/demo-store";
-import { readAssessmentStore } from "@/lib/assessments/demo-store";
-import { readLifecycleStore } from "@/lib/lifecycle/demo-store";
-import { readSopStore } from "@/lib/sops/demo-store";
-import { readTrainingStore } from "@/lib/training/demo-store";
-import { getDepartmentsSync } from "@/lib/services/departments";
+import { collection, getDocs, limit, orderBy, query } from "firebase/firestore";
+import { db, COLLECTIONS } from "@/lib/firebase/client";
+import { listAuditLogs } from "@/lib/services/audit-logs";
+import { listCertificates } from "@/lib/services/certificates";
+import { listDepartments } from "@/lib/services/departments";
+import { listEmployeesForLifecycle } from "@/lib/services/lifecycle";
+import { listSopsDetailed } from "@/lib/services/sops";
+import {
+  listTrainers,
+  listTrainingAssignments,
+} from "@/lib/services/training";
 import { formatDate } from "@/lib/utils";
-import type { TrainingAssignment } from "@/types";
+import type {
+  AuditLog,
+  Certificate,
+  Department,
+  Employee,
+  ExamResult,
+  SopDocument,
+  TrainerProfile,
+  TrainingAssignment,
+} from "@/types";
 import type {
   ChartPoint,
   ReportDataset,
@@ -21,36 +34,90 @@ import { REPORT_CATALOG } from "@/lib/reports/types";
 
 const TODAY = new Date();
 
+type ReportSnapshot = {
+  employees: Employee[];
+  departments: Department[];
+  sops: SopDocument[];
+  assignments: TrainingAssignment[];
+  trainers: TrainerProfile[];
+  certificates: Certificate[];
+  examResults: ExamResult[];
+  auditLogs: AuditLog[];
+};
+
+let snap: ReportSnapshot | null = null;
+
+function data(): ReportSnapshot {
+  if (!snap) throw new Error("Report snapshot not loaded");
+  return snap;
+}
+
+async function loadExamResults(): Promise<ExamResult[]> {
+  try {
+    const q = query(
+      collection(db, COLLECTIONS.examResults),
+      orderBy("createdAt", "desc"),
+      limit(500)
+    );
+    const docs = await getDocs(q);
+    return docs.docs.map((d) => ({ id: d.id, ...d.data() }) as ExamResult);
+  } catch {
+    const docs = await getDocs(collection(db, COLLECTIONS.examResults));
+    return docs.docs.map((d) => ({ id: d.id, ...d.data() }) as ExamResult);
+  }
+}
+
+export async function loadReportSnapshot(): Promise<ReportSnapshot> {
+  const [
+    employees,
+    departments,
+    sops,
+    assignments,
+    trainers,
+    certificates,
+    examResults,
+    auditLogs,
+  ] = await Promise.all([
+    listEmployeesForLifecycle().catch(() => [] as Employee[]),
+    listDepartments().catch(() => [] as Department[]),
+    listSopsDetailed().catch(() => [] as SopDocument[]),
+    listTrainingAssignments().catch(() => [] as TrainingAssignment[]),
+    listTrainers().catch(() => [] as TrainerProfile[]),
+    listCertificates().catch(() => [] as Certificate[]),
+    loadExamResults().catch(() => [] as ExamResult[]),
+    listAuditLogs(300).catch(() => [] as AuditLog[]),
+  ]);
+
+  return {
+    employees,
+    departments,
+    sops,
+    assignments,
+    trainers,
+    certificates,
+    examResults,
+    auditLogs,
+  };
+}
+
 function allEmployees() {
-  return readLifecycleStore().employees;
+  return data().employees;
 }
 
 function allDepartments() {
-  return getDepartmentsSync();
+  return data().departments;
 }
 
 function allSops() {
-  return readSopStore().sops;
+  return data().sops;
 }
 
 function allAssignments(): TrainingAssignment[] {
-  const fromTraining = readTrainingStore().assignments;
-  const fromSops = readSopStore().trainingAssignments || [];
-  const byId = new Map<string, TrainingAssignment>();
-  for (const a of [...fromSops, ...fromTraining]) byId.set(a.id, a);
-  return [...byId.values()];
+  return data().assignments;
 }
 
 function allAudit() {
-  return readLifecycleStore().events.map((e) => ({
-    id: e.id,
-    timestamp: e.createdAt,
-    actorEmail: e.actorName || e.actorId || "system",
-    action: "update",
-    resourceType: "employee_lifecycle",
-    resourceId: e.employeeId,
-    description: e.description || e.title,
-  }));
+  return data().auditLogs;
 }
 
 function empName(id: string) {
@@ -83,13 +150,8 @@ function sopTitle(id: string) {
 
 function trainerName(id?: string) {
   if (!id) return "—";
-  for (const u of Object.values(DEMO_USERS)) {
-    if (u.profile.uid === id) return u.profile.displayName;
-  }
-  const local = readTrainingStore().trainers.find(
-    (t) => t.id === id || t.userId === id
-  );
-  if (local) return local.userId;
+  const t = data().trainers.find((x) => x.id === id || x.userId === id);
+  if (t) return t.userId || t.id;
   return id;
 }
 
@@ -324,29 +386,28 @@ function buildTrainerPerformance(filters: ReportFilters): ReportDataset {
 }
 
 function buildExamResults(filters: ReportFilters): ReportDataset {
-  let results = readAssessmentStore().results;
+  let results = data().examResults;
   if (!results.length) {
-    // Fallback rows from assignments with scores
     results = allAssignments()
       .filter((a) => a.score != null)
       .map((a, i) => ({
-      id: `res_asg_${i}`,
-      attemptId: `att_asg_${i}`,
-      examId: "exam_from_assignment",
-      examTitle: `${sopLabel(a.sopId)} Assessment`,
-      employeeId: a.employeeId,
-      employeeName: empName(a.employeeId),
-      percentage: a.score!,
-      score: a.score!,
-      maxScore: 100,
-      passed: !!a.passed,
-      certificateEligible: !!a.passed && (a.score || 0) >= 80,
-      timeSpentSeconds: 600 + i * 40,
-      rank: i + 1,
-      createdAt: a.updatedAt,
-      updatedAt: a.updatedAt,
-      createdBy: "system",
-    }));
+        id: `res_asg_${i}`,
+        attemptId: `att_asg_${i}`,
+        examId: "exam_from_assignment",
+        examTitle: `${sopLabel(a.sopId)} Assessment`,
+        employeeId: a.employeeId,
+        employeeName: empName(a.employeeId),
+        percentage: a.score!,
+        score: a.score!,
+        maxScore: 100,
+        passed: !!a.passed,
+        certificateEligible: !!a.passed && (a.score || 0) >= 80,
+        timeSpentSeconds: 600 + i * 40,
+        rank: i + 1,
+        createdAt: a.updatedAt,
+        updatedAt: a.updatedAt,
+        createdBy: "system",
+      }));
   }
 
   const rows = results
@@ -545,7 +606,7 @@ function buildOverdue(filters: ReportFilters): ReportDataset {
 }
 
 function buildUpcomingExpiry(filters: ReportFilters): ReportDataset {
-  const certs = readCertificateStore().certificates.map((c) => ({
+  const certs = data().certificates.map((c) => ({
     type: "Certificate",
     reference: c.certificateNumber,
     subject: c.employeeName,
@@ -636,7 +697,7 @@ function buildUpcomingExpiry(filters: ReportFilters): ReportDataset {
 }
 
 function buildCertificateStatus(filters: ReportFilters): ReportDataset {
-  const rows = readCertificateStore()
+  const rows = data()
     .certificates.filter((c) => inDateRange(c.issuedAt, filters))
     .filter(
       (c) =>
@@ -854,7 +915,7 @@ function buildAuditReport(filters: ReportFilters): ReportDataset {
     .map((a) => ({
       timestamp: formatDate(a.timestamp),
       actor: a.actorEmail,
-      role: "—",
+      role: a.actorRole || "—",
       action: a.action,
       resource: a.resourceType,
       resourceId: a.resourceId,
@@ -897,10 +958,7 @@ function buildAuditReport(filters: ReportFilters): ReportDataset {
   };
 }
 
-export function buildReport(
-  type: ReportType,
-  filters: ReportFilters
-): ReportDataset {
+function buildFromType(type: ReportType, filters: ReportFilters): ReportDataset {
   switch (type) {
     case "employee_training":
       return buildEmployeeTraining(filters);
@@ -929,6 +987,20 @@ export function buildReport(
   }
 }
 
+/** Load Firestore data and build a report dataset. */
+export async function buildReport(
+  type: ReportType,
+  filters: ReportFilters,
+  snapshot?: ReportSnapshot
+): Promise<ReportDataset> {
+  snap = snapshot ?? (await loadReportSnapshot());
+  try {
+    return buildFromType(type, filters);
+  } finally {
+    if (!snapshot) snap = null;
+  }
+}
+
 export function emptyFilters(): ReportFilters {
   return {
     search: "",
@@ -938,4 +1010,4 @@ export function emptyFilters(): ReportFilters {
   };
 }
 
-export type { ChartPoint };
+export type { ChartPoint, ReportSnapshot };

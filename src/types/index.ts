@@ -267,6 +267,11 @@ export interface Employee extends Timestamps {
   lifecycleProgress: number;
   inductionStatus: InductionStatus;
   inductionCompletedAt?: string;
+  /**
+   * Signed physical induction paper (circulated to department heads,
+   * then uploaded by HR into the LMS).
+   */
+  inductionSignedPaper?: InductionSignedPaper;
   handedOverAt?: string;
   handedOverBy?: string;
   verifiedAt?: string;
@@ -332,6 +337,19 @@ export interface InductionDocument {
   mimeType: string;
   uploadedAt: string;
   uploadedBy: string;
+}
+
+/** Scanned induction clearance / signature sheet uploaded by HR */
+export interface InductionSignedPaper {
+  fileName: string;
+  storagePath: string;
+  downloadUrl: string;
+  fileSize: number;
+  mimeType: string;
+  uploadedAt: string;
+  uploadedBy: string;
+  uploadedByName?: string;
+  notes?: string;
 }
 
 export interface InductionAssignment extends Timestamps {

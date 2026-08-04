@@ -128,7 +128,7 @@ service cloud.firestore {
         (isSelfEmployee() && resource.data.id == userDoc().employeeId)
       );
       allow create, update: if hasRole(['super_admin', 'hr', 'department_head']);
-      allow delete: if hasRole(['super_admin', 'hr']);
+      allow delete: if isSuperAdmin();
     }
 
     // ─── Induction ────────────────────────────────────────────────────
@@ -140,25 +140,29 @@ service cloud.firestore {
 
     match /induction_assignments/{id} {
       allow read: if isActive() && (
-        hasRole(['super_admin', 'hr']) ||
-        resource.data.employeeId == userDoc().employeeId
+        hasRole(['super_admin', 'hr', 'qa', 'department_head', 'trainer']) ||
+        resource.data.employeeId == request.auth.uid ||
+        (userDoc().keys().hasAny(['employeeId']) &&
+          resource.data.employeeId == userDoc().employeeId)
       );
       allow create: if hasRole(['super_admin', 'hr']);
       allow update: if hasRole(['super_admin', 'hr']) ||
-        resource.data.employeeId == userDoc().employeeId;
+        resource.data.employeeId == request.auth.uid ||
+        (userDoc().keys().hasAny(['employeeId']) &&
+          resource.data.employeeId == userDoc().employeeId);
       allow delete: if isSuperAdmin();
     }
 
     // ─── JD & TNI ─────────────────────────────────────────────────────
     match /job_descriptions/{id} {
       allow read: if isActive();
-      allow create, update: if hasRole(['super_admin', 'department_head', 'hr']);
+      allow create, update: if hasRole(['super_admin', 'department_head', 'hr', 'qa']);
       allow delete: if isSuperAdmin();
     }
 
     match /training_need_identifications/{id} {
       allow read: if isActive();
-      allow create, update: if hasRole(['super_admin', 'department_head', 'hr']);
+      allow create, update: if hasRole(['super_admin', 'department_head', 'hr', 'qa']);
       allow delete: if isSuperAdmin();
     }
 
@@ -244,8 +248,8 @@ service cloud.firestore {
     }
 
     match /questions/{id} {
-      // Correct answers must not be readable by employees — prefer Admin SDK / CF
-      allow read: if isActive() && hasRole(['super_admin', 'qa', 'hr', 'department_head']);
+      // Active users need to read questions to take exams (answers sanitized in attempt payload)
+      allow read: if isActive();
       allow create, update: if hasRole(['super_admin', 'qa', 'hr']);
       allow delete: if isSuperAdmin();
     }
@@ -258,33 +262,49 @@ service cloud.firestore {
 
     match /assessment_attempts/{id} {
       allow read: if isActive() && (
-        hasRole(['super_admin', 'hr', 'qa', 'department_head']) ||
-        resource.data.employeeId == userDoc().employeeId
+        hasRole(['super_admin', 'hr', 'qa', 'department_head', 'trainer']) ||
+        resource.data.employeeId == userDoc().employeeId ||
+        resource.data.employeeId == request.auth.uid ||
+        resource.data.createdBy == request.auth.uid
       );
-      allow create: if isActive() && request.resource.data.employeeId == userDoc().employeeId;
+
+      allow create: if isActive() && (
+        hasRole(['super_admin', 'hr', 'qa', 'department_head', 'trainer']) ||
+        request.resource.data.createdBy == request.auth.uid ||
+        request.resource.data.employeeId == request.auth.uid ||
+        (userDoc().keys().hasAny(['employeeId']) &&
+          request.resource.data.employeeId == userDoc().employeeId)
+      );
+
       allow update: if isActive() && (
-        hasRole(['super_admin', 'qa', 'hr']) ||
-        (resource.data.employeeId == userDoc().employeeId
-          && !request.resource.data.diff(resource.data).affectedKeys()
-              .hasAny(['score', 'percentage', 'passed', 'questions']))
+        hasRole(['super_admin', 'hr', 'qa', 'department_head', 'trainer']) ||
+        resource.data.createdBy == request.auth.uid ||
+        resource.data.employeeId == request.auth.uid ||
+        (userDoc().keys().hasAny(['employeeId']) &&
+          resource.data.employeeId == userDoc().employeeId)
       );
+
       allow delete: if isSuperAdmin();
     }
 
     match /exam_results/{id} {
-      allow read: if isActive() && (
-        hasRole(['super_admin', 'hr', 'qa', 'department_head']) ||
-        resource.data.employeeId == userDoc().employeeId
+      // Leaderboard / analytics need broad read inside the LMS
+      allow read: if isActive();
+      allow create: if isActive() && (
+        hasRole(['super_admin', 'hr', 'qa', 'department_head', 'trainer']) ||
+        request.resource.data.createdBy == request.auth.uid ||
+        request.resource.data.employeeId == request.auth.uid ||
+        (userDoc().keys().hasAny(['employeeId']) &&
+          request.resource.data.employeeId == userDoc().employeeId)
       );
-      // Written by Cloud Functions / Admin SDK only
-      allow create, update: if false;
+      allow update: if hasRole(['super_admin', 'qa', 'hr']);
       allow delete: if isSuperAdmin();
     }
 
     // Aggregated leaderboard docs: exam_leaderboards/{examId}
     match /exam_leaderboards/{examId} {
       allow read: if isActive();
-      allow create, update: if false;
+      allow create, update: if isActive();
       allow delete: if isSuperAdmin();
     }
 

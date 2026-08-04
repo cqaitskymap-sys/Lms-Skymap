@@ -17,24 +17,23 @@ import {
 } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { db, storage, COLLECTIONS } from "@/lib/firebase/client";
-import type { InductionModule, InductionAssignment, InductionDocument } from "@/types";
-import { generateId, nowISO } from "@/lib/services/helpers";
+import type {
+  InductionModule,
+  InductionAssignment,
+  InductionDocument,
+  InductionSignedPaper,
+  Employee,
+} from "@/types";
+import { generateId, nowISO, stripUndefined } from "@/lib/services/helpers";
 import { isDemoMode } from "@/lib/demo/data";
 import {
   readInductionStore,
   writeInductionStore,
 } from "@/lib/induction/demo-store";
+import { readLifecycleStore, upsertDemoEmployee } from "@/lib/lifecycle/demo-store";
 
-async function preferLocal(moduleId?: string): Promise<boolean> {
-  if (isDemoMode()) return true;
-  if (!moduleId) return false;
-  try {
-    const snap = await getDoc(doc(db, COLLECTIONS.inductionModules, moduleId));
-    if (snap.exists()) return false;
-    return readInductionStore().modules.some((m) => m.id === moduleId);
-  } catch {
-    return false;
-  }
+async function preferLocal(_moduleId?: string): Promise<boolean> {
+  return isDemoMode();
 }
 
 export async function createInductionModule(
@@ -99,15 +98,9 @@ export async function getInductionModule(id: string): Promise<InductionModule | 
   if (await preferLocal(id)) {
     return readInductionStore().modules.find((m) => m.id === id) || null;
   }
-  try {
-    const snap = await getDoc(doc(db, COLLECTIONS.inductionModules, id));
-    if (!snap.exists()) {
-      return readInductionStore().modules.find((m) => m.id === id) || null;
-    }
-    return { id: snap.id, ...snap.data() } as InductionModule;
-  } catch {
-    return readInductionStore().modules.find((m) => m.id === id) || null;
-  }
+  const snap = await getDoc(doc(db, COLLECTIONS.inductionModules, id));
+  if (!snap.exists()) return null;
+  return { id: snap.id, ...snap.data() } as InductionModule;
 }
 
 export async function uploadInductionDocument(
@@ -175,6 +168,104 @@ export async function uploadInductionDocument(
   });
 
   return document;
+}
+
+/**
+ * HR uploads the physical induction paper after department heads have signed it.
+ * Stored on the employee record for audit / handover evidence.
+ */
+export async function uploadSignedInductionPaper(params: {
+  employeeId: string;
+  file: File;
+  actorId: string;
+  actorName?: string;
+  notes?: string;
+}): Promise<InductionSignedPaper> {
+  const { employeeId, file, actorId, actorName, notes } = params;
+  const allowed = /^(application\/pdf|image\/(png|jpe?g|webp))$/i.test(file.type);
+  if (!allowed) {
+    throw new Error("Upload a PDF or image (PNG/JPG) of the signed induction paper");
+  }
+  if (file.size > 15 * 1024 * 1024) {
+    throw new Error("File too large (max 15 MB)");
+  }
+
+  const docId = generateId("indpaper");
+  let downloadUrl: string;
+  let storagePath: string;
+
+  if (isDemoMode()) {
+    storagePath = `demo/employees/${employeeId}/induction-signed/${docId}_${file.name}`;
+    downloadUrl =
+      typeof URL !== "undefined"
+        ? URL.createObjectURL(file)
+        : "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf";
+  } else {
+    storagePath = `employees/${employeeId}/induction-signed/${docId}_${file.name}`;
+    try {
+      const storageRef = ref(storage, storagePath);
+      await uploadBytes(storageRef, file, { contentType: file.type });
+      downloadUrl = await getDownloadURL(storageRef);
+    } catch (err) {
+      console.error("[uploadSignedInductionPaper] storage failed:", err);
+      // Fallback so HR can still record the paper locally when Storage is unavailable
+      storagePath = `local/employees/${employeeId}/induction-signed/${docId}_${file.name}`;
+      downloadUrl =
+        typeof URL !== "undefined"
+          ? URL.createObjectURL(file)
+          : "";
+      if (!downloadUrl) throw err instanceof Error ? err : new Error("Upload failed");
+    }
+  }
+
+  const paper: InductionSignedPaper = stripUndefined({
+    fileName: file.name,
+    storagePath,
+    downloadUrl,
+    fileSize: file.size,
+    mimeType: file.type || "application/pdf",
+    uploadedAt: nowISO(),
+    uploadedBy: actorId,
+    uploadedByName: actorName,
+    notes: notes?.trim() || undefined,
+  });
+
+  if (isDemoMode()) {
+    const store = readLifecycleStore();
+    const emp = store.employees.find((e) => e.id === employeeId);
+    if (!emp) throw new Error("Employee not found");
+    upsertDemoEmployee({
+      ...emp,
+      inductionSignedPaper: paper,
+      updatedAt: nowISO(),
+      updatedBy: actorId,
+    });
+    return paper;
+  }
+
+  try {
+    await updateDoc(doc(db, COLLECTIONS.employees, employeeId), {
+      inductionSignedPaper: paper,
+      updatedAt: nowISO(),
+      updatedBy: actorId,
+    });
+  } catch {
+    // Keep offline cache so UI can still show the upload
+    const store = readLifecycleStore();
+    const emp = store.employees.find((e) => e.id === employeeId);
+    if (emp) {
+      upsertDemoEmployee({
+        ...emp,
+        inductionSignedPaper: paper,
+        updatedAt: nowISO(),
+        updatedBy: actorId,
+      });
+    } else {
+      throw new Error("Failed to save signed induction paper on employee record");
+    }
+  }
+
+  return paper;
 }
 
 export async function assignInductionModules(

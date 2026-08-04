@@ -46,17 +46,9 @@ export interface SopActor {
   employeeId?: string;
 }
 
-/** Prefer local demo store when demo mode is on, or SOP only exists locally. */
-async function preferLocalSopStore(sopId?: string): Promise<boolean> {
-  if (isDemoMode()) return true;
-  if (!sopId) return false;
-  try {
-    const snap = await getDoc(doc(db, COLLECTIONS.sops, sopId));
-    if (snap.exists()) return false;
-    return readSopStore().sops.some((s) => s.id === sopId);
-  } catch {
-    return true;
-  }
+/** Prefer local demo store only when demo mode is on. */
+async function preferLocalSopStore(_sopId?: string): Promise<boolean> {
+  return isDemoMode();
 }
 
 async function uploadAttachment(
