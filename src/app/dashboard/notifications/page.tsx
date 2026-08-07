@@ -1,23 +1,27 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import Link from "next/link";
-import { Loader2 } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { CheckCheck, Loader2 } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
 import {
   getUserNotifications,
+  markAllNotificationsRead,
   markNotificationRead,
 } from "@/lib/services/training";
 import { TRAINING_UPDATED_EVENT } from "@/lib/training/demo-store";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { formatDateTime } from "@/lib/utils";
 import type { Notification } from "@/types";
 
 export default function NotificationsPage() {
   const { profile } = useAuth();
+  const router = useRouter();
   const [items, setItems] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
+  const [markingAll, setMarkingAll] = useState(false);
 
   const refresh = useCallback(async () => {
     if (!profile) {
@@ -44,26 +48,60 @@ export default function NotificationsPage() {
     };
   }, [refresh]);
 
-  const handleOpen = async (n: Notification) => {
-    if (!n.isRead) {
-      try {
-        await markNotificationRead(n.id);
-        setItems((prev) =>
-          prev.map((x) => (x.id === n.id ? { ...x, isRead: true } : x))
-        );
-      } catch {
-        /* non-blocking */
-      }
+  const markRead = async (n: Notification) => {
+    if (n.isRead) return;
+    try {
+      await markNotificationRead(n.id);
+      setItems((prev) =>
+        prev.map((x) => (x.id === n.id ? { ...x, isRead: true } : x))
+      );
+    } catch {
+      /* non-blocking */
     }
   };
 
+  const handleOpen = async (n: Notification) => {
+    await markRead(n);
+    if (n.link) router.push(n.link);
+  };
+
+  const handleMarkAll = async () => {
+    if (!profile) return;
+    setMarkingAll(true);
+    try {
+      await markAllNotificationsRead(profile.uid);
+      setItems((prev) => prev.map((x) => ({ ...x, isRead: true })));
+    } finally {
+      setMarkingAll(false);
+    }
+  };
+
+  const unreadCount = items.filter((n) => !n.isRead).length;
+
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Notifications</h1>
-        <p className="text-muted-foreground">
-          Assignments, assessments, SOP revisions & certificates
-        </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">Notifications</h1>
+          <p className="text-muted-foreground">
+            Assignments, assessments, SOP revisions & certificates
+          </p>
+        </div>
+        {unreadCount > 0 && (
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={markingAll}
+            onClick={() => void handleMarkAll()}
+          >
+            {markingAll ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <CheckCheck className="mr-2 h-4 w-4" />
+            )}
+            Mark all as read
+          </Button>
+        )}
       </div>
 
       {loading ? (
@@ -79,7 +117,11 @@ export default function NotificationsPage() {
       ) : (
         <div className="space-y-3">
           {items.map((n) => (
-            <Card key={n.id} className={!n.isRead ? "border-primary/40" : undefined}>
+            <Card
+              key={n.id}
+              className={!n.isRead ? "border-primary/40" : undefined}
+              onClick={() => void markRead(n)}
+            >
               <CardHeader className="pb-2">
                 <div className="flex items-start justify-between gap-2">
                   <CardTitle className="text-base">{n.title}</CardTitle>
@@ -94,13 +136,16 @@ export default function NotificationsPage() {
                 <div className="mt-2 flex items-center justify-between text-xs text-muted-foreground">
                   <span>{formatDateTime(n.createdAt)}</span>
                   {n.link && (
-                    <Link
-                      href={n.link}
+                    <button
+                      type="button"
                       className="text-primary hover:underline"
-                      onClick={() => void handleOpen(n)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void handleOpen(n);
+                      }}
                     >
                       Open →
-                    </Link>
+                    </button>
                   )}
                 </div>
               </CardContent>

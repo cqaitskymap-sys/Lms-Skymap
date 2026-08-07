@@ -1,6 +1,6 @@
 import { adminAuth, adminDb } from "@/lib/firebase/admin";
 import { COLLECTIONS } from "@/lib/firebase/client";
-import { allocateEmployeeCode } from "@/lib/onboarding/employee-code";
+import { resolveOnboardingEmail } from "@/lib/auth/onboarding-schemas";
 import type { Employee, UserProfile } from "@/types";
 
 function isUserNotFound(err: unknown): boolean {
@@ -21,11 +21,12 @@ export async function ensureEmployeeAuthAccount(
   temporaryPassword: string,
   actorUid: string
 ): Promise<{ uid: string; username: string; employeeCode: string; employee: Employee }> {
-  if (!employee.email) {
-    throw new Error("Employee email is required to provision authentication");
+  if (!employee.employeeCode?.trim()) {
+    throw new Error("Employee code is required before provisioning authentication");
   }
 
-  const employeeCode = employee.employeeCode || (await allocateEmployeeCode());
+  const employeeCode = employee.employeeCode.trim().toUpperCase();
+  const email = resolveOnboardingEmail(employee.email, employeeCode);
   const username = employee.username || employeeCode;
   const displayName = `${employee.firstName} ${employee.lastName}`.trim();
   const now = new Date().toISOString();
@@ -33,7 +34,7 @@ export async function ensureEmployeeAuthAccount(
   let uid: string;
 
   try {
-    const existing = await adminAuth.getUserByEmail(employee.email);
+    const existing = await adminAuth.getUserByEmail(email);
     uid = existing.uid;
 
     const profileSnap = await adminDb.collection(COLLECTIONS.users).doc(uid).get();
@@ -54,7 +55,7 @@ export async function ensureEmployeeAuthAccount(
     }
 
     const created = await adminAuth.createUser({
-      email: employee.email,
+      email,
       password: temporaryPassword,
       displayName,
       emailVerified: false,
@@ -72,7 +73,7 @@ export async function ensureEmployeeAuthAccount(
   const userProfile: UserProfile = {
     id: uid,
     uid,
-    email: employee.email,
+    email,
     username,
     displayName,
     role: "employee",
@@ -94,6 +95,7 @@ export async function ensureEmployeeAuthAccount(
     userId: uid,
     username,
     employeeCode,
+    email,
     accountProvisionedAt: employee.accountProvisionedAt || now,
     onboardingStatus: "pending_first_login",
     updatedAt: now,

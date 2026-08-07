@@ -36,7 +36,7 @@ export function StaffCredentialsCard({
   const copyAll = async () => {
     const block = [
       `Name: ${displayName}`,
-      `Email: ${credentials.email}`,
+      `Staff ID / Username: ${credentials.username}`,
       `Temporary password: ${credentials.temporaryPassword}`,
       `Login: ${credentials.loginUrl}`,
     ].join("\n");
@@ -53,8 +53,8 @@ export function StaffCredentialsCard({
               Login credentials
             </CardTitle>
             <CardDescription>
-              Shown once — share securely with {displayName}. They must change the password on
-              first login.
+              Shown once — share securely with {displayName}. They sign in with staff ID and
+              password, then must change the password on first login.
             </CardDescription>
           </div>
           <Badge variant="outline" className="shrink-0">
@@ -70,15 +70,15 @@ export function StaffCredentialsCard({
 
         <dl className="grid gap-3">
           <div className="rounded-lg border bg-background/80 px-3 py-2">
-            <dt className="text-xs text-muted-foreground">Email / login</dt>
+            <dt className="text-xs text-muted-foreground">Staff ID / Username</dt>
             <dd className="mt-1 flex items-center justify-between gap-2 font-mono text-sm font-semibold">
-              <span className="truncate">{credentials.email}</span>
+              <span className="truncate">{credentials.username}</span>
               <button
                 type="button"
                 className="shrink-0 rounded p-1 text-muted-foreground hover:bg-muted"
-                onClick={() => void copy("Email", credentials.email)}
+                onClick={() => void copy("Username", credentials.username)}
               >
-                {copied === "Email" ? (
+                {copied === "Username" ? (
                   <Check className="h-3.5 w-3.5 text-emerald-600" />
                 ) : (
                   <Copy className="h-3.5 w-3.5" />

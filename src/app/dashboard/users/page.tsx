@@ -17,6 +17,7 @@ import {
 import { RequireRole } from "@/components/auth/require-permission";
 import { StaffCredentialsCard } from "@/components/auth/staff-credentials-card";
 import { StaffUserEditDialog } from "@/components/auth/staff-user-edit-dialog";
+import { ModuleAccessPicker } from "@/components/auth/module-access-picker";
 import { useAuth } from "@/contexts/auth-context";
 import { DEMO_USERS } from "@/lib/demo/data";
 import { useDepartments } from "@/hooks/use-departments";
@@ -26,6 +27,11 @@ import {
   type CreateAdminUserInput,
   type UpdateAdminUserInput,
 } from "@/lib/auth/user-admin-schemas";
+import {
+  defaultAllowedModules,
+  moduleTitle,
+  type AppModule,
+} from "@/lib/rbac/modules";
 import {
   createStaffUser,
   deleteStaffUser,
@@ -115,15 +121,22 @@ export default function UserManagementPage() {
     resolver: zodResolver(createAdminUserSchema),
     defaultValues: {
       displayName: "",
+      username: "",
       email: "",
       phone: "",
       role: "hr",
       departmentId: "",
+      allowedModules: defaultAllowedModules("hr"),
     },
   });
 
   const role = watch("role");
   const departmentId = watch("departmentId");
+  const allowedModules = watch("allowedModules");
+
+  useEffect(() => {
+    setValue("allowedModules", defaultAllowedModules(role), { shouldValidate: true });
+  }, [role, setValue]);
 
   const loadUsers = useCallback(async () => {
     setLoading(true);
@@ -149,10 +162,12 @@ export default function UserManagementPage() {
       setCreated(result);
       reset({
         displayName: "",
+        username: "",
         email: "",
         phone: "",
         role: "hr",
         departmentId: "",
+        allowedModules: defaultAllowedModules("hr"),
       });
       await loadUsers();
       toast.success(`Created ${ROLE_LABELS[data.role]} account for ${data.displayName}`);
@@ -255,7 +270,8 @@ export default function UserManagementPage() {
               Create staff account
             </CardTitle>
             <CardDescription>
-              Provisions Firebase Auth + Firestore profile. Temporary password is shown once.
+              Login credentials are the staff ID and a one-time temporary password. Choose which
+              modules this account can open. Work email is optional.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -269,7 +285,24 @@ export default function UserManagementPage() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="email">Work email</Label>
+                <Label htmlFor="username">Staff ID</Label>
+                <Input
+                  id="username"
+                  placeholder="e.g. HR1001"
+                  autoComplete="off"
+                  className="uppercase"
+                  {...register("username")}
+                />
+                {errors.username && (
+                  <p className="text-xs text-destructive">{errors.username.message}</p>
+                )}
+                <p className="text-xs text-muted-foreground">
+                  Used as the login username (with the temporary password).
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="email">Work email (optional)</Label>
                 <Input
                   id="email"
                   type="email"
@@ -339,6 +372,18 @@ export default function UserManagementPage() {
               )}
 
               <div className="md:col-span-2">
+                <ModuleAccessPicker
+                  role={role}
+                  value={(allowedModules ?? []) as AppModule[]}
+                  onChange={(modules) =>
+                    setValue("allowedModules", modules, { shouldValidate: true })
+                  }
+                  error={errors.allowedModules?.message}
+                  disabled={isSubmitting}
+                />
+              </div>
+
+              <div className="md:col-span-2">
                 <Button type="submit" disabled={isSubmitting}>
                   {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                   Create account
@@ -352,7 +397,7 @@ export default function UserManagementPage() {
           <CardHeader>
             <CardTitle>Staff accounts</CardTitle>
             <CardDescription>
-              Edit role, department, status, reset password, or remove accounts
+              Edit role, module access, department, status, reset password, or remove accounts
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -367,8 +412,10 @@ export default function UserManagementPage() {
                 <TableHeader>
                   <TableRow>
                     <TableHead>Name</TableHead>
+                    <TableHead>Staff ID</TableHead>
                     <TableHead>Email</TableHead>
                     <TableHead>Role</TableHead>
+                    <TableHead>Modules</TableHead>
                     <TableHead>Department</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Created</TableHead>
@@ -383,9 +430,29 @@ export default function UserManagementPage() {
                     return (
                       <TableRow key={user.uid}>
                         <TableCell className="font-medium">{user.displayName}</TableCell>
+                        <TableCell className="font-mono text-xs">
+                          {user.username || "—"}
+                        </TableCell>
                         <TableCell className="font-mono text-xs">{user.email}</TableCell>
                         <TableCell>
                           <Badge variant="secondary">{ROLE_LABELS[user.role]}</Badge>
+                        </TableCell>
+                        <TableCell className="max-w-[180px]">
+                          {user.role === "super_admin" || !user.allowedModules ? (
+                            <span className="text-xs text-muted-foreground">All (role)</span>
+                          ) : (
+                            <span className="line-clamp-2 text-xs text-muted-foreground">
+                              {user.allowedModules
+                                .filter(
+                                  (m) =>
+                                    m !== "dashboard" &&
+                                    m !== "settings" &&
+                                    m !== "notifications"
+                                )
+                                .map((m) => moduleTitle(m as AppModule))
+                                .join(", ") || "Core only"}
+                            </span>
+                          )}
                         </TableCell>
                         <TableCell>
                           {activeDepartments.find((d) => d.id === user.departmentId)?.name || "—"}

@@ -16,8 +16,8 @@ import {
   type OnboardEmployeeInput,
 } from "@/lib/auth/onboarding-schemas";
 import { onboardEmployee, type OnboardResult } from "@/lib/services/onboarding";
-import { listEmployeesForLifecycle } from "@/lib/services/lifecycle";
-import type { Employee, UserRole } from "@/types";
+import { listDepartmentHeads } from "@/lib/services/users";
+import type { UserProfile, UserRole } from "@/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -45,7 +45,7 @@ export default function NewEmployeePage() {
   const { profile } = useAuth();
   const { activeDepartments } = useDepartments();
   const [result, setResult] = useState<OnboardResult | null>(null);
-  const [managers, setManagers] = useState<Employee[]>([]);
+  const [departmentHeads, setDepartmentHeads] = useState<UserProfile[]>([]);
 
   const {
     register,
@@ -56,6 +56,7 @@ export default function NewEmployeePage() {
   } = useForm<OnboardEmployeeInput>({
     resolver: zodResolver(onboardEmployeeSchema),
     defaultValues: {
+      employeeCode: "",
       firstName: "",
       lastName: "",
       email: "",
@@ -76,35 +77,45 @@ export default function NewEmployeePage() {
   const emailCredentials = watch("emailCredentials");
 
   useEffect(() => {
-    void listEmployeesForLifecycle().then(setManagers);
+    void listDepartmentHeads()
+      .then(setDepartmentHeads)
+      .catch(() => setDepartmentHeads([]));
   }, []);
 
-  const managerOptions = useMemo(
-    () =>
-      managers.filter(
-        (e) =>
-          e.status !== "terminated" &&
-          e.status !== "inactive" &&
-          ["handed_over", "active", "qualified", "verified", "induction_complete"].includes(
-            e.status
-          )
-      ),
-    [managers]
-  );
+  const managerOptions = useMemo(() => {
+    if (!departmentId) return [];
+    const dept = activeDepartments.find((d) => d.id === departmentId);
+    return departmentHeads.filter(
+      (h) =>
+        h.departmentId === departmentId ||
+        (dept?.headUserId && (h.uid === dept.headUserId || h.id === dept.headUserId))
+    );
+  }, [departmentHeads, departmentId, activeDepartments]);
+
+  useEffect(() => {
+    if (!reportingManagerId) return;
+    const stillValid = managerOptions.some(
+      (h) => h.uid === reportingManagerId || h.id === reportingManagerId
+    );
+    if (!stillValid) {
+      setValue("reportingManagerId", "");
+      setValue("reportingManagerName", "");
+    }
+  }, [managerOptions, reportingManagerId, setValue]);
 
   const onSubmit = async (data: OnboardEmployeeInput) => {
     if (!profile) return;
     try {
       const dept = activeDepartments.find((d) => d.id === data.departmentId);
-      const manager = managers.find((m) => m.id === data.reportingManagerId);
+      const manager = departmentHeads.find(
+        (m) => m.uid === data.reportingManagerId || m.id === data.reportingManagerId
+      );
 
       const onboarded = await onboardEmployee(
         {
           ...data,
           departmentName: dept?.name,
-          reportingManagerName: manager
-            ? `${manager.firstName} ${manager.lastName}`
-            : data.reportingManagerName,
+          reportingManagerName: manager?.displayName || data.reportingManagerName,
         },
         {
           uid: profile.uid,
@@ -156,7 +167,7 @@ export default function NewEmployeePage() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Employee onboarding</h1>
           <p className="text-muted-foreground">
-            Creates profile, generates EMP code & credentials, and provisions authentication
+            Creates profile & credentials. Enter the employee code assigned by HR.
           </p>
         </div>
 
@@ -167,13 +178,29 @@ export default function NewEmployeePage() {
               New hire details
             </CardTitle>
             <CardDescription>
-              Employee code (EMP000001), username, and temporary password are generated
-              automatically. The hire must change password, update profile, and accept policies on
-              first login.
+              Enter the employee code manually. Username uses the same code; a temporary password is
+              generated automatically. The hire must change password, update profile, and accept
+              policies on first login.
             </CardDescription>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleSubmit(onSubmit)} className="grid gap-4 sm:grid-cols-2" noValidate>
+              <div className="space-y-2 sm:col-span-2">
+                <Label htmlFor="employeeCode">Employee code</Label>
+                <Input
+                  id="employeeCode"
+                  {...register("employeeCode")}
+                  placeholder="e.g. EMP1001"
+                  autoComplete="off"
+                  className="uppercase"
+                />
+                {errors.employeeCode && (
+                  <p className="text-xs text-destructive">{errors.employeeCode.message}</p>
+                )}
+                <p className="text-xs text-muted-foreground">
+                  Assigned by HR — also used as the login username.
+                </p>
+              </div>
               <div className="space-y-2">
                 <Label htmlFor="firstName">Employee name (first)</Label>
                 <Input id="firstName" {...register("firstName")} autoComplete="off" />
@@ -251,7 +278,7 @@ export default function NewEmployeePage() {
               </div>
 
               <div className="space-y-2 sm:col-span-2">
-                <Label htmlFor="email">Email</Label>
+                <Label htmlFor="email">Email (optional)</Label>
                 <Input id="email" type="email" {...register("email")} autoComplete="off" />
                 {errors.email && (
                   <p className="text-xs text-destructive">{errors.email.message}</p>
@@ -273,25 +300,34 @@ export default function NewEmployeePage() {
                   onValueChange={(v) => {
                     const id = v === "none" ? "" : v;
                     setValue("reportingManagerId", id);
-                    const m = managers.find((x) => x.id === id);
-                    setValue(
-                      "reportingManagerName",
-                      m ? `${m.firstName} ${m.lastName}` : ""
-                    );
+                    const m = departmentHeads.find((x) => x.uid === id || x.id === id);
+                    setValue("reportingManagerName", m?.displayName || "");
                   }}
+                  disabled={!departmentId}
                 >
                   <SelectTrigger>
-                    <SelectValue placeholder="Select manager (optional)" />
+                    <SelectValue
+                      placeholder={
+                        departmentId
+                          ? "Select department head (optional)"
+                          : "Select department first"
+                      }
+                    />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">None / assign later</SelectItem>
                     {managerOptions.map((m) => (
-                      <SelectItem key={m.id} value={m.id}>
-                        {m.firstName} {m.lastName} · {m.employeeCode}
+                      <SelectItem key={m.uid || m.id} value={m.uid || m.id}>
+                        {m.displayName}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
+                {departmentId && managerOptions.length === 0 && (
+                  <p className="text-xs text-muted-foreground">
+                    No department head assigned for this department yet.
+                  </p>
+                )}
               </div>
 
               <div className="flex items-start gap-3 rounded-lg border p-3 sm:col-span-2">

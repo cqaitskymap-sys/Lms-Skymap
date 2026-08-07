@@ -94,6 +94,7 @@ export async function POST(
   return NextResponse.json({
     success: true,
     credentials: {
+      username: user.username || user.email,
       email: user.email,
       temporaryPassword,
       loginUrl: origin ? `${origin}/login` : "/login",

@@ -9,6 +9,7 @@ import {
 import { adminAuth, adminDb, isAdminConfigured } from "@/lib/firebase/admin";
 import { COLLECTIONS } from "@/lib/firebase/client";
 import { updateAdminUserSchema } from "@/lib/auth/user-admin-schemas";
+import { normalizeAllowedModules } from "@/lib/rbac/modules";
 import type { UserProfile } from "@/types";
 
 export async function PATCH(
@@ -94,6 +95,14 @@ export async function PATCH(
     updates.departmentId = input.departmentId || undefined;
   }
 
+  const nextRole = input.role ?? before.role;
+  if (input.allowedModules !== undefined || input.role !== undefined) {
+    updates.allowedModules = normalizeAllowedModules(
+      nextRole,
+      input.allowedModules ?? before.allowedModules ?? []
+    );
+  }
+
   await ref.update(updates);
 
   const authUpdates: { disabled?: boolean; displayName?: string } = {};
@@ -103,7 +112,6 @@ export async function PATCH(
     await adminAuth.updateUser(id, authUpdates);
   }
 
-  const nextRole = input.role ?? before.role;
   const nextDept = input.departmentId !== undefined ? input.departmentId || undefined : before.departmentId;
 
   const claims: Record<string, string> = { role: nextRole };
@@ -131,11 +139,13 @@ export async function PATCH(
       role: before.role,
       isActive: before.isActive,
       departmentId: before.departmentId ?? null,
+      allowedModules: before.allowedModules ?? null,
     },
     after: {
       role: after.role,
       isActive: after.isActive,
       departmentId: after.departmentId ?? null,
+      allowedModules: after.allowedModules ?? null,
     },
   });
 

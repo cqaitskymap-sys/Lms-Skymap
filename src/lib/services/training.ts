@@ -31,7 +31,10 @@ import {
   readTrainingStore,
   writeTrainingStore,
 } from "@/lib/training/demo-store";
-import { readLifecycleStore } from "@/lib/lifecycle/demo-store";
+import {
+  readLifecycleStore,
+  writeLifecycleStore,
+} from "@/lib/lifecycle/demo-store";
 import { isDemoMode } from "@/lib/demo/data";
 
 /** Firestore rejects `undefined` field values — strip them before writes. */
@@ -680,56 +683,105 @@ export async function createNotification(params: {
   return notification;
 }
 
-export async function getUserNotifications(userId: string): Promise<Notification[]> {
-  const fromTraining = preferTrainingLocal()
-    ? readTrainingStore().notifications.filter((n) => n.userId === userId)
-    : [];
-
-  const fromLifecycle =
-    typeof window !== "undefined"
-      ? readLifecycleStore().notifications.filter((n) => n.userId === userId)
-      : [];
-
-  if (preferTrainingLocal() || isDemoMode()) {
-    return [...fromTraining, ...fromLifecycle].sort((a, b) =>
-      b.createdAt.localeCompare(a.createdAt)
-    );
+function localNotificationsForUser(userId: string): Notification[] {
+  if (typeof window === "undefined") return [];
+  const fromTraining = readTrainingStore().notifications.filter(
+    (n) => n.userId === userId
+  );
+  const fromLifecycle = readLifecycleStore().notifications.filter(
+    (n) => n.userId === userId
+  );
+  const byId = new Map<string, Notification>();
+  for (const n of [...fromTraining, ...fromLifecycle]) {
+    byId.set(n.id, n);
   }
-
-  try {
-    const q = query(
-      collection(db, COLLECTIONS.notifications),
-      where("userId", "==", userId),
-      orderBy("createdAt", "desc")
-    );
-    const snap = await getDocs(q);
-    const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Notification);
-    if (rows.length) return rows;
-  } catch {
-    /* fall through */
-  }
-
-  return [...fromTraining, ...fromLifecycle].sort((a, b) =>
+  return [...byId.values()].sort((a, b) =>
     b.createdAt.localeCompare(a.createdAt)
   );
 }
 
-export async function markNotificationRead(id: string): Promise<void> {
-  const now = nowISO();
-  if (preferTrainingLocal() || isDemoMode()) {
-    const store = readTrainingStore();
-    store.notifications = store.notifications.map((n) =>
+function markLocalNotificationRead(id: string, now: string): boolean {
+  if (typeof window === "undefined") return false;
+  let found = false;
+
+  const training = readTrainingStore();
+  if (training.notifications.some((n) => n.id === id)) {
+    found = true;
+    training.notifications = training.notifications.map((n) =>
       n.id === id ? { ...n, isRead: true, readAt: now, updatedAt: now } : n
     );
-    writeTrainingStore(store);
-    return;
+    writeTrainingStore(training);
   }
 
-  await updateDoc(doc(db, COLLECTIONS.notifications, id), {
-    isRead: true,
-    readAt: now,
-    updatedAt: now,
-  });
+  const lifecycle = readLifecycleStore();
+  if (lifecycle.notifications.some((n) => n.id === id)) {
+    found = true;
+    lifecycle.notifications = lifecycle.notifications.map((n) =>
+      n.id === id ? { ...n, isRead: true, readAt: now, updatedAt: now } : n
+    );
+    writeLifecycleStore(lifecycle);
+  }
+
+  return found;
+}
+
+export async function getUserNotifications(userId: string): Promise<Notification[]> {
+  const local = localNotificationsForUser(userId);
+
+  const fetchRemote = async (): Promise<Notification[] | null> => {
+    try {
+      const q = query(
+        collection(db, COLLECTIONS.notifications),
+        where("userId", "==", userId),
+        orderBy("createdAt", "desc")
+      );
+      const snap = await getDocs(q);
+      return snap.docs.map((d) => {
+        const data = d.data() as Omit<Notification, "id">;
+        return { ...data, id: d.id } as Notification;
+      });
+    } catch {
+      return null;
+    }
+  };
+
+  if (preferTrainingLocal() || isDemoMode()) {
+    // Merge API/Firestore notifs (e.g. employee onboard) with local demo stores.
+    const remote = await fetchRemote();
+    if (!remote?.length) return local;
+    const byId = new Map<string, Notification>();
+    for (const n of [...remote, ...local]) byId.set(n.id, n);
+    return [...byId.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+
+  const remote = await fetchRemote();
+  return remote ?? local;
+}
+
+export async function markNotificationRead(id: string): Promise<void> {
+  const now = nowISO();
+  const foundLocal = markLocalNotificationRead(id, now);
+
+  if (preferTrainingLocal() || isDemoMode()) {
+    // API-created notifications (e.g. employee onboard) live in Firestore even in demo.
+    if (foundLocal) return;
+  }
+
+  try {
+    await updateDoc(doc(db, COLLECTIONS.notifications, id), {
+      isRead: true,
+      readAt: now,
+      updatedAt: now,
+    });
+  } catch (err) {
+    if (!foundLocal) throw err;
+  }
+}
+
+export async function markAllNotificationsRead(userId: string): Promise<void> {
+  const items = await getUserNotifications(userId);
+  const unread = items.filter((n) => !n.isRead);
+  await Promise.all(unread.map((n) => markNotificationRead(n.id)));
 }
 
 /** Update assignment status after exam (demo + Firebase). */

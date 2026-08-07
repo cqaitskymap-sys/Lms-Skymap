@@ -51,6 +51,8 @@ export default function JdPage() {
   const [responsibilities, setResponsibilities] = useState("");
   const [qualifications, setQualifications] = useState("");
   const [skills, setSkills] = useState("");
+  const [experience, setExperience] = useState("");
+  const [supersedesNo, setSupersedesNo] = useState("");
   const [records, setRecords] = useState<JobDescription[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [effectiveFrom, setEffectiveFrom] = useState(
@@ -151,6 +153,8 @@ export default function JdPage() {
           .split(",")
           .map((s) => s.trim())
           .filter(Boolean),
+        experience: experience.trim(),
+        supersedesNo: supersedesNo.trim(),
         effectiveFrom: new Date(effectiveFrom).toISOString(),
       };
 
@@ -169,6 +173,8 @@ export default function JdPage() {
       setResponsibilities("");
       setQualifications("");
       setSkills("");
+      setExperience("");
+      setSupersedesNo("");
       setEmployeeId("");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to save JD");
@@ -191,6 +197,8 @@ export default function JdPage() {
     setResponsibilities(record.responsibilities.map((r, i) => `${i + 1}. ${r}`).join("\n"));
     setQualifications(record.qualifications.join("\n"));
     setSkills(record.skills.join(", "));
+    setExperience(record.experience || "");
+    setSupersedesNo(record.supersedesNo || "");
     setEffectiveFrom(record.effectiveFrom.slice(0, 10));
   }
 
@@ -214,17 +222,13 @@ export default function JdPage() {
     const effectiveDate = formatDate(record.effectiveFrom);
     const qualification =
       record.qualifications.filter(Boolean).join(", ") || "—";
-    const experience =
-      emp?.employmentType === "intern" || emp?.employmentType === "temporary"
-        ? "Fresher"
-        : emp?.employmentType === "permanent"
-          ? "—"
-          : "—";
+    const experience = record.experience?.trim() || "—";
     const reportingTo =
       record.reportingTo || emp?.reportingManagerName || "—";
     const revisionNo = String(record.version || 1);
     const supersedesNo =
-      record.version && record.version > 1 ? String(record.version - 1) : "—";
+      record.supersedesNo?.trim() ||
+      (record.version && record.version > 1 ? String(record.version - 1) : "—");
     const jdNo = record.id.toUpperCase();
     const logoUrl = `${window.location.origin}/brand/skymap-logo.png`;
 
@@ -565,11 +569,28 @@ export default function JdPage() {
                 />
               </div>
               <div className="space-y-2">
+                <Label>Experience</Label>
+                <Textarea
+                  rows={2}
+                  value={experience}
+                  onChange={(e) => setExperience(e.target.value)}
+                  placeholder="e.g. 2 years in QA / Fresher"
+                />
+              </div>
+              <div className="space-y-2">
                 <Label>Skills (comma separated)</Label>
                 <Textarea
                   rows={2}
                   value={skills}
                   onChange={(e) => setSkills(e.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Supersedes No.</Label>
+                <Input
+                  value={supersedesNo}
+                  onChange={(e) => setSupersedesNo(e.target.value)}
+                  placeholder="e.g. JD-001 / —"
                 />
               </div>
               <div className="space-y-2">
@@ -596,6 +617,8 @@ export default function JdPage() {
                     setResponsibilities("");
                     setQualifications("");
                     setSkills("");
+                    setExperience("");
+                    setSupersedesNo("");
                     setEmployeeId("");
                   }}
                 >

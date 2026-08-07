@@ -8,7 +8,12 @@ import {
 } from "@/lib/rbac/middleware";
 import { adminAuth, adminDb, isAdminConfigured } from "@/lib/firebase/admin";
 import { COLLECTIONS } from "@/lib/firebase/client";
-import { createAdminUserSchema, PROVISIONABLE_ROLES } from "@/lib/auth/user-admin-schemas";
+import {
+  createAdminUserSchema,
+  PROVISIONABLE_ROLES,
+  resolveStaffAuthEmail,
+} from "@/lib/auth/user-admin-schemas";
+import { normalizeAllowedModules } from "@/lib/rbac/modules";
 import { generateTemporaryPassword } from "@/lib/onboarding/temp-password";
 import type { UserProfile } from "@/types";
 
@@ -84,13 +89,28 @@ export async function POST(request: NextRequest) {
   }
 
   const input = parsed.data;
+  const username = input.username;
+  const email = resolveStaffAuthEmail(input.email, username);
+  const allowedModules = normalizeAllowedModules(input.role, input.allowedModules);
   const now = new Date().toISOString();
   const ip = request.headers.get("x-forwarded-for") || undefined;
   const ua = request.headers.get("user-agent") || undefined;
 
+  const existingByUsername = await adminDb
+    .collection(COLLECTIONS.users)
+    .where("username", "==", username)
+    .limit(1)
+    .get();
+  if (!existingByUsername.empty) {
+    return NextResponse.json(
+      { success: false, error: "A user with this staff ID already exists" },
+      { status: 409 }
+    );
+  }
+
   const existingUserSnap = await adminDb
     .collection(COLLECTIONS.users)
-    .where("email", "==", input.email)
+    .where("email", "==", email)
     .limit(1)
     .get();
   if (!existingUserSnap.empty) {
@@ -101,10 +121,10 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const existingAuth = await adminAuth.getUserByEmail(input.email);
+    const existingAuth = await adminAuth.getUserByEmail(email);
     if (existingAuth) {
       return NextResponse.json(
-        { success: false, error: "An authentication account already exists for this email" },
+        { success: false, error: "An authentication account already exists for this login" },
         { status: 409 }
       );
     }
@@ -117,7 +137,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const created = await adminAuth.createUser({
-      email: input.email,
+      email,
       password: temporaryPassword,
       displayName: input.displayName,
       emailVerified: false,
@@ -141,9 +161,11 @@ export async function POST(request: NextRequest) {
   const userProfile: UserProfile = {
     id: uid,
     uid,
-    email: input.email,
+    email,
+    username,
     displayName: input.displayName,
     role: input.role,
+    allowedModules,
     ...(input.phone ? { phone: input.phone } : {}),
     ...(input.departmentId ? { departmentId: input.departmentId } : {}),
     isActive: true,
@@ -169,8 +191,14 @@ export async function POST(request: NextRequest) {
     action: "create",
     resourceType: "user",
     resourceId: uid,
-    description: `Provisioned ${input.role} account for ${input.displayName} (${input.email})`,
-    after: { role: input.role, email: input.email, departmentId: input.departmentId || null },
+    description: `Provisioned ${input.role} account for ${input.displayName} (${username})`,
+    after: {
+      role: input.role,
+      username,
+      email,
+      departmentId: input.departmentId || null,
+      allowedModules,
+    },
     ipAddress: ip,
     userAgent: ua,
   });
@@ -181,7 +209,8 @@ export async function POST(request: NextRequest) {
     success: true,
     user: userProfile,
     credentials: {
-      email: input.email,
+      username,
+      email,
       temporaryPassword,
       loginUrl: origin ? `${origin}/login` : "/login",
       oneTime: true,

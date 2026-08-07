@@ -165,13 +165,19 @@ export interface UserProfile extends Timestamps {
   id: string;
   uid: string;
   email: string;
-  /** Login username — equals employee code when provisioned by HR */
+  /** Login username — staff ID or employee code used at sign-in */
   username?: string;
   displayName: string;
   role: UserRole;
   roleId?: string;
   employeeId?: string;
   departmentId?: string;
+  /**
+   * Sidebar modules this user may open.
+   * Undefined = legacy full role access. Empty/partial = restricted to listed modules
+   * (Dashboard / Settings / Notifications are always enforced on write).
+   */
+  allowedModules?: string[];
   photoURL?: string;
   phone?: string;
   isActive: boolean;
@@ -375,6 +381,8 @@ export interface JobDescription extends Timestamps {
   responsibilities: string[];
   qualifications: string[];
   skills: string[];
+  experience?: string;
+  supersedesNo?: string;
   reportingTo?: string;
   status: "draft" | "approved" | "obsolete";
   approvedBy?: string;

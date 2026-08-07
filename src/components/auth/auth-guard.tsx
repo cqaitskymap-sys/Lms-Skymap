@@ -9,6 +9,7 @@ import {
   ROLE_DASHBOARD_ROUTES,
 } from "@/lib/rbac/permissions";
 import { matchRouteRule } from "@/lib/auth/route-permissions";
+import { canAccessPath } from "@/lib/rbac/modules";
 import { needsFirstLoginOnboarding } from "@/lib/services/onboarding";
 import { Loader2 } from "lucide-react";
 
@@ -24,6 +25,10 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
     if (profile.isActive === false) return { ok: false as const, reason: "inactive" };
 
     if (onOnboardingPath) return { ok: true as const };
+
+    if (!canAccessPath(role, profile.allowedModules, pathname)) {
+      return { ok: false as const, reason: "forbidden" };
+    }
 
     const rule = matchRouteRule(pathname);
     if (!rule) return { ok: true as const };

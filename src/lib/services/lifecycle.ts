@@ -396,6 +396,8 @@ export async function advanceLifecycle(params: {
   if (!employee) throw new Error("Employee not found");
 
   const def = getStageDefinition(params.toStage);
+  const alreadyAtStage = employee.lifecycleStage === params.toStage;
+
   const patch: Partial<Employee> = {
     lifecycleStage: params.toStage,
     lifecycleProgress: getProgressForStage(params.toStage),
@@ -413,6 +415,12 @@ export async function advanceLifecycle(params: {
   }
 
   await patchEmployee(params.employeeId, patch);
+
+  // Re-entering the same stage (e.g. TNI create + Advance) should update
+  // employee fields without duplicating events/notifications.
+  if (alreadyAtStage) {
+    return { ...employee, ...patch } as Employee;
+  }
 
   await recordStageEvent({
     employeeId: params.employeeId,
@@ -437,9 +445,10 @@ export async function advanceLifecycle(params: {
   };
   await writeEvent(currentEvent);
 
-  const targetUser = employee.userId || params.actor.uid;
+  // Admin-facing inbox: always notify the actor. Employee-facing alerts for
+  // assignments/exams are created separately via createNotification.
   await notifyUser({
-    userId: targetUser,
+    userId: params.actor.uid,
     type: "system",
     title: `Lifecycle: ${def.label}`,
     message: params.description || def.description,

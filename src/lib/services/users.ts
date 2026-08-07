@@ -2,7 +2,7 @@
  * Super Admin — staff user provisioning & directory.
  */
 
-import { auth } from "@/lib/firebase/client";
+import { auth, db, COLLECTIONS } from "@/lib/firebase/client";
 import {
   isDemoMode,
   DEMO_USERS,
@@ -13,10 +13,15 @@ import {
   findDemoAdminUserByUid,
 } from "@/lib/demo/data";
 import type { CreateAdminUserInput, UpdateAdminUserInput } from "@/lib/auth/user-admin-schemas";
+import { resolveStaffAuthEmail } from "@/lib/auth/user-admin-schemas";
+import { normalizeAllowedModules } from "@/lib/rbac/modules";
 import type { UserProfile } from "@/types";
 import { generateId } from "@/lib/utils";
+import { collection, getDocs, query, where } from "firebase/firestore";
 
 export interface StaffCredentials {
+  /** Login ID shown on the credentials card / used at sign-in */
+  username: string;
   email: string;
   temporaryPassword: string;
   loginUrl: string;
@@ -72,14 +77,34 @@ export async function listStaffUsers(): Promise<UserProfile[]> {
   return json.users as UserProfile[];
 }
 
+/** Active department-head users (readable by HR via Firestore; not Super-Admin-only API). */
+export async function listDepartmentHeads(): Promise<UserProfile[]> {
+  if (isDemoMode()) {
+    return demoStaffUsers()
+      .filter((p) => p.role === "department_head" && p.isActive)
+      .sort((a, b) => a.displayName.localeCompare(b.displayName));
+  }
+
+  const q = query(
+    collection(db, COLLECTIONS.users),
+    where("role", "==", "department_head")
+  );
+  const snap = await getDocs(q);
+  return snap.docs
+    .map((d) => ({ id: d.id, ...d.data() } as UserProfile))
+    .filter((p) => p.isActive !== false)
+    .sort((a, b) => (a.displayName || "").localeCompare(b.displayName || ""));
+}
+
 export async function createStaffUser(
   input: CreateAdminUserInput
 ): Promise<CreateStaffUserResult> {
   if (isDemoMode()) {
-    const normalized = input.email.toLowerCase();
+    const username = input.username;
+    const email = resolveStaffAuthEmail(input.email, username);
     const merged = { ...DEMO_USERS, ...getDemoAdminUsers() };
-    if (merged[normalized]) {
-      throw new Error("A user with this email already exists");
+    if (merged[email] || Object.values(merged).some((e) => e.profile.username === username)) {
+      throw new Error("A user with this staff ID or email already exists");
     }
 
     const temporaryPassword = localTempPassword();
@@ -89,9 +114,11 @@ export async function createStaffUser(
     const profile: UserProfile = {
       id: uid,
       uid,
-      email: normalized,
+      email,
+      username,
       displayName: input.displayName,
       role: input.role,
+      allowedModules: normalizeAllowedModules(input.role, input.allowedModules),
       ...(input.phone ? { phone: input.phone } : {}),
       ...(input.departmentId ? { departmentId: input.departmentId } : {}),
       isActive: true,
@@ -101,12 +128,13 @@ export async function createStaffUser(
       createdBy: "super_admin",
     };
 
-    saveDemoAdminUser(normalized, { password: temporaryPassword, profile });
+    saveDemoAdminUser(email, { password: temporaryPassword, profile });
 
     return {
       user: profile,
       credentials: {
-        email: normalized,
+        username,
+        email,
         temporaryPassword,
         loginUrl: `${typeof window !== "undefined" ? window.location.origin : ""}/login`,
         oneTime: true,
@@ -144,6 +172,7 @@ export async function updateStaffUser(
 
     const [email, data] = entry;
     const now = new Date().toISOString();
+    const nextRole = input.role ?? data.profile.role;
     const updated: UserProfile = {
       ...data.profile,
       ...(input.displayName !== undefined ? { displayName: input.displayName } : {}),
@@ -152,6 +181,14 @@ export async function updateStaffUser(
       ...(input.role !== undefined ? { role: input.role } : {}),
       ...(input.departmentId !== undefined
         ? { departmentId: input.departmentId || undefined }
+        : {}),
+      ...(input.allowedModules !== undefined || input.role !== undefined
+        ? {
+            allowedModules: normalizeAllowedModules(
+              nextRole,
+              input.allowedModules ?? data.profile.allowedModules ?? []
+            ),
+          }
         : {}),
       updatedAt: now,
     };
@@ -189,6 +226,7 @@ export async function resetStaffPassword(userId: string): Promise<StaffCredentia
     updateDemoAdminUser(email, { password: temporaryPassword, profile: data.profile });
 
     return {
+      username: data.profile.username || data.profile.email,
       email: data.profile.email,
       temporaryPassword,
       loginUrl: `${typeof window !== "undefined" ? window.location.origin : ""}/login`,

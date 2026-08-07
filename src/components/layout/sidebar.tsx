@@ -23,136 +23,40 @@ import {
   Target,
   Calendar,
   X,
+  type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/auth-context";
 import type { UserRole } from "@/types";
+import {
+  APP_MODULE_DEFS,
+  canAccessModule,
+  type AppModule,
+} from "@/lib/rbac/modules";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
 
-interface NavItem {
-  title: string;
-  href: string;
-  icon: React.ComponentType<{ className?: string }>;
-  roles: UserRole[];
-}
-
-const NAV_ITEMS: NavItem[] = [
-  {
-    title: "Dashboard",
-    href: "/dashboard",
-    icon: LayoutDashboard,
-    roles: ["super_admin", "hr", "qa", "department_head", "trainer", "employee"],
-  },
-  {
-    title: "Employees",
-    href: "/dashboard/employees",
-    icon: Users,
-    roles: ["super_admin", "hr", "department_head", "qa"],
-  },
-  {
-    title: "Onboard employee",
-    href: "/dashboard/employees/new",
-    icon: UserPlus,
-    roles: ["super_admin", "hr"],
-  },
-  {
-    title: "Induction",
-    href: "/dashboard/induction",
-    icon: GraduationCap,
-    roles: ["super_admin", "hr", "employee"],
-  },
-  {
-    title: "Departments",
-    href: "/dashboard/departments",
-    icon: Building2,
-    roles: ["super_admin", "hr", "qa"],
-  },
-  {
-    title: "Job Descriptions",
-    href: "/dashboard/jd",
-    icon: Briefcase,
-    roles: ["super_admin", "department_head", "employee", "hr"],
-  },
-  {
-    title: "TNI",
-    href: "/dashboard/tni",
-    icon: Target,
-    roles: ["super_admin", "department_head", "hr"],
-  },
-  {
-    title: "SOPs",
-    href: "/dashboard/sops",
-    icon: FileText,
-    roles: ["super_admin", "qa", "department_head", "trainer", "employee"],
-  },
-  {
-    title: "Trainers",
-    href: "/dashboard/trainers",
-    icon: UserCog,
-    roles: ["super_admin", "department_head", "hr", "qa"],
-  },
-  {
-    title: "Training",
-    href: "/dashboard/training",
-    icon: Calendar,
-    roles: ["super_admin", "department_head", "trainer", "employee", "hr", "qa"],
-  },
-  {
-    title: "Training Matrix",
-    href: "/dashboard/matrix",
-    icon: ClipboardList,
-    roles: ["super_admin", "qa", "department_head", "hr"],
-  },
-  {
-    title: "Question Bank",
-    href: "/dashboard/questions",
-    icon: HelpCircle,
-    roles: ["super_admin", "qa", "hr"],
-  },
-  {
-    title: "Assessments",
-    href: "/dashboard/exams",
-    icon: BookOpen,
-    roles: ["super_admin", "qa", "hr", "employee"],
-  },
-  {
-    title: "Certificates",
-    href: "/dashboard/certificates",
-    icon: Award,
-    roles: ["super_admin", "hr", "qa", "department_head", "employee", "trainer"],
-  },
-  {
-    title: "Reports",
-    href: "/dashboard/reports",
-    icon: BarChart3,
-    roles: ["super_admin", "hr", "qa", "department_head"],
-  },
-  {
-    title: "Notifications",
-    href: "/dashboard/notifications",
-    icon: Bell,
-    roles: ["super_admin", "hr", "qa", "department_head", "trainer", "employee"],
-  },
-  {
-    title: "Audit Trail",
-    href: "/dashboard/audit",
-    icon: Shield,
-    roles: ["super_admin", "hr", "qa"],
-  },
-  {
-    title: "User Management",
-    href: "/dashboard/users",
-    icon: ShieldCheck,
-    roles: ["super_admin"],
-  },
-  {
-    title: "Settings",
-    href: "/dashboard/settings",
-    icon: Settings,
-    roles: ["super_admin", "hr", "qa", "department_head", "trainer", "employee"],
-  },
-];
+const MODULE_ICONS: Record<AppModule, LucideIcon> = {
+  dashboard: LayoutDashboard,
+  employees: Users,
+  employees_new: UserPlus,
+  induction: GraduationCap,
+  departments: Building2,
+  jd: Briefcase,
+  tni: Target,
+  sops: FileText,
+  trainers: UserCog,
+  training: Calendar,
+  matrix: ClipboardList,
+  questions: HelpCircle,
+  exams: BookOpen,
+  certificates: Award,
+  reports: BarChart3,
+  notifications: Bell,
+  audit: Shield,
+  users: ShieldCheck,
+  settings: Settings,
+};
 
 interface SidebarProps {
   open?: boolean;
@@ -161,14 +65,19 @@ interface SidebarProps {
 
 export function Sidebar({ open, onClose }: SidebarProps) {
   const pathname = usePathname();
-  const { role, user } = useAuth();
+  const { role, user, profile } = useAuth();
 
-  // Avoid privilege flash: while role loads, show minimal nav only
   const effectiveRole: UserRole | null = role ?? null;
   const items = effectiveRole
-    ? NAV_ITEMS.filter((item) => item.roles.includes(effectiveRole))
+    ? APP_MODULE_DEFS.filter(
+        (item) =>
+          item.roles.includes(effectiveRole) &&
+          canAccessModule(effectiveRole, profile?.allowedModules, item.id)
+      )
     : user
-      ? NAV_ITEMS.filter((item) => item.href === "/dashboard" || item.href === "/dashboard/settings")
+      ? APP_MODULE_DEFS.filter(
+          (item) => item.id === "dashboard" || item.id === "settings"
+        )
       : [];
 
   const content = (
@@ -199,11 +108,15 @@ export function Sidebar({ open, onClose }: SidebarProps) {
                   pathname.startsWith("/dashboard/department") ||
                   pathname.startsWith("/dashboard/trainer") ||
                   pathname.startsWith("/dashboard/employee")
-                : pathname === item.href || pathname.startsWith(`${item.href}/`);
-            const Icon = item.icon;
+                : pathname === item.href ||
+                  (item.id === "employees"
+                    ? pathname.startsWith(`${item.href}/`) &&
+                      !pathname.startsWith("/dashboard/employees/new")
+                    : pathname.startsWith(`${item.href}/`));
+            const Icon = MODULE_ICONS[item.id];
             return (
               <Link
-                key={item.href}
+                key={item.id}
                 href={item.href}
                 onClick={onClose}
                 className={cn(

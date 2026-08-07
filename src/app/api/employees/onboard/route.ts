@@ -9,8 +9,10 @@ import { hasPermission } from "@/lib/rbac/permissions";
 import { adminAuth, adminDb, isAdminConfigured } from "@/lib/firebase/admin";
 import { COLLECTIONS } from "@/lib/firebase/client";
 import { generateId } from "@/lib/utils";
-import { onboardEmployeeSchema } from "@/lib/auth/onboarding-schemas";
-import { allocateEmployeeCode } from "@/lib/onboarding/employee-code";
+import {
+  onboardEmployeeSchema,
+  resolveOnboardingEmail,
+} from "@/lib/auth/onboarding-schemas";
 import { generateTemporaryPassword } from "@/lib/onboarding/temp-password";
 import { sendOnboardingCredentialsEmail } from "@/lib/onboarding/email";
 import { getProgressForStage, getStageDefinition } from "@/lib/lifecycle/stages";
@@ -65,10 +67,13 @@ export async function POST(request: NextRequest) {
   const ip = request.headers.get("x-forwarded-for") || undefined;
   const ua = request.headers.get("user-agent") || undefined;
 
-  // Uniqueness: email
+  const employeeCode = input.employeeCode;
+  const email = resolveOnboardingEmail(input.email, employeeCode);
+
+  // Uniqueness: email (only when a real work email was provided, or derived address)
   const emailSnap = await adminDb
     .collection(COLLECTIONS.employees)
-    .where("email", "==", input.email)
+    .where("email", "==", email)
     .limit(1)
     .get();
   if (!emailSnap.empty) {
@@ -78,9 +83,22 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // Uniqueness: employee code (HR-provided)
+  const codeSnap = await adminDb
+    .collection(COLLECTIONS.employees)
+    .where("employeeCode", "==", input.employeeCode)
+    .limit(1)
+    .get();
+  if (!codeSnap.empty) {
+    return NextResponse.json(
+      { success: false, error: "An employee with this employee code already exists" },
+      { status: 409 }
+    );
+  }
+
   let authUser: { uid: string } | null = null;
   try {
-    const existingAuth = await adminAuth.getUserByEmail(input.email);
+    const existingAuth = await adminAuth.getUserByEmail(email);
     if (existingAuth) {
       return NextResponse.json(
         { success: false, error: "An authentication account already exists for this email" },
@@ -91,7 +109,6 @@ export async function POST(request: NextRequest) {
     /* getUserByEmail throws if not found — expected */
   }
 
-  const employeeCode = await allocateEmployeeCode();
   const username = employeeCode;
   const temporaryPassword = generateTemporaryPassword();
   const employeeId = generateId("emp");
@@ -99,7 +116,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const created = await adminAuth.createUser({
-      email: input.email,
+      email,
       password: temporaryPassword,
       displayName,
       emailVerified: false,
@@ -130,7 +147,7 @@ export async function POST(request: NextRequest) {
     employeeCode,
     username,
     userId: authUser!.uid,
-    email: input.email,
+    email,
     firstName: input.firstName,
     lastName: input.lastName,
     phone: input.mobile,
@@ -156,7 +173,7 @@ export async function POST(request: NextRequest) {
   const userProfile: UserProfile = {
     id: authUser!.uid,
     uid: authUser!.uid,
-    email: input.email,
+    email,
     username,
     displayName,
     role: "employee",
@@ -243,7 +260,7 @@ export async function POST(request: NextRequest) {
     summary: `Provisioned Auth account for ${employeeCode}`,
     resourceType: "employee",
     resourceId: employeeId,
-    metadata: { username, email: input.email },
+    metadata: { username, email },
     createdAt: now,
   });
 
@@ -279,7 +296,7 @@ export async function POST(request: NextRequest) {
       employeeCode,
       username,
       temporaryPassword,
-      email: input.email,
+      email,
       loginUrl,
       designation: input.designation,
       departmentName: input.departmentName,
@@ -317,7 +334,7 @@ export async function POST(request: NextRequest) {
     after: {
       employeeCode,
       username,
-      email: input.email,
+      email,
       employmentType: input.employmentType,
       departmentId: input.departmentId,
       userId: authUser!.uid,
@@ -335,7 +352,7 @@ export async function POST(request: NextRequest) {
         credentials: {
           username,
           employeeCode,
-          email: input.email,
+          email,
           temporaryPassword,
           loginUrl,
           /** Shown once — never stored */

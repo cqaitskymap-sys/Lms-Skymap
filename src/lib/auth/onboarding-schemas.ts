@@ -11,6 +11,17 @@ export const EMPLOYMENT_TYPES = [
 export const employmentTypeSchema = z.enum(EMPLOYMENT_TYPES);
 
 export const onboardEmployeeSchema = z.object({
+  /** Org employee code — entered by HR (also used as login username) */
+  employeeCode: z
+    .string()
+    .trim()
+    .min(1, "Employee code is required")
+    .max(30, "Employee code is too long")
+    .regex(
+      /^[A-Za-z0-9][A-Za-z0-9_-]*$/,
+      "Use letters, numbers, hyphens, or underscores only"
+    )
+    .transform((v) => v.toUpperCase()),
   firstName: z
     .string()
     .trim()
@@ -21,7 +32,13 @@ export const onboardEmployeeSchema = z.object({
     .trim()
     .min(1, "Last name is required")
     .max(60, "Last name is too long"),
-  email: z.string().trim().email("Enter a valid work email").transform((v) => v.toLowerCase()),
+  email: z
+    .string()
+    .trim()
+    .transform((v) => v.toLowerCase())
+    .refine((v) => v === "" || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v), {
+      message: "Enter a valid work email",
+    }),
   mobile: z
     .string()
     .trim()
@@ -72,3 +89,13 @@ export const resolveLoginSchema = z.object({
 export type OnboardEmployeeInput = z.infer<typeof onboardEmployeeSchema>;
 export type CompleteOnboardingProfileInput = z.infer<typeof completeOnboardingProfileSchema>;
 export type AcceptPoliciesInput = z.infer<typeof acceptPoliciesSchema>;
+
+/**
+ * Firebase Auth requires an email. When HR leaves work email blank,
+ * derive a stable login address from the employee code.
+ */
+export function resolveOnboardingEmail(email: string | undefined, employeeCode: string): string {
+  const trimmed = email?.trim();
+  if (trimmed) return trimmed.toLowerCase();
+  return `${employeeCode.trim().toLowerCase()}@pharma.local`;
+}

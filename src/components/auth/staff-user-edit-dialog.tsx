@@ -5,11 +5,18 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Loader2 } from "lucide-react";
 import { useDepartments } from "@/hooks/use-departments";
+import { ModuleAccessPicker } from "@/components/auth/module-access-picker";
 import {
   PROVISIONABLE_ROLES,
   updateAdminUserSchema,
   type UpdateAdminUserInput,
 } from "@/lib/auth/user-admin-schemas";
+import {
+  defaultAllowedModules,
+  normalizeAllowedModules,
+  selectableModulesForRole,
+  type AppModule,
+} from "@/lib/rbac/modules";
 import type { UserProfile } from "@/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -64,18 +71,37 @@ export function StaffUserEditDialog({
 
   const role = watch("role");
   const departmentId = watch("departmentId");
+  const allowedModules = watch("allowedModules");
 
   useEffect(() => {
     if (!user || !open) return;
+    const nextRole = PROVISIONABLE_ROLES.includes(user.role as (typeof PROVISIONABLE_ROLES)[number])
+      ? (user.role as UpdateAdminUserInput["role"])
+      : "hr";
     reset({
       displayName: user.displayName,
       phone: user.phone || "",
-      role: PROVISIONABLE_ROLES.includes(user.role as (typeof PROVISIONABLE_ROLES)[number])
-        ? (user.role as UpdateAdminUserInput["role"])
-        : "hr",
+      role: nextRole,
       departmentId: user.departmentId || "",
+      allowedModules: user.allowedModules
+        ? normalizeAllowedModules(nextRole!, user.allowedModules)
+        : defaultAllowedModules(nextRole!),
     });
   }, [user, open, reset]);
+
+  const onRoleChange = (v: UpdateAdminUserInput["role"]) => {
+    if (!v) return;
+    setValue("role", v, { shouldValidate: true });
+    const optionalIds = new Set(selectableModulesForRole(v).map((m) => m.id));
+    const currentOptional = (allowedModules ?? []).filter((id) => optionalIds.has(id as AppModule));
+    setValue(
+      "allowedModules",
+      currentOptional.length > 0
+        ? normalizeAllowedModules(v, currentOptional)
+        : defaultAllowedModules(v),
+      { shouldValidate: true }
+    );
+  };
 
   const onSubmit = async (data: UpdateAdminUserInput) => {
     if (!user) return;
@@ -85,11 +111,11 @@ export function StaffUserEditDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
+      <DialogContent className="max-h-[90vh] max-w-lg overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Edit staff account</DialogTitle>
           <DialogDescription>
-            Update profile for {user?.displayName}. Email cannot be changed here.
+            Update profile and module access for {user?.displayName}. Email cannot be changed here.
           </DialogDescription>
         </DialogHeader>
 
@@ -117,12 +143,7 @@ export function StaffUserEditDialog({
 
           <div className="space-y-2">
             <Label>Role</Label>
-            <Select
-              value={role}
-              onValueChange={(v) =>
-                setValue("role", v as UpdateAdminUserInput["role"], { shouldValidate: true })
-              }
-            >
+            <Select value={role} onValueChange={(v) => onRoleChange(v as UpdateAdminUserInput["role"])}>
               <SelectTrigger>
                 <SelectValue placeholder="Select role" />
               </SelectTrigger>
@@ -161,6 +182,18 @@ export function StaffUserEditDialog({
                 <p className="text-xs text-destructive">{errors.departmentId.message}</p>
               )}
             </div>
+          )}
+
+          {role && (
+            <ModuleAccessPicker
+              role={role}
+              value={(allowedModules ?? []) as AppModule[]}
+              onChange={(modules) =>
+                setValue("allowedModules", modules, { shouldValidate: true })
+              }
+              error={errors.allowedModules?.message}
+              disabled={isSubmitting}
+            />
           )}
 
           <DialogFooter>

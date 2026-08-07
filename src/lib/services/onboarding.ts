@@ -6,8 +6,9 @@ import { auth } from "@/lib/firebase/client";
 import { isDemoMode, DEMO_DEPARTMENTS } from "@/lib/demo/data";
 import { createEmployeeWithLifecycle, type LifecycleActor } from "@/lib/services/lifecycle";
 import type { OnboardEmployeeInput } from "@/lib/auth/onboarding-schemas";
+import { resolveOnboardingEmail } from "@/lib/auth/onboarding-schemas";
 import type { Employee, EmploymentType } from "@/types";
-import { formatEmployeeCode } from "@/lib/utils";
+import { readLifecycleStore } from "@/lib/lifecycle/demo-store";
 
 export interface OnboardingCredentials {
   username: string;
@@ -34,15 +35,6 @@ async function authHeaders(): Promise<HeadersInit> {
   };
 }
 
-/** Sequential EMP codes stored in localStorage when Admin/API path is unavailable */
-function nextLocalEmployeeCode(): string {
-  const key = "pharma_lms_emp_seq";
-  const current = Number(localStorage.getItem(key) || "0");
-  const next = current + 1;
-  localStorage.setItem(key, String(next));
-  return formatEmployeeCode(next);
-}
-
 function localTempPassword(): string {
   const part = Math.random().toString(36).slice(2, 8);
   return `Temp@${part}A1!`;
@@ -53,7 +45,16 @@ async function onboardLocally(
   actor: LifecycleActor,
   emailReason: string
 ): Promise<OnboardResult> {
-  const employeeCode = nextLocalEmployeeCode();
+  const employeeCode = input.employeeCode;
+  const email = resolveOnboardingEmail(input.email, employeeCode);
+  const existing = readLifecycleStore().employees;
+  if (existing.some((e) => e.employeeCode.toUpperCase() === employeeCode)) {
+    throw new Error("An employee with this employee code already exists");
+  }
+  if (existing.some((e) => e.email.toLowerCase() === email)) {
+    throw new Error("An employee with this email already exists");
+  }
+
   const temporaryPassword = localTempPassword();
   const dept = DEMO_DEPARTMENTS.find((d) => d.id === input.departmentId);
 
@@ -61,7 +62,7 @@ async function onboardLocally(
     {
       employeeCode,
       username: employeeCode,
-      email: input.email,
+      email,
       firstName: input.firstName,
       lastName: input.lastName,
       phone: input.mobile,
@@ -90,7 +91,7 @@ async function onboardLocally(
     credentials: {
       username: employeeCode,
       employeeCode,
-      email: input.email,
+      email,
       temporaryPassword,
       loginUrl: `${typeof window !== "undefined" ? window.location.origin : ""}/login`,
       oneTime: true,
