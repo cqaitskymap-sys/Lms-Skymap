@@ -101,6 +101,8 @@ export default function UserManagementPage() {
   const { profile, isDemo } = useAuth();
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
   const [created, setCreated] = useState<CreateStaffUserResult | null>(null);
   const [resetCredentials, setResetCredentials] = useState<{
     credentials: StaffCredentials;
@@ -134,17 +136,17 @@ export default function UserManagementPage() {
   const departmentId = watch("departmentId");
   const allowedModules = watch("allowedModules");
 
-  useEffect(() => {
-    setValue("allowedModules", defaultAllowedModules(role), { shouldValidate: true });
-  }, [role, setValue]);
-
   const loadUsers = useCallback(async () => {
     setLoading(true);
+    setError(null);
     try {
       const list = await listStaffUsers();
       setUsers(list);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to load users");
+      const message = err instanceof Error ? err.message : "Failed to load users";
+      setError(message);
+      setUsers([]);
+      toast.error(message);
     } finally {
       setLoading(false);
     }
@@ -154,7 +156,22 @@ export default function UserManagementPage() {
     void loadUsers();
   }, [loadUsers]);
 
+  useEffect(() => {
+    setValue("allowedModules", defaultAllowedModules(role), { shouldValidate: true });
+    if (role !== "department_head" && role !== "trainer") {
+      setValue("departmentId", "", { shouldValidate: true });
+    }
+  }, [role, setValue]);
+
   const { activeDepartments } = useDepartments();
+
+  const filteredUsers = users.filter((u) => {
+    if (!search.trim()) return true;
+    const q = search.trim().toLowerCase();
+    return `${u.displayName} ${u.username || ""} ${u.email} ${u.role} ${u.departmentId || ""}`
+      .toLowerCase()
+      .includes(q);
+  });
 
   const onSubmit = async (data: CreateAdminUserInput) => {
     try {
@@ -400,13 +417,30 @@ export default function UserManagementPage() {
               Edit role, module access, department, status, reset password, or remove accounts
             </CardDescription>
           </CardHeader>
-          <CardContent>
+          <CardContent className="space-y-4">
+            <Input
+              placeholder="Search by name, staff ID, email, role…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="max-w-md"
+            />
             {loading ? (
               <div className="flex justify-center py-12">
                 <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
               </div>
-            ) : users.length === 0 ? (
-              <p className="py-8 text-center text-sm text-muted-foreground">No staff accounts yet.</p>
+            ) : error ? (
+              <div className="space-y-3 py-10 text-center">
+                <p className="text-sm text-destructive">{error}</p>
+                <Button variant="outline" size="sm" onClick={() => void loadUsers()}>
+                  Retry
+                </Button>
+              </div>
+            ) : filteredUsers.length === 0 ? (
+              <p className="py-8 text-center text-sm text-muted-foreground">
+                {users.length === 0
+                  ? "No staff accounts yet."
+                  : "No accounts match your search."}
+              </p>
             ) : (
               <Table>
                 <TableHeader>
@@ -423,7 +457,7 @@ export default function UserManagementPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {users.map((user) => {
+                  {filteredUsers.map((user) => {
                     const manageable = canManageUser(user, isDemo);
                     const busy = actionUserId === user.uid;
 

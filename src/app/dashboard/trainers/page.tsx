@@ -20,22 +20,33 @@ export default function TrainersPage() {
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     void (async () => {
       setLoading(true);
+      setError(null);
       try {
-        const staffPromise = canReadUsers
-          ? listStaffUsers().catch(() => [] as UserProfile[])
-          : Promise.resolve([] as UserProfile[]);
-        const [staff, depts] = await Promise.all([staffPromise, listDepartments()]);
-        setUsers(staff);
+        const [depts, existing] = await Promise.all([
+          listDepartments(),
+          listTrainers(),
+        ]);
         setDepartments(depts);
-        const profiles =
-          staff.length > 0
-            ? await ensureTrainerProfilesFromUsers(staff)
-            : await listTrainers();
+
+        let profiles = existing;
+        if (canReadUsers) {
+          const staff = await listStaffUsers().catch(() => [] as UserProfile[]);
+          setUsers(staff);
+          if (staff.length > 0) {
+            profiles = await ensureTrainerProfilesFromUsers(staff);
+          }
+        } else {
+          setUsers([]);
+        }
         setTrainers(profiles);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to load trainers");
+        setTrainers([]);
       } finally {
         setLoading(false);
       }
@@ -49,31 +60,50 @@ export default function TrainersPage() {
           <h1 className="text-2xl font-bold tracking-tight">Trainers</h1>
           <p className="text-muted-foreground">Qualified trainers for SOP sessions</p>
         </div>
-        <Button asChild size="sm">
-          <Link href="/dashboard/users">
-            <UserPlus className="mr-1.5 h-4 w-4" /> Add trainer user
-          </Link>
-        </Button>
+        {canReadUsers && (
+          <Button asChild size="sm">
+            <Link href="/dashboard/users">
+              <UserPlus className="mr-1.5 h-4 w-4" /> Add trainer user
+            </Link>
+          </Button>
+        )}
       </div>
 
       {loading ? (
         <div className="flex items-center gap-2 text-muted-foreground">
           <Loader2 className="h-4 w-4 animate-spin" /> Loading trainers…
         </div>
+      ) : error ? (
+        <Card>
+          <CardContent className="py-8 text-center">
+            <p className="text-sm text-destructive">{error}</p>
+          </CardContent>
+        </Card>
       ) : trainers.length === 0 ? (
         <Card>
           <CardContent className="flex flex-col items-center gap-3 py-12 text-center">
             <p className="font-medium">No trainer users yet</p>
             <p className="max-w-md text-sm text-muted-foreground">
-              User Management mein naya user banao aur role <strong>Trainer</strong> select
-              karo. Phir yahan auto dikhega — Training assign karte waqt use select kar sakte
-              ho.
+              {canReadUsers ? (
+                <>
+                  Create a new user in User Management and set the role to{" "}
+                  <strong>Trainer</strong>. They will appear here automatically — you can select
+                  them when assigning training.
+                </>
+              ) : (
+                <>
+                  Trainers are provisioned from user accounts with the Trainer role. Contact HR or
+                  an administrator to add trainer users.
+                </>
+              )}
             </p>
-            <Button asChild className="mt-1">
-              <Link href="/dashboard/users">
-                <UserPlus className="mr-1.5 h-4 w-4" /> Go to User Management
-              </Link>
-            </Button>
+            {canReadUsers && (
+              <Button asChild className="mt-1">
+                <Link href="/dashboard/users">
+                  <UserPlus className="mr-1.5 h-4 w-4" /> Go to User Management
+                </Link>
+              </Button>
+            )}
           </CardContent>
         </Card>
       ) : (

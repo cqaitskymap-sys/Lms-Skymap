@@ -10,13 +10,15 @@ import type { Department } from "@/types";
 export function useDepartments() {
   const [departments, setDepartments] = useState<Department[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
+    setError(null);
     try {
-      const list = await listDepartments();
-      setDepartments(list);
-    } catch {
+      setDepartments(await listDepartments());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load departments");
       setDepartments([]);
     } finally {
       setLoading(false);
@@ -35,5 +37,5 @@ export function useDepartments() {
 
   const activeDepartments = departments.filter((d) => d.isActive);
 
-  return { departments, activeDepartments, loading, refresh };
+  return { departments, activeDepartments, loading, error, refresh };
 }

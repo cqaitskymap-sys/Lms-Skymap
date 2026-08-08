@@ -51,9 +51,11 @@ export function useQuestionBank(filters?: {
   const [banks, setBanks] = useState<QuestionBank[]>([]);
   const [questions, setQuestions] = useState<Question[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
+    setError(null);
     try {
       const [b, q] = await Promise.all([
         listQuestionBanks(),
@@ -63,6 +65,7 @@ export function useQuestionBank(filters?: {
       setQuestions(q);
     } catch (err) {
       console.warn("[useQuestionBank] refresh failed:", err);
+      setError(err instanceof Error ? err.message : "Failed to load question bank");
       setBanks([]);
       setQuestions([]);
     } finally {
@@ -77,7 +80,7 @@ export function useQuestionBank(filters?: {
     return () => window.removeEventListener(ASSESSMENT_UPDATED_EVENT, onUpdate);
   }, [refresh]);
 
-  return { banks, questions, loading, refresh };
+  return { banks, questions, loading, error, refresh };
 }
 
 export function useExamLeaderboard(examId: string | undefined) {

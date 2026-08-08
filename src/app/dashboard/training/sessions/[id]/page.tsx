@@ -5,9 +5,12 @@ import Link from "next/link";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
+import { hasPermission } from "@/lib/rbac/permissions";
 import { listEmployeesForLifecycle, markTrainingLifecycle } from "@/lib/services/lifecycle";
+import { getEmployee } from "@/lib/services/employees";
 import {
   completeTrainingSession,
+  getSessionAssignments,
   getTrainingSession,
   markAttendance,
 } from "@/lib/services/training";
@@ -18,7 +21,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
-import type { Employee, TrainingAttendance, TrainingSession } from "@/types";
+import type { Employee, TrainingAssignment, TrainingAttendance, TrainingSession } from "@/types";
 
 export default function TrainingSessionPage({
   params,
@@ -33,24 +36,67 @@ export default function TrainingSessionPage({
   const [notes, setNotes] = useState("");
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
+    setError(null);
     try {
-      const [s, emps] = await Promise.all([
+      const canListAssignments =
+        profile?.role === "super_admin" ||
+        profile?.role === "hr" ||
+        profile?.role === "qa" ||
+        profile?.role === "department_head" ||
+        profile?.role === "trainer";
+
+      const linkedPromise =
+        canListAssignments
+          ? getSessionAssignments(id)
+          : profile?.employeeId
+            ? getSessionAssignments(id, { employeeId: profile.employeeId })
+            : Promise.resolve([] as TrainingAssignment[]);
+
+      const [s, linked] = await Promise.all([
         getTrainingSession(id),
-        listEmployeesForLifecycle(),
+        linkedPromise,
       ]);
       setSession(s);
+
+      const rosterIds = new Set<string>();
+      for (const a of linked) rosterIds.add(a.employeeId);
+      for (const a of s?.attendance || []) rosterIds.add(a.employeeId);
+
+      let emps: Employee[] = [];
+      if (canListAssignments) {
+        emps = await listEmployeesForLifecycle().catch(() => [] as Employee[]);
+      } else {
+        const fetched = await Promise.all(
+          [...rosterIds].map((empId) => getEmployee(empId).catch(() => null))
+        );
+        emps = fetched.filter((e): e is Employee => Boolean(e));
+      }
       setEmployees(emps);
+
       if (s) {
-        setAttendance(s.attendance?.length ? s.attendance : []);
+        const roster =
+          s.attendance?.length > 0
+            ? s.attendance
+            : linked.map((a) => ({ employeeId: a.employeeId, present: false }));
+        // Employees only see their own attendance row.
+        const scopedRoster =
+          canListAssignments || !profile?.employeeId
+            ? roster
+            : roster.filter((a) => a.employeeId === profile.employeeId);
+        setAttendance(scopedRoster);
         setNotes(s.notes || "");
       }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load session");
+      setSession(null);
     } finally {
       setLoading(false);
     }
-  }, [id]);
+  }, [id, profile?.role, profile?.employeeId]);
 
   useEffect(() => {
     void refresh();
@@ -78,8 +124,16 @@ export default function TrainingSessionPage({
     );
   };
 
+  const canManageSessionFor = (s: TrainingSession | null) => {
+    if (!s || !profile?.role || !profile.uid) return false;
+    const canConduct = hasPermission(profile.role, "training:conduct");
+    const isAssigned =
+      s.trainerId === profile.uid || s.createdBy === profile.uid;
+    return canConduct && (profile.role === "super_admin" || isAssigned);
+  };
+
   const handleSaveAttendance = async () => {
-    if (!profile) return;
+    if (!profile || !canManageSessionFor(session)) return;
     setBusy(true);
     try {
       await markAttendance(id, attendance, profile.uid);
@@ -93,7 +147,7 @@ export default function TrainingSessionPage({
   };
 
   const handleComplete = async () => {
-    if (!profile) return;
+    if (!profile || !canManageSessionFor(session)) return;
     if (!attendance.some((a) => a.present)) {
       toast.error("Mark at least one attendee present before completing");
       return;
@@ -131,6 +185,23 @@ export default function TrainingSessionPage({
     );
   }
 
+  if (error) {
+    return (
+      <div className="space-y-4">
+        <h1 className="text-2xl font-bold">Could not load session</h1>
+        <p className="text-sm text-destructive">{error}</p>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={() => void refresh()}>
+            Retry
+          </Button>
+          <Button asChild variant="outline">
+            <Link href="/dashboard/training">Back to training</Link>
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
   if (!session) {
     return (
       <div className="space-y-4">
@@ -144,6 +215,7 @@ export default function TrainingSessionPage({
   }
 
   const done = session.status === "completed";
+  const canManageSession = canManageSessionFor(session);
 
   return (
     <div className="mx-auto max-w-2xl space-y-6">
@@ -176,7 +248,7 @@ export default function TrainingSessionPage({
                 >
                   <Checkbox
                     checked={a.present}
-                    disabled={done}
+                    disabled={done || !canManageSession}
                     onCheckedChange={() => togglePresent(a.employeeId)}
                   />
                   <span className="text-sm">{empName(a.employeeId)}</span>
@@ -189,13 +261,19 @@ export default function TrainingSessionPage({
             <Label>Session notes</Label>
             <Textarea
               value={notes}
-              disabled={done}
+              disabled={done || !canManageSession}
               onChange={(e) => setNotes(e.target.value)}
               placeholder="Topics covered, Q&A summary…"
             />
           </div>
 
-          {!done && (
+          {!canManageSession && !done && (
+            <p className="text-sm text-muted-foreground">
+              Only the assigned trainer can mark attendance and complete this session.
+            </p>
+          )}
+
+          {!done && canManageSession && (
             <div className="flex gap-2">
               <Button
                 variant="outline"

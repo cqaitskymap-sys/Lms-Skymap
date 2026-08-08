@@ -16,9 +16,14 @@ import type { Certificate } from "@/types";
 interface CertificateActionsProps {
   certificate: Certificate;
   onUploaded?: (cert: Certificate) => void;
+  allowUpload?: boolean;
 }
 
-export function CertificateActions({ certificate, onUploaded }: CertificateActionsProps) {
+export function CertificateActions({
+  certificate,
+  onUploaded,
+  allowUpload = false,
+}: CertificateActionsProps) {
   const sheetRef = useRef<HTMLDivElement>(null);
   const [qr, setQr] = useState<string | undefined>(certificate.qrCodeImageUrl);
   const [busy, setBusy] = useState<"pdf" | "print" | "upload" | null>(null);
@@ -68,15 +73,24 @@ export function CertificateActions({ certificate, onUploaded }: CertificateActio
   };
 
   const handleUploadStorage = async () => {
+    if (!allowUpload) {
+      toast.error("Only QA/HR can store certificates in Firebase Storage");
+      return;
+    }
     setBusy("upload");
     try {
       const qrUrl = await ensureQr();
       const blob = await buildCertificatePdf(certificate, qrUrl);
       const urls = await uploadCertificatePdf(certificate.id, blob);
-      toast.success("Certificate stored in Firebase Storage");
+      if (urls.storedRemotely) {
+        toast.success("Certificate stored in Firebase Storage");
+      } else {
+        toast.message("PDF saved locally (demo mode)");
+      }
       onUploaded?.({
         ...certificate,
-        ...urls,
+        pdfStoragePath: urls.pdfStoragePath,
+        pdfDownloadUrl: urls.pdfDownloadUrl,
       });
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Storage upload failed");
@@ -116,7 +130,7 @@ export function CertificateActions({ certificate, onUploaded }: CertificateActio
         </Button>
         <Button
           size="sm"
-          disabled={!!busy}
+          disabled={!!busy || !allowUpload}
           onClick={() => void handleUploadStorage()}
         >
           {busy === "upload" ? (

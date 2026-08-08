@@ -14,6 +14,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
+import { RequirePermission } from "@/components/auth/require-permission";
 import { useDepartments } from "@/hooks/use-departments";
 import {
   createDepartmentSchema,
@@ -131,16 +132,16 @@ function DepartmentForm({
 }
 
 export default function DepartmentsPage() {
-  const { role } = useAuth();
-  const { departments, loading, refresh } = useDepartments();
+  const { can } = useAuth();
+  const { departments, loading, error, refresh } = useDepartments();
   const [showCreate, setShowCreate] = useState(false);
   const [editing, setEditing] = useState<Department | null>(null);
   const [deleting, setDeleting] = useState<Department | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [seeding, setSeeding] = useState(false);
 
-  const canWrite = role === "super_admin" || role === "hr";
-  const canDelete = role === "super_admin";
+  const canWrite = can("departments:write");
+  const canDelete = can("departments:delete");
 
   const activeCount = useMemo(
     () => departments.filter((d) => d.isActive).length,
@@ -220,6 +221,7 @@ export default function DepartmentsPage() {
   };
 
   return (
+    <RequirePermission permission="departments:read">
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
@@ -260,6 +262,13 @@ export default function DepartmentsPage() {
           {loading ? (
             <div className="flex justify-center py-16">
               <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            </div>
+          ) : error ? (
+            <div className="py-12 text-center">
+              <p className="text-destructive">{error}</p>
+              <Button className="mt-4" variant="outline" onClick={() => void refresh()}>
+                Retry
+              </Button>
             </div>
           ) : departments.length === 0 ? (
             <div className="py-12 text-center">
@@ -382,8 +391,9 @@ export default function DepartmentsPage() {
           <DialogHeader>
             <DialogTitle>Delete department?</DialogTitle>
             <DialogDescription>
-              Remove <strong>{deleting?.name}</strong> ({deleting?.code})? This fails if employees
-              are still assigned.
+              Remove <strong>{deleting?.name}</strong> ({deleting?.code})? This fails if
+              employees, staff accounts, or SOPs still reference this department. Deactivate it
+              instead when in doubt.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -398,5 +408,6 @@ export default function DepartmentsPage() {
         </DialogContent>
       </Dialog>
     </div>
+    </RequirePermission>
   );
 }

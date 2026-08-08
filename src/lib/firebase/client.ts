@@ -5,7 +5,7 @@ import {
   initializeFirestore,
   connectFirestoreEmulator,
   type Firestore,
-} from "firebase/firestore";
+} from "firebase/firestore/lite";
 import { getStorage, connectStorageEmulator, type FirebaseStorage } from "firebase/storage";
 import { getFunctions, connectFunctionsEmulator, type Functions } from "firebase/functions";
 import { firebaseConfig } from "@/lib/firebase/config";
@@ -15,20 +15,26 @@ function createFirebaseApp(): FirebaseApp {
   return initializeApp(firebaseConfig);
 }
 
+/**
+ * Use Firestore Lite (REST) in the browser — not the full SDK.
+ *
+ * The full client opens a WebChannel `Listen/channel` multiplex even for one-shot
+ * `getDocs` / `getDoc`. On some Windows / proxy / AV setups those GETs return
+ * HTTP 400 (`…&TYPE=xmlhttp&…&t=1`) while the app still works. We do not use
+ * `onSnapshot`, so Lite is enough and avoids that transport entirely.
+ */
 function createFirestore(firebaseApp: FirebaseApp): Firestore {
-  // Browser: auto-detect buffering proxies / AV that break WebChannel Listen
-  // (common source of Listen/channel HTTP 400 with t=1). Server keeps defaults.
-  if (typeof window !== "undefined") {
-    try {
-      return initializeFirestore(firebaseApp, {
-        experimentalAutoDetectLongPolling: true,
-      });
-    } catch {
-      // Already initialized in this runtime (HMR / duplicate import).
-      return getFirestore(firebaseApp);
-    }
+  if (typeof window === "undefined") {
+    return getFirestore(firebaseApp);
   }
-  return getFirestore(firebaseApp);
+
+  try {
+    // Lite requires a settings object (empty === default REST client).
+    return initializeFirestore(firebaseApp, {});
+  } catch {
+    // Already initialized in this browser runtime (HMR / duplicate import).
+    return getFirestore(firebaseApp);
+  }
 }
 
 export const app = createFirebaseApp();

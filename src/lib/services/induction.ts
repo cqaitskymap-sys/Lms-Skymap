@@ -14,7 +14,7 @@ import {
   query,
   where,
   orderBy,
-} from "firebase/firestore";
+} from "firebase/firestore/lite";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { db, storage, COLLECTIONS } from "@/lib/firebase/client";
 import type {
@@ -29,8 +29,15 @@ import { isDemoMode } from "@/lib/demo/data";
 import {
   readInductionStore,
   writeInductionStore,
+  INDUCTION_UPDATED_EVENT,
 } from "@/lib/induction/demo-store";
 import { readLifecycleStore, upsertDemoEmployee } from "@/lib/lifecycle/demo-store";
+
+function notifyInductionUpdated() {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event(INDUCTION_UPDATED_EVENT));
+  }
+}
 
 async function preferLocal(_moduleId?: string): Promise<boolean> {
   return isDemoMode();
@@ -62,6 +69,7 @@ export async function createInductionModule(
   }
 
   await setDoc(doc(db, COLLECTIONS.inductionModules, id), inductionModule);
+  notifyInductionUpdated();
   return inductionModule;
 }
 
@@ -72,22 +80,22 @@ export async function listInductionModules(): Promise<InductionModule[]> {
       .sort((a, b) => a.order - b.order);
   }
 
+  // Equality + orderBy needs a composite index; sort client-side so listing works
+  // even before `firestore.indexes.json` is deployed.
   try {
-    const q = query(
-      collection(db, COLLECTIONS.inductionModules),
-      where("isActive", "==", true),
-      orderBy("order", "asc")
+    const snap = await getDocs(
+      query(collection(db, COLLECTIONS.inductionModules), where("isActive", "==", true))
     );
-    const snap = await getDocs(q);
-    return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as InductionModule);
+    return snap.docs
+      .map((d) => ({ id: d.id, ...d.data() }) as InductionModule)
+      .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
   } catch {
     try {
-      const snap = await getDocs(
-        query(collection(db, COLLECTIONS.inductionModules), where("isActive", "==", true))
-      );
+      const snap = await getDocs(collection(db, COLLECTIONS.inductionModules));
       return snap.docs
         .map((d) => ({ id: d.id, ...d.data() }) as InductionModule)
-        .sort((a, b) => a.order - b.order);
+        .filter((m) => m.isActive)
+        .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
     } catch {
       return [];
     }
@@ -167,6 +175,7 @@ export async function uploadInductionDocument(
     updatedBy: actorId,
   });
 
+  notifyInductionUpdated();
   return document;
 }
 
@@ -278,6 +287,27 @@ export async function assignInductionModules(
   const local = await preferLocal(moduleIds[0]);
 
   for (const moduleId of moduleIds) {
+    if (local) {
+      const store = readInductionStore();
+      const exists = store.assignments.some(
+        (a) => a.employeeId === employeeId && a.moduleId === moduleId && a.status !== "passed"
+      );
+      if (exists) continue;
+    } else {
+      const dupSnap = await getDocs(
+        query(
+          collection(db, COLLECTIONS.inductionAssignments),
+          where("employeeId", "==", employeeId),
+          where("moduleId", "==", moduleId)
+        )
+      );
+      const hasActive = dupSnap.docs.some((d) => {
+        const status = (d.data() as InductionAssignment).status;
+        return status !== "passed";
+      });
+      if (hasActive) continue;
+    }
+
     const id = generateId("inda");
     const assignment: InductionAssignment = {
       id,
@@ -294,14 +324,18 @@ export async function assignInductionModules(
 
     if (local) {
       const store = readInductionStore();
-      const exists = store.assignments.some(
-        (a) => a.employeeId === employeeId && a.moduleId === moduleId && a.status !== "passed"
-      );
-      if (!exists) store.assignments.push(assignment);
+      store.assignments.push(assignment);
       writeInductionStore(store);
     } else {
-      await setDoc(doc(db, COLLECTIONS.inductionAssignments, id), assignment);
+      await setDoc(
+        doc(db, COLLECTIONS.inductionAssignments, id),
+        stripUndefined(assignment)
+      );
     }
+  }
+
+  if (moduleIds.length > 0 && assignments.length === 0) {
+    throw new Error("Selected module(s) are already assigned to this employee");
   }
 
   if (!local) {
@@ -313,6 +347,7 @@ export async function assignInductionModules(
     });
   }
 
+  notifyInductionUpdated();
   return assignments;
 }
 
@@ -330,11 +365,10 @@ export async function getEmployeeInductionAssignments(
     );
     const snap = await getDocs(q);
     const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }) as InductionAssignment);
-    if (rows.length) return rows;
+    return rows;
   } catch {
-    /* fall through */
+    return [];
   }
-  return readInductionStore().assignments.filter((a) => a.employeeId === employeeId);
 }
 
 export async function listAllInductionAssignments(): Promise<InductionAssignment[]> {
@@ -343,12 +377,10 @@ export async function listAllInductionAssignments(): Promise<InductionAssignment
   }
   try {
     const snap = await getDocs(collection(db, COLLECTIONS.inductionAssignments));
-    const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }) as InductionAssignment);
-    if (rows.length) return rows;
+    return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as InductionAssignment);
   } catch {
-    /* fall through */
+    return [];
   }
-  return [...readInductionStore().assignments];
 }
 
 export async function markDocumentViewed(
@@ -380,12 +412,20 @@ export async function markDocumentViewed(
   const viewed = Array.from(new Set([...assignment.documentsViewed, documentId]));
   const total = Math.max(inductionModule.documents?.length || 1, 1);
   const progress = Math.min(100, Math.round((viewed.length / total) * 100));
+  const hasAssessment = Boolean(inductionModule.assessmentId);
   const now = nowISO();
   const updated: InductionAssignment = {
     ...assignment,
     documentsViewed: viewed,
     progressPercent: progress,
-    status: progress >= 100 ? "assessment_pending" : "in_progress",
+    status:
+      progress >= 100
+        ? hasAssessment
+          ? "assessment_pending"
+          : "passed"
+        : "in_progress",
+    passed: progress >= 100 && !hasAssessment ? true : assignment.passed,
+    completedAt: progress >= 100 && !hasAssessment ? now : assignment.completedAt,
     startedAt: assignment.startedAt || now,
     updatedAt: now,
     updatedBy: actorId,
@@ -396,16 +436,22 @@ export async function markDocumentViewed(
     store.assignments = store.assignments.map((a) => (a.id === assignmentId ? updated : a));
     writeInductionStore(store);
   } else {
-    await updateDoc(doc(db, COLLECTIONS.inductionAssignments, assignmentId), {
-      documentsViewed: viewed,
-      progressPercent: progress,
-      status: updated.status,
-      startedAt: updated.startedAt,
-      updatedAt: now,
-      updatedBy: actorId,
-    });
+    await updateDoc(
+      doc(db, COLLECTIONS.inductionAssignments, assignmentId),
+      stripUndefined({
+        documentsViewed: viewed,
+        progressPercent: progress,
+        status: updated.status,
+        passed: updated.passed,
+        completedAt: updated.completedAt,
+        startedAt: updated.startedAt,
+        updatedAt: now,
+        updatedBy: actorId,
+      })
+    );
   }
 
+  notifyInductionUpdated();
   return updated;
 }
 
@@ -436,12 +482,16 @@ export async function markModuleStudied(
   if (!assignment || !inductionModule) return null;
 
   const allDocIds = (inductionModule.documents || []).map((d) => d.id);
+  const hasAssessment = Boolean(inductionModule.assessmentId);
   const now = nowISO();
   const updated: InductionAssignment = {
     ...assignment,
     documentsViewed: allDocIds.length ? allDocIds : assignment.documentsViewed,
     progressPercent: 100,
-    status: "assessment_pending",
+    status: hasAssessment ? "assessment_pending" : "passed",
+    passed: hasAssessment ? assignment.passed : true,
+    score: hasAssessment ? assignment.score : 100,
+    completedAt: hasAssessment ? assignment.completedAt : now,
     startedAt: assignment.startedAt || now,
     updatedAt: now,
     updatedBy: actorId,
@@ -452,16 +502,23 @@ export async function markModuleStudied(
     store.assignments = store.assignments.map((a) => (a.id === assignmentId ? updated : a));
     writeInductionStore(store);
   } else {
-    await updateDoc(doc(db, COLLECTIONS.inductionAssignments, assignmentId), {
-      documentsViewed: updated.documentsViewed,
-      progressPercent: 100,
-      status: "assessment_pending",
-      startedAt: updated.startedAt,
-      updatedAt: now,
-      updatedBy: actorId,
-    });
+    await updateDoc(
+      doc(db, COLLECTIONS.inductionAssignments, assignmentId),
+      stripUndefined({
+        documentsViewed: updated.documentsViewed,
+        progressPercent: 100,
+        status: updated.status,
+        passed: updated.passed,
+        score: updated.score,
+        completedAt: updated.completedAt,
+        startedAt: updated.startedAt,
+        updatedAt: now,
+        updatedBy: actorId,
+      })
+    );
   }
 
+  notifyInductionUpdated();
   return updated;
 }
 
@@ -478,10 +535,11 @@ export async function getEmployeeInductionBundle(
     listInductionModules(),
   ]);
   const byId = new Map(modules.map((m) => [m.id, m]));
-  // Include inactive modules still assigned
-  const storeMods = readInductionStore().modules;
-  for (const m of storeMods) {
-    if (!byId.has(m.id)) byId.set(m.id, m);
+  for (const assignment of assignments) {
+    if (!byId.has(assignment.moduleId)) {
+      const mod = await getInductionModule(assignment.moduleId);
+      if (mod) byId.set(mod.id, mod);
+    }
   }
 
   return assignments
@@ -497,6 +555,33 @@ export function overallInductionProgress(items: InductionBundleItem[]): number {
   if (!items.length) return 0;
   const sum = items.reduce((acc, i) => acc + (i.assignment.progressPercent || 0), 0);
   return Math.round(sum / items.length);
+}
+
+/** Ensure every assignment is passed and mandatory catalog modules were assigned. */
+export async function assertEmployeeInductionComplete(employeeId: string): Promise<void> {
+  const [assignments, modules] = await Promise.all([
+    getEmployeeInductionAssignments(employeeId),
+    listInductionModules(),
+  ]);
+
+  if (!assignments.length) {
+    throw new Error("No induction modules assigned yet");
+  }
+
+  const notPassed = assignments.filter((a) => a.status !== "passed");
+  if (notPassed.length) {
+    throw new Error(
+      `${notPassed.length} induction module(s) not yet passed — complete all assigned modules first`
+    );
+  }
+
+  const assignedIds = new Set(assignments.map((a) => a.moduleId));
+  const missingMandatory = modules
+    .filter((m) => m.isMandatory && !assignedIds.has(m.id))
+    .map((m) => m.title);
+  if (missingMandatory.length) {
+    throw new Error(`Mandatory module(s) not assigned: ${missingMandatory.join(", ")}`);
+  }
 }
 
 /** Record assessment outcome against an induction assignment (local + Firestore). */
@@ -529,49 +614,24 @@ export async function completeInductionAssessment(params: {
         : a
     );
     writeInductionStore(store);
-
-    if (params.passed) {
-      const empAssignments = store.assignments.filter(
-        (a) => a.employeeId === params.employeeId
-      );
-      if (empAssignments.length && empAssignments.every((a) => a.status === "passed")) {
-        try {
-          const { completeInductionLifecycle } = await import("@/lib/services/lifecycle");
-          await completeInductionLifecycle(params.employeeId, {
-            uid: params.actorId,
-            name: "Assessment Engine",
-            role: "super_admin",
-          });
-        } catch {
-          /* non-blocking */
-        }
-      }
-    }
+    notifyInductionUpdated();
     return;
   }
 
-  await updateDoc(doc(db, COLLECTIONS.inductionAssignments, params.assignmentId), {
-    status: params.passed ? "passed" : "failed",
-    score: params.percentage,
-    passed: params.passed,
-    assessmentAttemptId: params.attemptId,
-    completedAt: params.passed ? now : undefined,
-    updatedAt: now,
-    updatedBy: params.actorId,
-  });
+  await updateDoc(
+    doc(db, COLLECTIONS.inductionAssignments, params.assignmentId),
+    stripUndefined({
+      status: params.passed ? "passed" : "failed",
+      score: params.percentage,
+      passed: params.passed,
+      assessmentAttemptId: params.attemptId,
+      ...(params.passed ? { completedAt: now, progressPercent: 100 } : {}),
+      updatedAt: now,
+      updatedBy: params.actorId,
+    })
+  );
 
-  if (params.passed) {
-    try {
-      const { completeInductionLifecycle } = await import("@/lib/services/lifecycle");
-      await completeInductionLifecycle(params.employeeId, {
-        uid: params.actorId,
-        name: "Assessment Engine",
-        role: "super_admin",
-      });
-    } catch {
-      /* non-blocking */
-    }
-  }
+  notifyInductionUpdated();
 }
 
 /** Super Admin only — permanently remove an induction module. */
@@ -593,6 +653,7 @@ export async function deleteInductionModule(moduleId: string): Promise<void> {
   } catch {
     /* related cleanup best-effort */
   }
+  notifyInductionUpdated();
 }
 
 /** Super Admin only — remove a single induction assignment. */
@@ -605,4 +666,5 @@ export async function deleteInductionAssignment(assignmentId: string): Promise<v
   }
 
   await deleteDoc(doc(db, COLLECTIONS.inductionAssignments, assignmentId));
+  notifyInductionUpdated();
 }

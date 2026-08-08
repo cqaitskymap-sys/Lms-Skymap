@@ -24,7 +24,9 @@ import type { UserRole } from "@/types";
 
 export default function HrDashboardPage() {
   const { profile } = useAuth();
-  const { employees, approvals, loading, refresh } = useLifecycleDirectory();
+  const { employees, approvals, loading, refresh } = useLifecycleDirectory({
+    includeApprovals: true,
+  });
 
   if (loading) {
     return (

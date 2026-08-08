@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { toast } from "sonner";
 import {
@@ -47,29 +48,62 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useEffect } from "react";
+
 import type { Employee, UserRole } from "@/types";
 
 export default function InductionPage() {
+  const searchParams = useSearchParams();
+  const assignFromUrl = searchParams.get("assign") || "";
   const { profile, can } = useAuth();
   const isHr = can("induction:assign") || can("induction:write");
   const employeeId = profile?.employeeId;
 
-  const { items, loading: myLoading, refresh: refreshMine, progress } =
+  const { items, loading: myLoading, error: myError, refresh: refreshMine, progress } =
     useMyInduction(employeeId);
-  const { modules, loading: catLoading, refresh: refreshCatalog } = useInductionCatalog();
-  const { assignments, loading: asgLoading, refresh: refreshAsg } =
-    useInductionAssignments();
+  const { modules, loading: catLoading, error: catError, refresh: refreshCatalog } =
+    useInductionCatalog();
+  const { assignments, loading: asgLoading, error: asgError, refresh: refreshAsg } =
+    useInductionAssignments({ enabled: isHr });
 
   const [employees, setEmployees] = useState<Employee[]>([]);
+  const [employeesLoading, setEmployeesLoading] = useState(false);
   const [assignEmployeeId, setAssignEmployeeId] = useState("");
   const [selectedModules, setSelectedModules] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
 
-  useEffect(() => {
+  const loadEmployees = useCallback(async () => {
     if (!isHr) return;
-    void listEmployeesForLifecycle().then(setEmployees);
+    setEmployeesLoading(true);
+    try {
+      setEmployees(await listEmployeesForLifecycle());
+    } catch {
+      setEmployees([]);
+    } finally {
+      setEmployeesLoading(false);
+    }
   }, [isHr]);
+
+  useEffect(() => {
+    void loadEmployees();
+    const onUpdate = () => void loadEmployees();
+    window.addEventListener("pharma-lifecycle-updated", onUpdate);
+    return () => window.removeEventListener("pharma-lifecycle-updated", onUpdate);
+  }, [loadEmployees]);
+
+  useEffect(() => {
+    if (assignFromUrl) setAssignEmployeeId(assignFromUrl);
+  }, [assignFromUrl]);
+
+  const assignableEmployees = useMemo(
+    () =>
+      employees.filter(
+        (e) =>
+          Boolean(e.verifiedAt) &&
+          e.lifecycleStage !== "qualified" &&
+          e.lifecycleStage !== "induction_completed"
+      ),
+    [employees]
+  );
 
   const actor: LifecycleActor | null = useMemo(() => {
     if (!profile) return null;
@@ -99,8 +133,8 @@ export default function InductionPage() {
     try {
       await markDocumentViewed(assignmentId, documentId, profile.uid);
       await refreshMine();
-    } catch {
-      /* non-blocking */
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not track document view");
     }
   };
 
@@ -115,8 +149,8 @@ export default function InductionPage() {
       toast.success("Induction modules assigned");
       setSelectedModules([]);
       setAssignEmployeeId("");
-      await refreshAsg();
-      await refreshMine();
+      window.dispatchEvent(new Event("pharma-lifecycle-updated"));
+      await Promise.all([refreshAsg(), refreshMine(), loadEmployees()]);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Assignment failed");
     } finally {
@@ -130,7 +164,7 @@ export default function InductionPage() {
     );
   };
 
-  const defaultTab = employeeId ? "mine" : isHr ? "assign" : "catalog";
+  const defaultTab = assignFromUrl && isHr ? "assign" : employeeId ? "mine" : isHr ? "assign" : "catalog";
 
   return (
     <RequirePermission permission="induction:read">
@@ -158,6 +192,10 @@ export default function InductionPage() {
                 <div className="flex items-center gap-2 text-muted-foreground">
                   <Loader2 className="h-4 w-4 animate-spin" /> Loading assignments…
                 </div>
+              ) : myError ? (
+                <Card>
+                  <CardContent className="py-8 text-center text-destructive">{myError}</CardContent>
+                </Card>
               ) : items.length === 0 ? (
                 <Card>
                   <CardContent className="flex flex-col items-center gap-3 py-12 text-center">
@@ -257,15 +295,24 @@ export default function InductionPage() {
                             {(assignment.status === "assessment_pending" ||
                               assignment.status === "failed" ||
                               assignment.progressPercent >= 100) &&
-                              assignment.status !== "passed" && (
+                              assignment.status !== "passed" &&
+                              m.assessmentId && (
                                 <Button size="sm" asChild>
                                   <Link
-                                    href={`/dashboard/exams${m.assessmentId ? `?exam=${m.assessmentId}&inda=${assignment.id}` : ""}`}
+                                    href={`/dashboard/exams?exam=${m.assessmentId}&inda=${assignment.id}`}
                                   >
                                     <ClipboardList className="mr-1.5 h-3.5 w-3.5" />
                                     Take assessment
                                   </Link>
                                 </Button>
+                              )}
+                            {(assignment.status === "assessment_pending" ||
+                              assignment.progressPercent >= 100) &&
+                              assignment.status !== "passed" &&
+                              !m.assessmentId && (
+                                <p className="text-xs text-muted-foreground">
+                                  No linked assessment — module marked complete when studied.
+                                </p>
                               )}
                             {assignment.status === "passed" && (
                               <p className="text-sm font-medium text-emerald-600">
@@ -296,6 +343,10 @@ export default function InductionPage() {
               <div className="flex items-center gap-2 text-muted-foreground">
                 <Loader2 className="h-4 w-4 animate-spin" /> Loading catalog…
               </div>
+            ) : catError ? (
+              <Card>
+                <CardContent className="py-8 text-center text-destructive">{catError}</CardContent>
+              </Card>
             ) : modules.length === 0 ? (
               <Card>
                 <CardContent className="flex flex-col items-center gap-3 py-12 text-center">
@@ -360,12 +411,20 @@ export default function InductionPage() {
                 <CardContent className="space-y-4">
                   <div className="space-y-2">
                     <Label>Employee</Label>
-                    <Select value={assignEmployeeId} onValueChange={setAssignEmployeeId}>
+                    <Select
+                      value={assignEmployeeId}
+                      onValueChange={setAssignEmployeeId}
+                      disabled={employeesLoading}
+                    >
                       <SelectTrigger>
-                        <SelectValue placeholder="Select employee" />
+                        <SelectValue
+                          placeholder={
+                            employeesLoading ? "Loading employees…" : "Select employee"
+                          }
+                        />
                       </SelectTrigger>
                       <SelectContent>
-                        {employees.map((e) => (
+                        {assignableEmployees.map((e) => (
                           <SelectItem key={e.id} value={e.id}>
                             {e.firstName} {e.lastName} · {e.employeeCode} (
                             {e.lifecycleStage?.replace(/_/g, " ")})
@@ -373,6 +432,12 @@ export default function InductionPage() {
                         ))}
                       </SelectContent>
                     </Select>
+                    {!employeesLoading && assignableEmployees.length === 0 && (
+                      <p className="text-xs text-muted-foreground">
+                        No verified employees ready for induction. Complete HR verification on
+                        the employee profile first.
+                      </p>
+                    )}
                   </div>
 
                   <div className="space-y-2">
@@ -418,6 +483,10 @@ export default function InductionPage() {
                 <div className="flex items-center gap-2 text-muted-foreground">
                   <Loader2 className="h-4 w-4 animate-spin" /> Loading…
                 </div>
+              ) : asgError ? (
+                <Card>
+                  <CardContent className="py-8 text-center text-destructive">{asgError}</CardContent>
+                </Card>
               ) : (
                 <Card>
                   <CardHeader>
@@ -461,7 +530,12 @@ export default function InductionPage() {
                       );
                     })}
                     {!assignments.length && (
-                      <p className="text-sm text-muted-foreground">No assignments yet.</p>
+                      <div className="py-6 text-center text-sm text-muted-foreground">
+                        <p>No induction assignments yet.</p>
+                        <p className="mt-1">
+                          Use the Assign tab to link modules to verified employees.
+                        </p>
+                      </div>
                     )}
                   </CardContent>
                 </Card>

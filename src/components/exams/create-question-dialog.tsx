@@ -106,8 +106,25 @@ export function CreateQuestionDialog({ banks, defaultBankId, onCreated }: Props)
       toast.error("Add at least 2 options");
       return;
     }
-    if (!filled.some((o) => o.isCorrect)) {
+    const correctCount = filled.filter((o) => o.isCorrect).length;
+    if (!correctCount) {
       toast.error("Mark at least one correct option");
+      return;
+    }
+    if ((type === "mcq" || type === "true_false") && correctCount !== 1) {
+      toast.error("MCQ and True/False need exactly one correct option");
+      return;
+    }
+    if (type === "scenario" && !scenario.trim()) {
+      toast.error("Scenario narrative is required");
+      return;
+    }
+    if (marks < 1) {
+      toast.error("Marks must be at least 1");
+      return;
+    }
+    if (negativeMarks < 0) {
+      toast.error("Negative marks cannot be below 0");
       return;
     }
 
@@ -309,7 +326,7 @@ export function CreateQuestionDialog({ banks, defaultBankId, onCreated }: Props)
                   type="number"
                   min={1}
                   value={marks}
-                  onChange={(e) => setMarks(Number(e.target.value) || 1)}
+                  onChange={(e) => setMarks(Math.max(1, Number(e.target.value) || 1))}
                 />
               </div>
               <div className="space-y-2">
@@ -318,7 +335,7 @@ export function CreateQuestionDialog({ banks, defaultBankId, onCreated }: Props)
                   type="number"
                   min={0}
                   value={negativeMarks}
-                  onChange={(e) => setNegativeMarks(Number(e.target.value) || 0)}
+                  onChange={(e) => setNegativeMarks(Math.max(0, Number(e.target.value) || 0))}
                 />
               </div>
             </div>

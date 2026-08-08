@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -30,7 +30,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useEffect } from "react";
 
 const EMPLOYMENT_LABELS: Record<(typeof EMPLOYMENT_TYPES)[number], string> = {
   permanent: "Permanent",
@@ -43,7 +42,7 @@ const EMPLOYMENT_LABELS: Record<(typeof EMPLOYMENT_TYPES)[number], string> = {
 export default function NewEmployeePage() {
   const router = useRouter();
   const { profile } = useAuth();
-  const { activeDepartments } = useDepartments();
+  const { activeDepartments, loading: deptLoading } = useDepartments();
   const [result, setResult] = useState<OnboardResult | null>(null);
   const [departmentHeads, setDepartmentHeads] = useState<UserProfile[]>([]);
 
@@ -52,6 +51,7 @@ export default function NewEmployeePage() {
     handleSubmit,
     setValue,
     watch,
+    setError,
     formState: { errors, isSubmitting },
   } = useForm<OnboardEmployeeInput>({
     resolver: zodResolver(onboardEmployeeSchema),
@@ -130,18 +130,24 @@ export default function NewEmployeePage() {
         description: `Code ${onboarded.credentials.employeeCode} · Auth account created`,
       });
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Onboarding failed");
+      const message = err instanceof Error ? err.message : "Onboarding failed";
+      toast.error(message);
+      const match = message.match(/^(\w+): /);
+      if (match) {
+        const field = match[1] as keyof OnboardEmployeeInput;
+        setError(field, { message: message.replace(/^[^:]+:\s*/, "") });
+      }
     }
   };
 
   if (result) {
     return (
-      <RequirePermission permission="employees:write">
+      <RequirePermission permission={["employees:onboard", "employees:write"]} mode="any">
         <div className="mx-auto max-w-2xl space-y-6">
           <div>
             <h1 className="text-2xl font-bold tracking-tight">Employee onboarded</h1>
             <p className="text-muted-foreground">
-              Account provisioned. Next: verify documents, then assign induction modules.
+              Account provisioned. Next: complete HR verification, then assign induction modules.
             </p>
           </div>
           <CredentialsCard
@@ -152,9 +158,9 @@ export default function NewEmployeePage() {
           />
           <Button
             variant="outline"
-            onClick={() => router.push(`/dashboard/induction?assign=${result.employee.id}`)}
+            onClick={() => router.push(`/dashboard/employees/${result.employee.id}`)}
           >
-            Assign induction modules
+            Open employee profile (verify & assign induction)
           </Button>
         </div>
       </RequirePermission>
@@ -162,7 +168,7 @@ export default function NewEmployeePage() {
   }
 
   return (
-    <RequirePermission permission="employees:write">
+    <RequirePermission permission={["employees:onboard", "employees:write"]} mode="any">
       <div className="mx-auto max-w-2xl space-y-6">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Employee onboarding</h1>
@@ -184,12 +190,22 @@ export default function NewEmployeePage() {
             </CardDescription>
           </CardHeader>
           <CardContent>
+            {!deptLoading && activeDepartments.length === 0 && (
+              <p className="mb-4 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-900 dark:text-amber-100">
+                No departments found. Create departments first under Settings → Departments before
+                onboarding employees.
+              </p>
+            )}
             <form onSubmit={handleSubmit(onSubmit)} className="grid gap-4 sm:grid-cols-2" noValidate>
               <div className="space-y-2 sm:col-span-2">
                 <Label htmlFor="employeeCode">Employee code</Label>
                 <Input
                   id="employeeCode"
-                  {...register("employeeCode")}
+                  {...register("employeeCode", {
+                    onChange: (e) => {
+                      e.target.value = e.target.value.toUpperCase();
+                    },
+                  })}
                   placeholder="e.g. EMP1001"
                   autoComplete="off"
                   className="uppercase"
@@ -221,9 +237,10 @@ export default function NewEmployeePage() {
                 <Select
                   value={departmentId || undefined}
                   onValueChange={(v) => setValue("departmentId", v, { shouldValidate: true })}
+                  disabled={deptLoading || activeDepartments.length === 0}
                 >
                   <SelectTrigger>
-                    <SelectValue placeholder="Select department" />
+                    <SelectValue placeholder={deptLoading ? "Loading…" : "Select department"} />
                   </SelectTrigger>
                   <SelectContent>
                     {activeDepartments.map((d) => (
@@ -283,6 +300,9 @@ export default function NewEmployeePage() {
                 {errors.email && (
                   <p className="text-xs text-destructive">{errors.email.message}</p>
                 )}
+                <p className="text-xs text-muted-foreground">
+                  If blank, login email becomes <span className="font-mono">code@pharma.local</span>
+                </p>
               </div>
 
               <div className="space-y-2 sm:col-span-2">
@@ -347,7 +367,11 @@ export default function NewEmployeePage() {
               </div>
 
               <div className="sm:col-span-2">
-                <Button type="submit" disabled={isSubmitting} className="min-w-[200px]">
+                <Button
+                  type="submit"
+                  disabled={isSubmitting || activeDepartments.length === 0}
+                  className="min-w-[200px]"
+                >
                   {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                   Create employee & account
                 </Button>

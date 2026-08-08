@@ -31,7 +31,7 @@ export function generateId(prefix?: string) {
 export function generateCertificateNumber() {
   const year = new Date().getFullYear();
   const seq = Math.floor(Math.random() * 900000) + 100000;
-  return `CERT-${year}-${seq}`;
+  return `CERT-${year}-${seq}`.toUpperCase();
 }
 
 /** Sequential org code: EMP000001, EMP000002, … */

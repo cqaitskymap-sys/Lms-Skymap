@@ -13,6 +13,7 @@ import {
   onboardEmployeeSchema,
   resolveOnboardingEmail,
 } from "@/lib/auth/onboarding-schemas";
+import { getActiveDepartmentOrThrow } from "@/lib/departments/validate";
 import { generateTemporaryPassword } from "@/lib/onboarding/temp-password";
 import { sendOnboardingCredentialsEmail } from "@/lib/onboarding/email";
 import { getProgressForStage, getStageDefinition } from "@/lib/lifecycle/stages";
@@ -67,6 +68,17 @@ export async function POST(request: NextRequest) {
   const ip = request.headers.get("x-forwarded-for") || undefined;
   const ua = request.headers.get("user-agent") || undefined;
 
+  let departmentName: string | undefined;
+  try {
+    const dept = await getActiveDepartmentOrThrow(input.departmentId);
+    departmentName = dept.name;
+  } catch (err) {
+    return NextResponse.json(
+      { success: false, error: err instanceof Error ? err.message : "Invalid department" },
+      { status: 400 }
+    );
+  }
+
   const employeeCode = input.employeeCode;
   const email = resolveOnboardingEmail(input.email, employeeCode);
 
@@ -83,15 +95,27 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Uniqueness: employee code (HR-provided)
+  // Uniqueness: employee code (HR-provided, normalized)
   const codeSnap = await adminDb
     .collection(COLLECTIONS.employees)
-    .where("employeeCode", "==", input.employeeCode)
+    .where("employeeCode", "==", employeeCode)
     .limit(1)
     .get();
   if (!codeSnap.empty) {
     return NextResponse.json(
       { success: false, error: "An employee with this employee code already exists" },
+      { status: 409 }
+    );
+  }
+
+  const usernameSnap = await adminDb
+    .collection(COLLECTIONS.users)
+    .where("username", "==", employeeCode)
+    .limit(1)
+    .get();
+  if (!usernameSnap.empty) {
+    return NextResponse.json(
+      { success: false, error: "An account with this username already exists" },
       { status: 409 }
     );
   }
@@ -155,7 +179,7 @@ export async function POST(request: NextRequest) {
     dateOfJoining: input.dateOfJoining,
     designation: input.designation,
     departmentId: input.departmentId,
-    ...(input.departmentName ? { departmentName: input.departmentName } : {}),
+    departmentName: input.departmentName || departmentName,
     ...(input.reportingManagerId ? { reportingManagerId: input.reportingManagerId } : {}),
     ...(input.reportingManagerName ? { reportingManagerName: input.reportingManagerName } : {}),
     employmentType: input.employmentType,

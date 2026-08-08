@@ -26,6 +26,9 @@ export function UpcomingTrainingList({ items }: { items: DashTrainingItem[] }) {
           }
         />
         <div className="space-y-3">
+          {items.length === 0 && (
+            <p className="text-sm text-muted-foreground">No upcoming sessions scheduled.</p>
+          )}
           {items.map((item) => (
             <Link
               key={item.id}

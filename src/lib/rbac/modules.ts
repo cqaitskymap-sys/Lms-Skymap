@@ -52,7 +52,7 @@ export const APP_MODULE_DEFS: AppModuleDef[] = [
     id: "employees",
     title: "Employees",
     href: "/dashboard/employees",
-    roles: ["super_admin", "hr", "department_head", "qa"],
+    roles: ["super_admin", "hr", "department_head", "qa", "trainer"],
   },
   {
     id: "employees_new",

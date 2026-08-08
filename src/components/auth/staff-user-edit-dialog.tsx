@@ -92,6 +92,9 @@ export function StaffUserEditDialog({
   const onRoleChange = (v: UpdateAdminUserInput["role"]) => {
     if (!v) return;
     setValue("role", v, { shouldValidate: true });
+    if (v !== "department_head" && v !== "trainer") {
+      setValue("departmentId", "", { shouldValidate: true });
+    }
     const optionalIds = new Set(selectableModulesForRole(v).map((m) => m.id));
     const currentOptional = (allowedModules ?? []).filter((id) => optionalIds.has(id as AppModule));
     setValue(
@@ -105,7 +108,11 @@ export function StaffUserEditDialog({
 
   const onSubmit = async (data: UpdateAdminUserInput) => {
     if (!user) return;
-    await onSave(user.uid, data);
+    const payload: UpdateAdminUserInput = { ...data };
+    if (payload.role && payload.role !== "department_head" && payload.role !== "trainer") {
+      payload.departmentId = "";
+    }
+    await onSave(user.uid, payload);
     onOpenChange(false);
   };
 

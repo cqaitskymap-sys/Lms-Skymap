@@ -21,7 +21,7 @@ import { reissueCredentials, type OnboardingCredentials } from "@/lib/services/o
 import { CredentialsCard } from "@/components/onboarding/credentials-card";
 import { getStageDefinition, nextStage } from "@/lib/lifecycle/stages";
 import { StatusBadge } from "@/components/shared/status-badge";
-import { RequirePermission } from "@/components/auth/require-permission";
+import { RequirePermission, RequireRole } from "@/components/auth/require-permission";
 import { LifecycleStatusTracker } from "@/components/lifecycle/lifecycle-status-tracker";
 import { LifecycleProgressBar } from "@/components/lifecycle/lifecycle-progress-bar";
 import { LifecycleTimeline } from "@/components/lifecycle/lifecycle-timeline";
@@ -49,7 +49,7 @@ export default function EmployeeDetailPage({
 }) {
   const { id } = use(params);
   const { profile, can } = useAuth();
-  const { employee, events, approvals, loading, refresh } = useEmployeeLifecycle(id);
+  const { employee, events, approvals, loading, error, refresh } = useEmployeeLifecycle(id);
   const { modules: inductionModules } = useInductionCatalog();
   const [selectedModules, setSelectedModules] = useState<string[]>([]);
   const [handoverDept, setHandoverDept] = useState("");
@@ -63,7 +63,7 @@ export default function EmployeeDetailPage({
   } | null>(null);
 
   useEffect(() => {
-    void listDepartments().then(setDepartments);
+    void listDepartments().then((list) => setDepartments(list.filter((d) => d.isActive)));
   }, []);
 
   const actor: LifecycleActor = useMemo(
@@ -81,6 +81,20 @@ export default function EmployeeDetailPage({
       <div className="flex justify-center py-20">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
       </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <RequirePermission permission="employees:read">
+        <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-8 text-center">
+          <p className="font-medium text-destructive">Could not load employee</p>
+          <p className="mt-1 text-sm text-muted-foreground">{error}</p>
+          <Button className="mt-4" variant="outline" onClick={() => void refresh()}>
+            Retry
+          </Button>
+        </div>
+      </RequirePermission>
     );
   }
 
@@ -305,7 +319,7 @@ export default function EmployeeDetailPage({
                 </Button>
               )}
 
-              {can("employees:write") && stage === "hr_verification" && (
+              {can("employees:write") && stage === "hr_verification" && !employee.verifiedAt && (
                 <Button
                   disabled={busy}
                   onClick={() =>
@@ -318,11 +332,16 @@ export default function EmployeeDetailPage({
               )}
 
               {can("induction:assign") &&
-                (Boolean(employee.verifiedAt) ||
-                  stage === "hr_verification" ||
-                  stage === "induction_assigned") && (
+                (Boolean(employee.verifiedAt) || stage === "induction_assigned") && (
                   <div className="space-y-3 rounded-md border p-3">
-                    <p className="text-sm font-medium">Assign induction modules</p>
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="text-sm font-medium">Assign induction modules</p>
+                      <Button variant="link" size="sm" className="h-auto p-0" asChild>
+                        <Link href={`/dashboard/induction?assign=${employee.id}`}>
+                          Open in Induction
+                        </Link>
+                      </Button>
+                    </div>
                     {inductionModules.length === 0 ? (
                       <p className="text-sm text-muted-foreground">
                         No induction modules yet. Create them under Induction → Catalog → Create
@@ -355,12 +374,6 @@ export default function EmployeeDetailPage({
                     </Button>
                   </div>
                 )}
-
-              {can("induction:assign") && stage === "hr_verification" && !employee.verifiedAt && (
-                <p className="text-sm text-muted-foreground">
-                  Complete HR verification before assigning induction.
-                </p>
-              )}
 
               {can("induction:write") &&
                 (stage === "induction_assigned" ||
@@ -496,28 +509,30 @@ export default function EmployeeDetailPage({
                 </div>
               )}
 
-              {can("employees:write") && nxt && stage !== "qualified" && (
-                <Button
-                  variant="outline"
-                  disabled={busy}
-                  onClick={() =>
-                    run(
-                      () => advanceToNext(employee.id, actor),
-                      `Advanced to ${getStageDefinition(nxt).label}`
-                    )
-                  }
-                >
-                  Advance to next stage
-                  <ArrowRight className="ml-2 h-4 w-4" />
-                </Button>
-              )}
+              <RequireRole roles="super_admin" hideOnDeny>
+                {can("employees:write") && nxt && stage !== "qualified" && (
+                  <Button
+                    variant="outline"
+                    disabled={busy}
+                    onClick={() =>
+                      run(
+                        () => advanceToNext(employee.id, actor),
+                        `Advanced to ${getStageDefinition(nxt).label}`
+                      )
+                    }
+                  >
+                    Advance to next stage (admin)
+                    <ArrowRight className="ml-2 h-4 w-4" />
+                  </Button>
+                )}
+              </RequireRole>
 
               <div className="flex flex-wrap gap-2 border-t pt-3">
                 <Button variant="outline" size="sm" asChild>
-                  <Link href="/dashboard/jd">Open JD</Link>
+                  <Link href={`/dashboard/jd?employee=${employee.id}`}>Open JD</Link>
                 </Button>
                 <Button variant="outline" size="sm" asChild>
-                  <Link href="/dashboard/tni">Open TNI</Link>
+                  <Link href={`/dashboard/tni?employee=${employee.id}`}>Open TNI</Link>
                 </Button>
                 <Button variant="outline" size="sm" asChild>
                   <Link href="/dashboard/training">Training</Link>

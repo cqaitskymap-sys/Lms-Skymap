@@ -1,7 +1,7 @@
 "use client";
 
 import { Suspense, useEffect, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
@@ -14,7 +14,7 @@ import {
   type ChangePasswordInput,
   type ProfileUpdateInput,
 } from "@/lib/auth/schemas";
-import { PASSWORD_POLICY_HINT } from "@/constants/auth";
+import { PASSWORD_POLICY_HINT, SESSION_IDLE_TIMEOUT_MS } from "@/constants/auth";
 import { changeUserPassword, updateUserProfile } from "@/lib/services/auth";
 import { validatePassword } from "@/lib/auth/password-policy";
 import { formatDateTime } from "@/lib/utils";
@@ -25,7 +25,7 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 
-function ProfileTab() {
+function ProfileTab({ locked }: { locked?: boolean }) {
   const { profile, isDemo, patchProfile, refreshProfile } = useAuth();
   const {
     register,
@@ -48,7 +48,7 @@ function ProfileTab() {
   }, [profile, reset]);
 
   const onSubmit = async (data: ProfileUpdateInput) => {
-    if (!profile) return;
+    if (!profile || locked) return;
     try {
       if (isDemo) {
         patchProfile({
@@ -81,41 +81,62 @@ function ProfileTab() {
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <form onSubmit={handleSubmit(onSubmit)} className="space-y-4" noValidate>
-          <div className="space-y-2">
-            <Label htmlFor="displayName">Display name</Label>
-            <Input id="displayName" {...register("displayName")} />
-            {errors.displayName && (
-              <p className="text-xs text-destructive">{errors.displayName.message}</p>
+        {locked ? (
+          <p className="text-sm text-muted-foreground">
+            Change your password first, then you can update your profile.
+          </p>
+        ) : (
+          <form onSubmit={handleSubmit(onSubmit)} className="space-y-4" noValidate>
+            <div className="space-y-2">
+              <Label htmlFor="displayName">Display name</Label>
+              <Input id="displayName" {...register("displayName")} />
+              {errors.displayName && (
+                <p className="text-xs text-destructive">{errors.displayName.message}</p>
+              )}
+            </div>
+            {profile?.username && (
+              <div className="space-y-2">
+                <Label>Staff ID</Label>
+                <Input value={profile.username} disabled className="font-mono" />
+              </div>
             )}
-          </div>
-          <div className="space-y-2">
-            <Label>Email</Label>
-            <Input value={profile?.email ?? ""} disabled />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="phone">Phone</Label>
-            <Input id="phone" placeholder="+91 …" {...register("phone")} />
-            {errors.phone && (
-              <p className="text-xs text-destructive">{errors.phone.message}</p>
-            )}
-          </div>
-          <div className="flex flex-wrap gap-2 text-sm text-muted-foreground">
-            <span>Last login: {formatDateTime(profile?.lastLoginAt)}</span>
-            {profile?.isActive === false && <Badge variant="destructive">Inactive</Badge>}
-          </div>
-          <Button type="submit" disabled={isSubmitting}>
-            {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            Save profile
-          </Button>
-        </form>
+            <div className="space-y-2">
+              <Label>Email</Label>
+              <Input value={profile?.email ?? ""} disabled />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="phone">Phone</Label>
+              <Input id="phone" placeholder="+91 …" {...register("phone")} />
+              {errors.phone && (
+                <p className="text-xs text-destructive">{errors.phone.message}</p>
+              )}
+            </div>
+            <div className="flex flex-wrap gap-2 text-sm text-muted-foreground">
+              <span>Last login: {formatDateTime(profile?.lastLoginAt)}</span>
+              {profile?.passwordChangedAt && (
+                <span>· Password changed: {formatDateTime(profile.passwordChangedAt)}</span>
+              )}
+              {profile?.isActive === false && <Badge variant="destructive">Inactive</Badge>}
+            </div>
+            <Button type="submit" disabled={isSubmitting}>
+              {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Save profile
+            </Button>
+          </form>
+        )}
       </CardContent>
     </Card>
   );
 }
 
-function PasswordTab() {
-  const { profile, isDemo } = useAuth();
+function PasswordTab({
+  required,
+  onChanged,
+}: {
+  required?: boolean;
+  onChanged?: () => void;
+}) {
+  const { profile, isDemo, patchProfile, refreshProfile } = useAuth();
   const [show, setShow] = useState({ current: false, next: false, confirm: false });
   const {
     register,
@@ -139,8 +160,18 @@ function PasswordTab() {
         email: profile.email,
         userId: profile.uid,
       });
+      const now = new Date().toISOString();
+      patchProfile({
+        mustChangePassword: false,
+        passwordChangedAt: now,
+        updatedAt: now,
+      });
+      if (!isDemo) {
+        await refreshProfile();
+      }
       reset();
       toast.success("Password changed successfully");
+      onChanged?.();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not change password");
     }
@@ -153,101 +184,116 @@ function PasswordTab() {
         <CardDescription>{PASSWORD_POLICY_HINT}</CardDescription>
       </CardHeader>
       <CardContent>
-        {isDemo ? (
-          <p className="text-sm text-muted-foreground">
-            Password change is disabled in demo mode. Use Firebase Auth in a configured environment.
-          </p>
-        ) : (
-          <form onSubmit={handleSubmit(onSubmit)} className="space-y-4" noValidate>
-            {(
-              [
-                ["currentPassword", "Current password", "current"],
-                ["newPassword", "New password", "next"],
-                ["confirmPassword", "Confirm new password", "confirm"],
-              ] as const
-            ).map(([name, label, key]) => (
-              <div key={name} className="space-y-2">
-                <Label htmlFor={name}>{label}</Label>
-                <div className="relative">
-                  <Input
-                    id={name}
-                    type={show[key] ? "text" : "password"}
-                    autoComplete={name === "currentPassword" ? "current-password" : "new-password"}
-                    className="pr-10"
-                    {...register(name)}
-                  />
-                  <button
-                    type="button"
-                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-muted-foreground"
-                    onClick={() => setShow((s) => ({ ...s, [key]: !s[key] }))}
-                  >
-                    {show[key] ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                  </button>
-                </div>
-                {errors[name] && (
-                  <p className="text-xs text-destructive">{errors[name]?.message}</p>
-                )}
-              </div>
-            ))}
-
-            {newPassword.length > 0 && (
-              <div className="flex items-center gap-2 text-xs">
-                <Shield className="h-3.5 w-3.5" />
-                Strength:{" "}
-                <Badge
-                  variant={
-                    strength === "strong" ? "default" : strength === "fair" ? "secondary" : "outline"
-                  }
+        <form onSubmit={handleSubmit(onSubmit)} className="space-y-4" noValidate>
+          {(
+            [
+              ["currentPassword", "Current password", "current"],
+              ["newPassword", "New password", "next"],
+              ["confirmPassword", "Confirm new password", "confirm"],
+            ] as const
+          ).map(([name, label, key]) => (
+            <div key={name} className="space-y-2">
+              <Label htmlFor={name}>{label}</Label>
+              <div className="relative">
+                <Input
+                  id={name}
+                  type={show[key] ? "text" : "password"}
+                  autoComplete={name === "currentPassword" ? "current-password" : "new-password"}
+                  className="pr-10"
+                  {...register(name)}
+                />
+                <button
+                  type="button"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-muted-foreground"
+                  onClick={() => setShow((s) => ({ ...s, [key]: !s[key] }))}
                 >
-                  {strength}
-                </Badge>
+                  {show[key] ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
               </div>
-            )}
+              {errors[name] && (
+                <p className="text-xs text-destructive">{errors[name]?.message}</p>
+              )}
+            </div>
+          ))}
 
-            <Button type="submit" disabled={isSubmitting}>
-              {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Update password
-            </Button>
-          </form>
-        )}
+          {newPassword.length > 0 && (
+            <div className="flex items-center gap-2 text-xs">
+              <Shield className="h-3.5 w-3.5" />
+              Strength:{" "}
+              <Badge
+                variant={
+                  strength === "strong" ? "default" : strength === "fair" ? "secondary" : "outline"
+                }
+              >
+                {strength}
+              </Badge>
+            </div>
+          )}
+
+          {isDemo && (
+            <p className="text-xs text-muted-foreground">
+              Demo mode: password is stored in this browser only.
+            </p>
+          )}
+
+          <Button type="submit" disabled={isSubmitting}>
+            {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            {required ? "Set new password" : "Update password"}
+          </Button>
+        </form>
       </CardContent>
     </Card>
   );
 }
 
-function SessionTab() {
+function SessionTab({ locked }: { locked?: boolean }) {
   const { profile, signOut, isDemo } = useAuth();
+  const idleMinutes = Math.round(SESSION_IDLE_TIMEOUT_MS / 60_000);
+
+  const handleSignOut = async () => {
+    await signOut();
+    window.location.href = "/login";
+  };
 
   return (
     <Card>
       <CardHeader>
         <CardTitle>Session</CardTitle>
         <CardDescription>
-          Idle sessions expire after 30 minutes. Tokens refresh automatically while you are active.
+          Idle sessions expire after {idleMinutes} minutes. Tokens refresh automatically while you
+          are active.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        <dl className="grid gap-2 text-sm sm:grid-cols-2">
-          <div>
-            <dt className="text-muted-foreground">User ID</dt>
-            <dd className="font-mono text-xs">{profile?.uid}</dd>
-          </div>
-          <div>
-            <dt className="text-muted-foreground">Role</dt>
-            <dd>{profile?.role ? ROLE_LABELS[profile.role] : "—"}</dd>
-          </div>
-          <div>
-            <dt className="text-muted-foreground">Last login</dt>
-            <dd>{formatDateTime(profile?.lastLoginAt)}</dd>
-          </div>
-          <div>
-            <dt className="text-muted-foreground">Mode</dt>
-            <dd>{isDemo ? "Demo" : "Firebase Auth"}</dd>
-          </div>
-        </dl>
-        <Button variant="destructive" onClick={() => signOut()}>
-          Sign out everywhere (this browser)
-        </Button>
+        {locked ? (
+          <p className="text-sm text-muted-foreground">
+            Change your password first to manage session options.
+          </p>
+        ) : (
+          <>
+            <dl className="grid gap-2 text-sm sm:grid-cols-2">
+              <div>
+                <dt className="text-muted-foreground">User ID</dt>
+                <dd className="font-mono text-xs">{profile?.uid}</dd>
+              </div>
+              <div>
+                <dt className="text-muted-foreground">Role</dt>
+                <dd>{profile?.role ? ROLE_LABELS[profile.role] : "—"}</dd>
+              </div>
+              <div>
+                <dt className="text-muted-foreground">Last login</dt>
+                <dd>{formatDateTime(profile?.lastLoginAt)}</dd>
+              </div>
+              <div>
+                <dt className="text-muted-foreground">Mode</dt>
+                <dd>{isDemo ? "Demo" : "Firebase Auth"}</dd>
+              </div>
+            </dl>
+            <Button variant="destructive" onClick={() => void handleSignOut()}>
+              Sign out (this browser)
+            </Button>
+          </>
+        )}
       </CardContent>
     </Card>
   );
@@ -255,8 +301,27 @@ function SessionTab() {
 
 function SettingsTabs() {
   const searchParams = useSearchParams();
-  const defaultTab = searchParams.get("tab") === "password" ? "password" : "profile";
-  const required = searchParams.get("reason") === "required";
+  const router = useRouter();
+  const { profile } = useAuth();
+  const required =
+    searchParams.get("reason") === "required" || Boolean(profile?.mustChangePassword);
+  const tabParam = searchParams.get("tab");
+  const [tab, setTab] = useState(
+    required || tabParam === "password"
+      ? "password"
+      : tabParam === "session"
+        ? "session"
+        : "profile"
+  );
+
+  useEffect(() => {
+    if (required) setTab("password");
+  }, [required]);
+
+  const onPasswordChanged = () => {
+    router.replace("/dashboard/settings?tab=password");
+    setTab("profile");
+  };
 
   return (
     <div className="mx-auto max-w-xl space-y-6">
@@ -271,20 +336,39 @@ function SettingsTabs() {
         </div>
       )}
 
-      <Tabs defaultValue={defaultTab}>
+      <Tabs
+        value={tab}
+        onValueChange={(v) => {
+          if (required && v !== "password") return;
+          setTab(v);
+          const next =
+            v === "password"
+              ? required
+                ? "/dashboard/settings?tab=password&reason=required"
+                : "/dashboard/settings?tab=password"
+              : v === "session"
+                ? "/dashboard/settings?tab=session"
+                : "/dashboard/settings";
+          router.replace(next);
+        }}
+      >
         <TabsList className="grid w-full grid-cols-3">
-          <TabsTrigger value="profile">Profile</TabsTrigger>
+          <TabsTrigger value="profile" disabled={required}>
+            Profile
+          </TabsTrigger>
           <TabsTrigger value="password">Password</TabsTrigger>
-          <TabsTrigger value="session">Session</TabsTrigger>
+          <TabsTrigger value="session" disabled={required}>
+            Session
+          </TabsTrigger>
         </TabsList>
         <TabsContent value="profile" className="mt-4">
-          <ProfileTab />
+          <ProfileTab locked={required} />
         </TabsContent>
         <TabsContent value="password" className="mt-4">
-          <PasswordTab />
+          <PasswordTab required={required} onChanged={onPasswordChanged} />
         </TabsContent>
         <TabsContent value="session" className="mt-4">
-          <SessionTab />
+          <SessionTab locked={required} />
         </TabsContent>
       </Tabs>
     </div>

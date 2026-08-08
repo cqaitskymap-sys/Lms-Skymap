@@ -13,7 +13,7 @@ import {
   deleteDoc,
   where,
   limit,
-} from "firebase/firestore";
+} from "firebase/firestore/lite";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import QRCode from "qrcode";
 import { db, storage, COLLECTIONS } from "@/lib/firebase/client";
@@ -23,6 +23,7 @@ import type {
 } from "@/types";
 import { generateId, nowISO } from "@/lib/services/helpers";
 import { generateCertificateNumber } from "@/lib/utils";
+import { getTrainerProfile } from "@/lib/services/training";
 import { isDemoMode } from "@/lib/demo/data";
 import {
   readCertificateStore,
@@ -118,9 +119,23 @@ async function hashString(input: string): Promise<string> {
   return Math.abs(h).toString(16);
 }
 
-function resolveTrainerName(trainerId?: string, trainerName?: string): string {
+async function resolveTrainerNameAsync(
+  trainerId?: string,
+  trainerName?: string
+): Promise<string> {
   if (trainerName) return trainerName;
   if (!trainerId) return "Assigned Trainer";
+  const profile = await getTrainerProfile(trainerId);
+  const userId = profile?.userId || trainerId;
+  try {
+    const userSnap = await getDoc(doc(db, COLLECTIONS.users, userId));
+    if (userSnap.exists()) {
+      const user = userSnap.data() as { displayName?: string };
+      if (user.displayName) return user.displayName;
+    }
+  } catch {
+    /* user lookup optional */
+  }
   return "Assigned Trainer";
 }
 
@@ -146,11 +161,53 @@ export type IssueCertificateInput = {
   signedByTitle?: string;
 };
 
+/** Issue certificate via server API (bypasses Firestore rules for employees). */
+export async function issueCertificateForAttempt(attemptId: string): Promise<Certificate | null> {
+  if (await preferLocal()) return null;
+
+  const { auth } = await import("@/lib/firebase/client");
+  const user = auth.currentUser;
+  if (!user) {
+    console.warn("[certificate] issue skipped — not signed in");
+    return null;
+  }
+
+  try {
+    const token = await user.getIdToken(true);
+    const res = await fetch("/api/certificates/issue", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ attemptId }),
+    });
+
+    if (!res.ok) {
+      const body = (await res.json().catch(() => ({}))) as { error?: string };
+      console.error("[certificate] API issue failed:", body.error || res.status);
+      return null;
+    }
+
+    const body = (await res.json()) as { certificate?: Certificate };
+    return body.certificate || null;
+  } catch (err) {
+    console.error("[certificate] API issue error:", err);
+    return null;
+  }
+}
+
 /** Issue a training certificate, generate QR, PDF, and upload to Storage when available. */
 export async function issueTrainingCertificate(
   input: IssueCertificateInput
 ): Promise<Certificate> {
-  const local = await preferLocal();
+  // Live mode: always go through server API for dedupe + rules
+  if (!(await preferLocal())) {
+    const viaApi = await issueCertificateForAttempt(input.attemptId);
+    if (viaApi) return viaApi;
+    throw new Error("Failed to issue certificate via server");
+  }
+
   const now = nowISO();
   const id = generateId("cert");
   const certificateNumber = generateCertificateNumber();
@@ -160,7 +217,7 @@ export async function issueTrainingCertificate(
   const departmentName = input.departmentName || "—";
   const sopNumber = input.sopNumber || "SOP";
   const sopTitle = input.sopTitle || "Training";
-  const trainerName = resolveTrainerName(input.trainerId, input.trainerName);
+  const trainerName = await resolveTrainerNameAsync(input.trainerId, input.trainerName);
 
   const verifyUrl = `${APP_URL}/verify/${encodeURIComponent(certificateNumber)}`;
   const qrCodeImageUrl = await QRCode.toDataURL(verifyUrl, {
@@ -208,36 +265,20 @@ export async function issueTrainingCertificate(
     createdBy: input.actorId,
   };
 
-  // Generate PDF and upload (falls back to data URL if Storage bucket is unavailable)
   try {
     const pdfBlob = await buildCertificatePdf(certificate, qrCodeImageUrl);
     const path = `certificates/${certificateNumber}.pdf`;
-
-    if (local || isDemoMode()) {
-      const dataUrl = await blobToDataUrl(pdfBlob);
-      certificate = {
-        ...certificate,
-        pdfStoragePath: `demo/${path}`,
-        pdfDownloadUrl: dataUrl,
-      };
-    } else {
-      const stored = await storeCertificatePdf(path, pdfBlob);
-      certificate = { ...certificate, ...stored };
-    }
+    const dataUrl = await blobToDataUrl(pdfBlob);
+    certificate = {
+      ...certificate,
+      pdfStoragePath: `demo/${path}`,
+      pdfDownloadUrl: dataUrl,
+    };
   } catch {
-    /* PDF optional at issue time — can regenerate client-side */
+    /* PDF optional */
   }
 
-  if (local) {
-    upsertCertificateLocal(certificate);
-  } else {
-    try {
-      await setDoc(doc(db, COLLECTIONS.certificates, id), certificate);
-    } catch {
-      upsertCertificateLocal(certificate);
-    }
-  }
-
+  upsertCertificateLocal(certificate);
   return normalizeCertificate(certificate);
 }
 
@@ -294,22 +335,53 @@ export async function getCertificateByNumber(
     );
     return found ? normalizeCertificate(found) : null;
   }
+
+  // Prefer public verify API (works without open Firestore reads)
+  try {
+    const res = await fetch(
+      `/api/certificates/verify?number=${encodeURIComponent(normalized)}`
+    );
+    if (res.ok) {
+      const body = (await res.json()) as { certificate?: Certificate | null };
+      if (body.certificate) return normalizeCertificate(body.certificate as Certificate);
+      return null;
+    }
+  } catch {
+    /* fall through */
+  }
+
   const snap = await getDocs(
     query(
       collection(db, COLLECTIONS.certificates),
-      where("certificateNumber", "==", certificateNumber.trim()),
+      where("certificateNumber", "==", normalized),
       limit(1)
     )
   );
   if (snap.empty) return null;
-  const d = snap.docs[0];
+  const d = snap.docs[0]!;
   return normalizeCertificate({ id: d.id, ...d.data() } as Certificate);
 }
 
 export async function verifyCertificate(
   certificateNumber: string
 ): Promise<CertificateVerification> {
-  const cert = await getCertificateByNumber(certificateNumber);
+  const normalized = certificateNumber.trim().toUpperCase();
+
+  if (!(await preferLocal())) {
+    try {
+      const res = await fetch(
+        `/api/certificates/verify?number=${encodeURIComponent(normalized)}`
+      );
+      if (res.ok) {
+        const body = (await res.json()) as { verification?: CertificateVerification };
+        if (body.verification) return body.verification;
+      }
+    } catch {
+      /* fall through to local/firestore */
+    }
+  }
+
+  const cert = await getCertificateByNumber(normalized);
   if (!cert) {
     return {
       valid: false,
@@ -341,11 +413,55 @@ export async function verifyCertificate(
   };
 }
 
+export async function revokeCertificate(
+  certificateId: string,
+  reason: string
+): Promise<Certificate> {
+  if (await preferLocal()) {
+    const store = readCertificateStore();
+    const idx = store.certificates.findIndex((c) => c.id === certificateId);
+    if (idx < 0) throw new Error("Certificate not found");
+    const now = nowISO();
+    const updated = {
+      ...store.certificates[idx]!,
+      isRevoked: true,
+      revokedReason: reason.trim(),
+      revokedAt: now,
+      updatedAt: now,
+    };
+    store.certificates[idx] = updated;
+    writeCertificateStore(store);
+    return normalizeCertificate(updated);
+  }
+
+  const { auth } = await import("@/lib/firebase/client");
+  const user = auth.currentUser;
+  if (!user) throw new Error("Sign in required");
+  const token = await user.getIdToken(true);
+  const res = await fetch("/api/certificates/revoke", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ certificateId, reason }),
+  });
+  const body = (await res.json().catch(() => ({}))) as {
+    success?: boolean;
+    error?: string;
+    certificate?: Certificate;
+  };
+  if (!res.ok || !body.certificate) {
+    throw new Error(body.error || "Failed to revoke certificate");
+  }
+  return normalizeCertificate(body.certificate);
+}
+
 /** Re-upload / refresh PDF for an existing certificate. */
 export async function uploadCertificatePdf(
   certificateId: string,
   blob: Blob
-): Promise<{ pdfStoragePath: string; pdfDownloadUrl: string }> {
+): Promise<{ pdfStoragePath: string; pdfDownloadUrl: string; storedRemotely: boolean }> {
   const cert = await getCertificate(certificateId);
   if (!cert) throw new Error("Certificate not found");
 
@@ -360,23 +476,35 @@ export async function uploadCertificatePdf(
       updatedAt: nowISO(),
     };
     upsertCertificateLocal(updated);
-    return { pdfStoragePath: updated.pdfStoragePath!, pdfDownloadUrl };
+    return {
+      pdfStoragePath: updated.pdfStoragePath!,
+      pdfDownloadUrl,
+      storedRemotely: false,
+    };
   }
 
-  const stored = await storeCertificatePdf(path, blob);
-  try {
-    await updateDoc(doc(db, COLLECTIONS.certificates, certificateId), {
-      ...stored,
-      updatedAt: nowISO(),
-    });
-  } catch {
-    upsertCertificateLocal({
-      ...cert,
-      ...stored,
-      updatedAt: nowISO(),
-    });
+  if (!isStorageMarkedUnavailable()) {
+    try {
+      const storageRef = ref(storage, path);
+      await uploadBytes(storageRef, blob, { contentType: "application/pdf" });
+      const pdfDownloadUrl = await getDownloadURL(storageRef);
+      const stored = { pdfStoragePath: path, pdfDownloadUrl };
+      await updateDoc(doc(db, COLLECTIONS.certificates, certificateId), {
+        ...stored,
+        updatedAt: nowISO(),
+      });
+      return { ...stored, storedRemotely: true };
+    } catch (err) {
+      markStorageUnavailable();
+      throw err instanceof Error
+        ? err
+        : new Error("Firebase Storage upload failed");
+    }
   }
-  return stored;
+
+  throw new Error(
+    "Firebase Storage is unavailable in this session. Download the PDF locally instead."
+  );
 }
 
 /** Super Admin only — permanently delete a certificate record. */
@@ -386,6 +514,21 @@ export async function deleteCertificate(certificateId: string): Promise<void> {
     store.certificates = store.certificates.filter((c) => c.id !== certificateId);
     writeCertificateStore(store);
     return;
+  }
+
+  const snap = await getDoc(doc(db, COLLECTIONS.certificates, certificateId));
+  if (snap.exists()) {
+    const cert = snap.data() as Certificate;
+    if (cert.trainingAssignmentId && !cert.trainingAssignmentId.startsWith("standalone_")) {
+      try {
+        await updateDoc(doc(db, COLLECTIONS.trainingAssignments, cert.trainingAssignmentId), {
+          certificateId: null,
+          updatedAt: nowISO(),
+        });
+      } catch {
+        /* assignment may be missing */
+      }
+    }
   }
 
   await deleteDoc(doc(db, COLLECTIONS.certificates, certificateId));

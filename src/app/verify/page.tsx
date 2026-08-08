@@ -23,21 +23,26 @@ function VerifyInner() {
     search.get("n") ||
     "";
 
-  const [number, setNumber] = useState(initial || "CERT-2026-100234");
+  const [number, setNumber] = useState(initial || "");
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<CertificateVerification | null>(null);
   const [cert, setCert] = useState<Certificate | null>(null);
   const [qr, setQr] = useState<string>();
 
   const runVerify = async (value: string) => {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      setResult({ valid: false, message: "Enter a certificate number." });
+      return;
+    }
     setLoading(true);
     setResult(null);
     setCert(null);
     try {
-      const verification = await verifyCertificate(value);
+      const verification = await verifyCertificate(trimmed);
       setResult(verification);
       if (verification.valid) {
-        const full = await getCertificateByNumber(value);
+        const full = await getCertificateByNumber(trimmed);
         setCert(full);
         if (full) {
           const url =

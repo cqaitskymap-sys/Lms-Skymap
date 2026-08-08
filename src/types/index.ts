@@ -790,6 +790,7 @@ export interface Certificate extends Timestamps {
   verificationHash: string;
   isRevoked: boolean;
   revokedReason?: string;
+  revokedAt?: string;
 }
 
 /** Public-safe payload returned by verification API / page */

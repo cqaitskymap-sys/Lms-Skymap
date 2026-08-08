@@ -2,8 +2,10 @@
 
 import { useMemo, useState } from "react";
 import { BookOpen, Loader2 } from "lucide-react";
+import { toast } from "sonner";
+import { useAuth } from "@/contexts/auth-context";
 import { useQuestionBank } from "@/hooks/use-assessment";
-import { deleteQuestion } from "@/lib/services/assessments";
+import { deactivateQuestion, deleteQuestion } from "@/lib/services/assessments";
 import { RequirePermission, Can } from "@/components/auth/require-permission";
 import { AdminDeleteButton } from "@/components/auth/admin-delete-button";
 import { AiGenerateQuestionsDialog } from "@/components/ai/ai-generate-questions-dialog";
@@ -11,6 +13,7 @@ import { CreateQuestionBankDialog } from "@/components/exams/create-question-ban
 import { CreateQuestionDialog } from "@/components/exams/create-question-dialog";
 import { QuestionTypeBadge } from "@/components/exams/question-renderer";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Select,
@@ -30,6 +33,7 @@ import {
 import { Label } from "@/components/ui/label";
 
 export default function QuestionsPage() {
+  const { profile } = useAuth();
   const [bankId, setBankId] = useState<string>("all");
   const [difficulty, setDifficulty] = useState<string>("all");
   const [type, setType] = useState<string>("all");
@@ -43,7 +47,15 @@ export default function QuestionsPage() {
     [bankId, difficulty, type]
   );
 
-  const { banks, questions, loading, refresh } = useQuestionBank(filters);
+  const { banks, questions, loading, error, refresh } = useQuestionBank(filters);
+
+  const emptyCopy = () => {
+    if (!banks.length) return "Create a question bank first.";
+    if (bankId !== "all" || difficulty !== "all" || type !== "all") {
+      return "No questions match the current filters.";
+    }
+    return "This bank has no questions yet.";
+  };
 
   return (
     <RequirePermission permission="questions:read">
@@ -52,7 +64,7 @@ export default function QuestionsPage() {
           <div>
             <h1 className="text-2xl font-bold tracking-tight">Question Bank</h1>
             <p className="text-muted-foreground">
-              MCQ · True/False · Multi-select · Scenario · Image · difficulty levels
+              MCQ · True/False · Multi-select · Scenario · difficulty levels
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -71,13 +83,22 @@ export default function QuestionsPage() {
           </div>
         </div>
 
-        {banks.length === 0 ? (
+        {error ? (
+          <Card>
+            <CardContent className="flex flex-col items-center gap-3 py-10 text-center">
+              <p className="text-sm text-destructive">{error}</p>
+              <Button variant="outline" size="sm" onClick={() => void refresh()}>
+                Retry
+              </Button>
+            </CardContent>
+          </Card>
+        ) : banks.length === 0 && !loading ? (
           <Card>
             <CardContent className="flex flex-col items-center gap-3 py-12 text-center">
               <BookOpen className="h-10 w-10 text-muted-foreground" />
               <p className="font-medium">No question banks yet</p>
               <p className="text-sm text-muted-foreground">
-                Pehle bank banao, phir questions add karo (manual ya AI).
+                Create a bank first, then add questions (manually or with AI).
               </p>
               <Can permission="questions:write">
                 <CreateQuestionBankDialog
@@ -89,7 +110,7 @@ export default function QuestionsPage() {
               </Can>
             </CardContent>
           </Card>
-        ) : (
+        ) : banks.length > 0 ? (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             {banks.map((b) => (
               <Card
@@ -97,7 +118,7 @@ export default function QuestionsPage() {
                 className={
                   bankId === b.id ? "cursor-pointer ring-1 ring-primary/40" : "cursor-pointer"
                 }
-                onClick={() => setBankId(b.id)}
+                onClick={() => setBankId((prev) => (prev === b.id ? "all" : b.id))}
               >
                 <CardHeader className="pb-2">
                   <CardTitle className="text-base">{b.name}</CardTitle>
@@ -109,7 +130,7 @@ export default function QuestionsPage() {
               </Card>
             ))}
           </div>
-        )}
+        ) : null}
 
         <Card>
           <CardHeader>
@@ -160,7 +181,6 @@ export default function QuestionsPage() {
                     <SelectItem value="true_false">True/False</SelectItem>
                     <SelectItem value="multi_select">Multi select</SelectItem>
                     <SelectItem value="scenario">Scenario</SelectItem>
-                    <SelectItem value="image">Image</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -172,11 +192,7 @@ export default function QuestionsPage() {
               </div>
             ) : questions.length === 0 ? (
               <div className="flex flex-col items-center gap-3 py-10 text-center">
-                <p className="text-sm text-muted-foreground">
-                  {banks.length
-                    ? "Is bank mein abhi koi question nahi hai."
-                    : "Pehle ek question bank create karo."}
-                </p>
+                <p className="text-sm text-muted-foreground">{emptyCopy()}</p>
                 {banks.length > 0 && (
                   <CreateQuestionDialog
                     banks={banks}
@@ -195,7 +211,7 @@ export default function QuestionsPage() {
                     <TableHead>Marks</TableHead>
                     <TableHead>−ve</TableHead>
                     <TableHead>Tags</TableHead>
-                    <TableHead className="w-12" />
+                    <TableHead className="w-24" />
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -217,7 +233,7 @@ export default function QuestionsPage() {
                       <TableCell>{q.negativeMarks ?? 0}</TableCell>
                       <TableCell>
                         <div className="flex flex-wrap gap-1">
-                          {q.tags.slice(0, 3).map((t) => (
+                          {(q.tags || []).slice(0, 3).map((t) => (
                             <Badge key={t} variant="outline" className="text-[10px]">
                               {t}
                             </Badge>
@@ -225,15 +241,39 @@ export default function QuestionsPage() {
                         </div>
                       </TableCell>
                       <TableCell>
-                        <AdminDeleteButton
-                          confirmTitle="Delete question?"
-                          confirmDescription="This question will be removed from the bank permanently."
-                          successMessage="Question deleted"
-                          onDelete={async () => {
-                            await deleteQuestion(q.id);
-                            await refresh();
-                          }}
-                        />
+                        <div className="flex items-center gap-1">
+                          <Can permission="questions:write">
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-8 text-xs"
+                              onClick={() => {
+                                if (!profile) return;
+                                void deactivateQuestion(q.id, profile.uid)
+                                  .then(() => {
+                                    toast.success("Question hidden");
+                                    return refresh();
+                                  })
+                                  .catch((err) =>
+                                    toast.error(
+                                      err instanceof Error ? err.message : "Failed to hide question"
+                                    )
+                                  );
+                              }}
+                            >
+                              Hide
+                            </Button>
+                          </Can>
+                          <AdminDeleteButton
+                            confirmTitle="Delete question permanently?"
+                            confirmDescription="This removes the question from the bank. Prefer Hide for soft-delete."
+                            successMessage="Question deleted"
+                            onDelete={async () => {
+                              await deleteQuestion(q.id);
+                              await refresh();
+                            }}
+                          />
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))}

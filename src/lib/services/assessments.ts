@@ -14,8 +14,8 @@ import {
   where,
   orderBy,
   limit,
-} from "firebase/firestore";
-import { db, COLLECTIONS } from "@/lib/firebase/client";
+} from "firebase/firestore/lite";
+import { auth, db, COLLECTIONS } from "@/lib/firebase/client";
 import type {
   AssessmentAnalytics,
   AssessmentAttempt,
@@ -46,6 +46,73 @@ import {
 async function preferLocalData(): Promise<boolean> {
   if (isDemoMode()) return true;
   return false;
+}
+
+async function authHeaders(): Promise<HeadersInit> {
+  const user = auth.currentUser;
+  if (!user) throw new Error("Sign in required");
+  const token = await user.getIdToken(true);
+  return {
+    Authorization: `Bearer ${token}`,
+    "Content-Type": "application/json",
+  };
+}
+
+/** Persist attempts without answer keys / explanations (defense in depth). */
+function attemptForPersistence(attempt: AssessmentAttempt): AssessmentAttempt {
+  return {
+    ...attempt,
+    questions: attempt.questions.map((q) => {
+      const { explanation: _e, ...rest } = q;
+      return { ...rest, correctOptionIds: [], explanation: undefined };
+    }),
+  };
+}
+
+async function recountBankQuestions(bankId: string): Promise<number> {
+  if (await preferLocalData()) {
+    const store = readAssessmentStore();
+    const count = store.questions.filter((q) => q.bankId === bankId && q.isActive).length;
+    store.banks = store.banks.map((b) =>
+      b.id === bankId ? { ...b, questionCount: count, updatedAt: nowISO() } : b
+    );
+    writeAssessmentStore(store);
+    return count;
+  }
+  const snap = await getDocs(
+    query(
+      collection(db, COLLECTIONS.questions),
+      where("bankId", "==", bankId),
+      where("isActive", "==", true)
+    )
+  );
+  const count = snap.size;
+  await updateDoc(doc(db, COLLECTIONS.questionBanks, bankId), {
+    questionCount: count,
+    updatedAt: nowISO(),
+  });
+  return count;
+}
+
+function normalizeQuestionText(text: string): string {
+  return text.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function validateQuestionPayload(
+  data: Pick<Question, "text" | "type" | "options" | "marks" | "scenario">
+): void {
+  if (!data.text?.trim()) throw new Error("Question text is required");
+  if (!(data.marks >= 1)) throw new Error("Marks must be at least 1");
+  const filled = data.options.filter((o) => o.text.trim());
+  if (filled.length < 2) throw new Error("Add at least 2 options");
+  const correct = filled.filter((o) => o.isCorrect);
+  if (!correct.length) throw new Error("Mark at least one correct option");
+  if ((data.type === "mcq" || data.type === "true_false") && correct.length !== 1) {
+    throw new Error("MCQ and True/False questions must have exactly one correct option");
+  }
+  if (data.type === "scenario" && !data.scenario?.narrative?.trim()) {
+    throw new Error("Scenario questions require a narrative");
+  }
 }
 
 async function loadExam(examId: string): Promise<Exam | null> {
@@ -92,11 +159,26 @@ export async function listQuestions(filters?: {
   let rows: Question[];
   if (await preferLocalData()) {
     rows = readAssessmentStore().questions;
+  } else if (filters?.bankId) {
+    try {
+      const snap = await getDocs(
+        query(
+          collection(db, COLLECTIONS.questions),
+          where("bankId", "==", filters.bankId),
+          where("isActive", "==", true)
+        )
+      );
+      rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Question);
+    } catch {
+      const snap = await getDocs(collection(db, COLLECTIONS.questions));
+      rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Question);
+    }
   } else {
     const snap = await getDocs(collection(db, COLLECTIONS.questions));
     rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Question);
   }
 
+  rows = rows.map((q) => ({ ...q, tags: q.tags || [] }));
   if (filters?.bankId) rows = rows.filter((q) => q.bankId === filters.bankId);
   if (filters?.difficulty) rows = rows.filter((q) => q.difficulty === filters.difficulty);
   if (filters?.type) rows = rows.filter((q) => q.type === filters.type);
@@ -133,10 +215,10 @@ export async function getAttempt(
   if (!attempt) return null;
 
   const reveal =
-    opts?.revealAnswers ||
-    attempt.status === "passed" ||
-    attempt.status === "failed" ||
-    attempt.status === "expired";
+    !!opts?.revealAnswers &&
+    (attempt.status === "passed" ||
+      attempt.status === "failed" ||
+      attempt.status === "expired");
 
   return {
     ...attempt,
@@ -152,15 +234,47 @@ export async function startAssessment(params: {
   inductionAssignmentId?: string;
   actorId?: string;
 }): Promise<AssessmentAttempt> {
+  if (!(await preferLocalData())) {
+    const res = await fetch("/api/assessments/start", {
+      method: "POST",
+      headers: await authHeaders(),
+      body: JSON.stringify({
+        examId: params.examId,
+        employeeId: params.employeeId,
+        employeeName: params.employeeName,
+        assignmentId: params.assignmentId,
+        inductionAssignmentId: params.inductionAssignmentId,
+      }),
+    });
+    const body = (await res.json().catch(() => ({}))) as {
+      success?: boolean;
+      error?: string;
+      attempt?: AssessmentAttempt;
+    };
+    if (!res.ok || !body.attempt) {
+      throw new Error(body.error || "Could not start assessment");
+    }
+    return body.attempt;
+  }
+
   const exam = await loadExam(params.examId);
   if (!exam) throw new Error("Exam not found");
 
-  // Enforce max attempts
   const prior = await listAttemptsForEmployee(params.examId, params.employeeId);
+  const now = new Date();
+  const open = prior.filter((a) => a.status === "in_progress");
+  const resumable = open.find((a) => new Date(a.expiresAt) > now);
+  if (resumable) {
+    return {
+      ...resumable,
+      questions: sanitizeAttemptForClient(resumable.questions, false),
+    };
+  }
+
   const finished = prior.filter((a) =>
     ["passed", "failed", "expired"].includes(a.status)
   );
-  if (finished.length >= exam.maxAttempts) {
+  if (finished.length + open.length >= exam.maxAttempts) {
     throw new Error(`Maximum attempts (${exam.maxAttempts}) reached for this exam`);
   }
 
@@ -168,11 +282,9 @@ export async function startAssessment(params: {
   const selected = selectQuestionsForExam(pool, exam);
   if (!selected.length) throw new Error("No questions available in the question bank");
 
-  const now = new Date();
   const expiresAt = new Date(now.getTime() + exam.durationMinutes * 60 * 1000);
   const id = generateId("att");
   const actorId = params.actorId || params.employeeId;
-
   const attemptQuestions = toAttemptQuestions(selected, exam);
 
   const attempt: AssessmentAttempt = {
@@ -197,24 +309,7 @@ export async function startAssessment(params: {
       : {}),
   };
 
-  if (await preferLocalData()) {
-    pushAttemptLocal(attempt);
-  } else {
-    try {
-      await setDoc(
-        doc(db, COLLECTIONS.assessmentAttempts, id),
-        stripUndefined(attempt)
-      );
-    } catch (err) {
-      console.error("[startAssessment] Firestore write failed:", err);
-      // Keep local copy so the user can still continue offline/demo-style
-      pushAttemptLocal(attempt);
-      throw err instanceof Error
-        ? err
-        : new Error("Missing or insufficient permissions.");
-    }
-  }
-
+  pushAttemptLocal(attempt);
   return {
     ...attempt,
     questions: sanitizeAttemptForClient(attempt.questions, false),
@@ -262,16 +357,27 @@ export async function submitAssessment(
   answers: Record<string, string[]>,
   actorId: string
 ): Promise<AssessmentAttempt> {
-  const local = await preferLocalData();
-  let attempt: AssessmentAttempt | null = null;
+  if (!(await preferLocalData())) {
+    const res = await fetch("/api/assessments/submit", {
+      method: "POST",
+      headers: await authHeaders(),
+      body: JSON.stringify({ attemptId, answers }),
+    });
+    const body = (await res.json().catch(() => ({}))) as {
+      success?: boolean;
+      error?: string;
+      attempt?: AssessmentAttempt;
+    };
+    if (!res.ok || !body.attempt) {
+      throw new Error(body.error || "Could not submit assessment");
+    }
+    return body.attempt;
+  }
+
+  const attempt: AssessmentAttempt | null =
+    readAssessmentStore().attempts.find((a) => a.id === attemptId) || null;
   let exam: Exam | null = null;
 
-  if (local) {
-    attempt = readAssessmentStore().attempts.find((a) => a.id === attemptId) || null;
-  } else {
-    const snap = await getDoc(doc(db, COLLECTIONS.assessmentAttempts, attemptId));
-    if (snap.exists()) attempt = { id: snap.id, ...snap.data() } as AssessmentAttempt;
-  }
   if (!attempt) throw new Error("Attempt not found");
   if (attempt.status !== "in_progress") throw new Error("Attempt already submitted");
 
@@ -282,7 +388,19 @@ export async function submitAssessment(
   const expired = now > new Date(attempt.expiresAt);
   const mergedAnswers = { ...(attempt.answersDraft || {}), ...answers };
 
-  const evaluated = evaluateAttempt(attempt.questions, mergedAnswers, exam);
+  const bankQuestions = await loadBankQuestions(exam);
+  const keyById = new Map(
+    bankQuestions.map((q) => [
+      q.id,
+      q.options.filter((o) => o.isCorrect).map((o) => o.id),
+    ])
+  );
+  const questionsWithKeys = attempt.questions.map((q) => ({
+    ...q,
+    correctOptionIds: keyById.get(q.questionId) || q.correctOptionIds || [],
+  }));
+
+  const evaluated = evaluateAttempt(questionsWithKeys, mergedAnswers, exam);
   const passed = !expired && evaluated.passed;
   const certificateEligible = !expired && evaluated.certificateEligible;
 
@@ -325,41 +443,30 @@ export async function submitAssessment(
     createdBy: actorId,
   };
 
-  if (local) {
-    const store = readAssessmentStore();
-    const idx = store.attempts.findIndex((a) => a.id === attemptId);
-    if (idx >= 0) store.attempts[idx] = updated;
-    else store.attempts.unshift(updated);
+  const store = readAssessmentStore();
+  const idx = store.attempts.findIndex((a) => a.id === attemptId);
+  if (idx >= 0) store.attempts[idx] = updated;
+  else store.attempts.unshift(updated);
 
-    const peers = [
-      ...store.results.filter((r) => r.examId === exam.id && r.attemptId !== result.attemptId),
-      result,
-    ].sort((a, b) => {
-      if (b.percentage !== a.percentage) return b.percentage - a.percentage;
-      return a.timeSpentSeconds - b.timeSpentSeconds;
-    });
-    peers.forEach((r, i) => {
-      r.rank = i + 1;
-    });
-    result.rank = peers.find((r) => r.attemptId === result.attemptId)?.rank;
-    updated.rank = result.rank;
-    if (idx >= 0) store.attempts[idx] = updated;
+  const peers = [
+    ...store.results.filter((r) => r.examId === exam!.id && r.attemptId !== result.attemptId),
+    result,
+  ].sort((a, b) => {
+    if (b.percentage !== a.percentage) return b.percentage - a.percentage;
+    return a.timeSpentSeconds - b.timeSpentSeconds;
+  });
+  peers.forEach((r, i) => {
+    r.rank = i + 1;
+  });
+  result.rank = peers.find((r) => r.attemptId === result.attemptId)?.rank;
+  updated.rank = result.rank;
+  if (idx >= 0) store.attempts[idx] = updated;
 
-    store.results = [
-      ...store.results.filter((r) => r.examId !== exam.id),
-      ...peers,
-    ];
-    writeAssessmentStore(store);
-  } else {
-    await setDoc(
-      doc(db, COLLECTIONS.assessmentAttempts, attemptId),
-      stripUndefined(updated)
-    );
-    await setDoc(
-      doc(db, COLLECTIONS.examResults, result.id),
-      stripUndefined(result)
-    );
-  }
+  store.results = [
+    ...store.results.filter((r) => r.examId !== exam!.id),
+    ...peers,
+  ];
+  writeAssessmentStore(store);
 
   if (attempt.assignmentId) {
     await handleTrainingAssessmentResult(attempt.assignmentId, updated, exam, actorId);
@@ -381,34 +488,35 @@ export async function submitAssessment(
     }
   }
 
-  // Auto-issue training certificate when eligible (once per attempt)
   if (updated.passed && updated.certificateEligible) {
     try {
-      const { issueTrainingCertificate, listCertificates } = await import(
-        "@/lib/services/certificates"
-      );
+      const { issueTrainingCertificate, listCertificates } =
+        await import("@/lib/services/certificates");
       const existing = (await listCertificates()).find((c) => c.attemptId === updated.id);
       if (!existing) {
-        const examDoc = exam!;
         await issueTrainingCertificate({
           employeeId: updated.employeeId,
           employeeName: updated.employeeName,
           trainingAssignmentId: updated.assignmentId || `standalone_${updated.id}`,
-          sopId: examDoc.sopId || examDoc.inductionModuleId || `standalone_${examDoc.id}`,
-          sopVersionId: examDoc.sopId ? "sopv_current" : "n/a",
-          examId: examDoc.id,
+          sopId: exam.sopId || exam.inductionModuleId || `standalone_${exam.id}`,
+          sopVersionId: exam.sopId ? "sopv_current" : "n/a",
+          examId: exam.id,
           attemptId: updated.id,
           score: updated.score || 0,
           percentage: updated.percentage || 0,
           actorId,
         });
       }
-    } catch {
-      /* non-blocking — certificate page can re-issue */
+    } catch (err) {
+      console.error("[submitAssessment] certificate issue failed:", err);
     }
   }
 
-  return updated;
+  const reveal = !!exam.allowReview && !!exam.showResultsImmediately;
+  return {
+    ...updated,
+    questions: sanitizeAttemptForClient(updated.questions, reveal),
+  };
 }
 
 async function handleTrainingAssessmentResult(
@@ -436,22 +544,26 @@ async function handleTrainingAssessmentResult(
   }
 
   if (attempt.passed) {
-    const cert = await issueCertificate({
-      employeeId: attempt.employeeId,
-      trainingAssignmentId: assignmentId,
-      examId: exam.id,
-      attemptId: attempt.id!,
-      score: attempt.score!,
-      percentage: attempt.percentage!,
-      actorId,
-    });
+    let certId: string | undefined;
+    if (attempt.certificateEligible) {
+      const cert = await issueCertificate({
+        employeeId: attempt.employeeId,
+        trainingAssignmentId: assignmentId,
+        examId: exam.id,
+        attemptId: attempt.id!,
+        score: attempt.score!,
+        percentage: attempt.percentage!,
+        actorId,
+      });
+      certId = cert.id;
+    }
 
     await updateDoc(doc(db, COLLECTIONS.trainingAssignments, assignmentId), {
       status: "passed",
       score: attempt.percentage,
       passed: true,
       assessmentAttemptId: attempt.id,
-      certificateId: cert.id,
+      ...(certId ? { certificateId: certId } : {}),
       updatedAt: now,
       updatedBy: actorId,
     });
@@ -470,13 +582,16 @@ async function handleTrainingAssessmentResult(
       };
       await markExamLifecycle(attempt.employeeId, actor);
       await markPassedLifecycle(attempt.employeeId, actor, attempt.percentage);
-      await markCertifiedLifecycle(attempt.employeeId, cert.id, actor);
-      await markQualifiedLifecycle(attempt.employeeId, actor);
+      if (certId) {
+        await markCertifiedLifecycle(attempt.employeeId, certId, actor);
+        await markQualifiedLifecycle(attempt.employeeId, actor);
+      }
     } catch {
       /* lifecycle may already be ahead */
     }
   } else {
     const assignSnap = await getDoc(doc(db, COLLECTIONS.trainingAssignments, assignmentId));
+    if (!assignSnap.exists()) return;
     const prev = assignSnap.data() as TrainingAssignment;
 
     await updateDoc(doc(db, COLLECTIONS.trainingAssignments, assignmentId), {
@@ -507,7 +622,7 @@ async function handleTrainingAssessmentResult(
       updatedAt: now,
       createdBy: actorId,
     };
-    await setDoc(doc(db, COLLECTIONS.trainingAssignments, retrainId), retraining);
+    await setDoc(doc(db, COLLECTIONS.trainingAssignments, retrainId), stripUndefined(retraining));
   }
 }
 
@@ -521,6 +636,12 @@ export async function issueCertificate(params: {
   actorId: string;
   trainerId?: string;
 }): Promise<Certificate> {
+  if (!(await preferLocalData())) {
+    const { issueCertificateForAttempt } = await import("@/lib/services/certificates");
+    const viaApi = await issueCertificateForAttempt(params.attemptId);
+    if (viaApi) return viaApi;
+  }
+
   const { issueTrainingCertificate } = await import("@/lib/services/certificates");
 
   let sopId = `standalone_${params.examId}`;
@@ -760,11 +881,19 @@ export async function createQuestionBank(
   },
   actorId: string
 ): Promise<QuestionBank> {
+  const name = data.name.trim();
+  if (!name) throw new Error("Bank name is required");
+
+  const existing = await listQuestionBanks();
+  if (existing.some((b) => b.name.trim().toLowerCase() === name.toLowerCase())) {
+    throw new Error("A question bank with this name already exists");
+  }
+
   const id = generateId("qb");
   const now = nowISO();
   const bank: QuestionBank = {
     id,
-    name: data.name.trim(),
+    name,
     description: data.description?.trim(),
     sopId: data.sopId,
     departmentId: data.departmentId,
@@ -782,13 +911,7 @@ export async function createQuestionBank(
     return bank;
   }
 
-  try {
-    await setDoc(doc(db, COLLECTIONS.questionBanks, id), bank);
-  } catch {
-    const store = readAssessmentStore();
-    store.banks.push(bank);
-    writeAssessmentStore(store);
-  }
+  await setDoc(doc(db, COLLECTIONS.questionBanks, id), stripUndefined(bank));
   return bank;
 }
 
@@ -796,11 +919,23 @@ export async function createQuestion(
   data: Omit<Question, "id" | "createdAt" | "updatedAt" | "createdBy">,
   actorId: string
 ): Promise<Question> {
+  validateQuestionPayload(data);
+
+  const existing = await listQuestions({ bankId: data.bankId });
+  const normalized = normalizeQuestionText(data.text);
+  if (existing.some((q) => normalizeQuestionText(q.text) === normalized)) {
+    throw new Error("A similar question already exists in this bank");
+  }
+
   const id = generateId("q");
   const now = nowISO();
   const question: Question = {
     ...data,
+    text: data.text.trim(),
+    tags: data.tags || [],
+    options: data.options.map((o) => ({ ...o, text: o.text.trim() })),
     id,
+    isActive: data.isActive !== false,
     createdAt: now,
     updatedAt: now,
     createdBy: actorId,
@@ -809,65 +944,163 @@ export async function createQuestion(
   if (await preferLocalData()) {
     const store = readAssessmentStore();
     store.questions.push(question);
-    store.banks = store.banks.map((b) =>
-      b.id === question.bankId
-        ? {
-            ...b,
-            questionCount: store.questions.filter((q) => q.bankId === b.id && q.isActive).length,
-          }
-        : b
-    );
     writeAssessmentStore(store);
+    await recountBankQuestions(question.bankId);
     return question;
   }
 
+  await setDoc(doc(db, COLLECTIONS.questions, id), stripUndefined(question));
   try {
-    await setDoc(doc(db, COLLECTIONS.questions, id), question);
-    try {
-      const bankSnap = await getDoc(doc(db, COLLECTIONS.questionBanks, question.bankId));
-      if (bankSnap.exists()) {
-        const count =
-          (
-            await getDocs(
-              query(
-                collection(db, COLLECTIONS.questions),
-                where("bankId", "==", question.bankId),
-                where("isActive", "==", true)
-              )
-            )
-          ).size || 0;
-        await updateDoc(doc(db, COLLECTIONS.questionBanks, question.bankId), {
-          questionCount: count,
-          updatedAt: now,
-        });
-      }
-    } catch {
-      /* count update non-blocking */
-    }
+    await recountBankQuestions(question.bankId);
   } catch {
-    const store = readAssessmentStore();
-    store.questions.push(question);
-    store.banks = store.banks.map((b) =>
-      b.id === question.bankId
-        ? {
-            ...b,
-            questionCount: store.questions.filter((q) => q.bankId === b.id && q.isActive).length,
-          }
-        : b
-    );
-    writeAssessmentStore(store);
+    /* count update non-blocking */
   }
   return question;
+}
+
+export async function updateQuestion(
+  questionId: string,
+  patch: Partial<
+    Pick<
+      Question,
+      | "text"
+      | "type"
+      | "options"
+      | "explanation"
+      | "difficulty"
+      | "marks"
+      | "negativeMarks"
+      | "tags"
+      | "scenario"
+      | "isActive"
+    >
+  >,
+  actorId: string
+): Promise<Question> {
+  let current: Question | null = null;
+  if (await preferLocalData()) {
+    current = readAssessmentStore().questions.find((q) => q.id === questionId) || null;
+  } else {
+    const snap = await getDoc(doc(db, COLLECTIONS.questions, questionId));
+    if (snap.exists()) current = { id: snap.id, ...snap.data() } as Question;
+  }
+  if (!current) throw new Error("Question not found");
+
+  const next: Question = {
+    ...current,
+    ...patch,
+    updatedAt: nowISO(),
+    updatedBy: actorId,
+  };
+  validateQuestionPayload(next);
+
+  if (await preferLocalData()) {
+    const store = readAssessmentStore();
+    store.questions = store.questions.map((q) => (q.id === questionId ? next : q));
+    writeAssessmentStore(store);
+    await recountBankQuestions(next.bankId);
+    return next;
+  }
+
+  await setDoc(doc(db, COLLECTIONS.questions, questionId), stripUndefined(next));
+  await recountBankQuestions(next.bankId);
+  return next;
+}
+
+/** Soft-delete — hides from banks while preserving historical attempt references. */
+export async function deactivateQuestion(
+  questionId: string,
+  actorId: string
+): Promise<void> {
+  await updateQuestion(questionId, { isActive: false }, actorId);
+}
+
+/** Super Admin only — permanently delete a question and recount the bank. */
+export async function deleteQuestion(questionId: string): Promise<void> {
+  if (await preferLocalData()) {
+    const store = readAssessmentStore();
+    const removed = store.questions.find((q) => q.id === questionId);
+    store.questions = store.questions.filter((q) => q.id !== questionId);
+    writeAssessmentStore(store);
+    if (removed) await recountBankQuestions(removed.bankId);
+    return;
+  }
+
+  const snap = await getDoc(doc(db, COLLECTIONS.questions, questionId));
+  if (!snap.exists()) return;
+  const bankId = (snap.data() as Question).bankId;
+  await deleteDoc(doc(db, COLLECTIONS.questions, questionId));
+  await recountBankQuestions(bankId);
+}
+
+/** Soft-deactivate a question bank (blocked if active exams reference it). */
+export async function deactivateQuestionBank(
+  bankId: string,
+  actorId: string
+): Promise<void> {
+  const exams = await listExams();
+  const linked = exams.filter(
+    (e) => e.bankId === bankId || e.bankIds?.includes(bankId)
+  );
+  if (linked.length) {
+    throw new Error(
+      `Cannot deactivate bank — ${linked.length} active exam(s) still reference it`
+    );
+  }
+
+  const now = nowISO();
+  if (await preferLocalData()) {
+    const store = readAssessmentStore();
+    store.banks = store.banks.map((b) =>
+      b.id === bankId ? { ...b, isActive: false, updatedAt: now, updatedBy: actorId } : b
+    );
+    writeAssessmentStore(store);
+    return;
+  }
+
+  await updateDoc(doc(db, COLLECTIONS.questionBanks, bankId), {
+    isActive: false,
+    updatedAt: now,
+    updatedBy: actorId,
+  });
 }
 
 export async function createExam(
   data: Omit<Exam, "id" | "createdAt" | "updatedAt" | "createdBy">,
   actorId: string
 ): Promise<Exam> {
+  if (data.questionCount < 1) throw new Error("Exam must include at least 1 question");
+  if (data.durationMinutes < 1 || data.durationMinutes > 480) {
+    throw new Error("Duration must be between 1 and 480 minutes");
+  }
+  if (data.passPercentage < 1 || data.passPercentage > 100) {
+    throw new Error("Pass percentage must be between 1 and 100");
+  }
+  if (data.maxAttempts < 1 || data.maxAttempts > 20) {
+    throw new Error("Max attempts must be between 1 and 20");
+  }
+  const certPass = data.certificatePassPercentage ?? data.passPercentage;
+  if (certPass < data.passPercentage || certPass > 100) {
+    throw new Error("Certificate pass % must be ≥ exam pass % and ≤ 100");
+  }
+
+  const pool = await loadBankQuestions({ ...data, id: "preview" } as Exam);
+  const available = pool.filter(
+    (q) =>
+      q.isActive &&
+      (q.bankId === data.bankId || data.bankIds?.includes(q.bankId))
+  ).length;
+  if (available > 0 && available < data.questionCount) {
+    throw new Error(
+      `Question bank has only ${available} active question(s); need ${data.questionCount}`
+    );
+  }
+
   const id = generateId("exam");
   const now = nowISO();
   const exam: Exam = {
     ...data,
+    certificatePassPercentage: certPass,
     id,
     createdAt: now,
     updatedAt: now,
@@ -885,30 +1118,6 @@ export async function createExam(
   return exam;
 }
 
-/** Super Admin only — delete a question from the bank. */
-export async function deleteQuestion(questionId: string): Promise<void> {
-  if (await preferLocalData()) {
-    const store = readAssessmentStore();
-    const removed = store.questions.find((q) => q.id === questionId);
-    store.questions = store.questions.filter((q) => q.id !== questionId);
-    if (removed) {
-      store.banks = store.banks.map((b) =>
-        b.id === removed.bankId
-          ? {
-              ...b,
-              questionCount: store.questions.filter((q) => q.bankId === b.id && q.isActive)
-                .length,
-            }
-          : b
-      );
-    }
-    writeAssessmentStore(store);
-    return;
-  }
-
-  await deleteDoc(doc(db, COLLECTIONS.questions, questionId));
-}
-
 /** Super Admin only — delete an exam definition. */
 export async function deleteExam(examId: string): Promise<void> {
   if (await preferLocalData()) {
@@ -920,5 +1129,13 @@ export async function deleteExam(examId: string): Promise<void> {
     return;
   }
 
+  const [attempts, results] = await Promise.all([
+    getDocs(query(collection(db, COLLECTIONS.assessmentAttempts), where("examId", "==", examId))),
+    getDocs(query(collection(db, COLLECTIONS.examResults), where("examId", "==", examId))),
+  ]);
+  await Promise.all([
+    ...attempts.docs.map((d) => deleteDoc(d.ref)),
+    ...results.docs.map((d) => deleteDoc(d.ref)),
+  ]);
   await deleteDoc(doc(db, COLLECTIONS.exams, examId));
 }

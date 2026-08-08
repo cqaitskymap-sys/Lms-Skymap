@@ -1,13 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
 import { RequirePermission } from "@/components/auth/require-permission";
 import { useAuth } from "@/contexts/auth-context";
 import { hasPermission } from "@/lib/rbac/permissions";
-import { listEmployeesForLifecycle, assignSopLifecycle, assignTrainerLifecycle } from "@/lib/services/lifecycle";
+import { listEmployeesForLifecycle, assignSopLifecycle, assignTrainerLifecycle, validateTrainingAssignmentLifecycle } from "@/lib/services/lifecycle";
 import { listSopsDetailed } from "@/lib/services/sops";
 import { listStaffUsers } from "@/lib/services/users";
 import {
@@ -15,6 +15,7 @@ import {
   ensureTrainerProfilesFromUsers,
   listTrainingAssignments,
   listTrainers,
+  type TrainingAssignmentFilters,
 } from "@/lib/services/training";
 import { TRAINING_UPDATED_EVENT } from "@/lib/training/demo-store";
 import { Button } from "@/components/ui/button";
@@ -54,32 +55,67 @@ export default function TrainingPage() {
   const [assignments, setAssignments] = useState<TrainingAssignment[]>([]);
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const assignmentFilters = useMemo((): TrainingAssignmentFilters | undefined => {
+    if (!profile) return undefined;
+    if (profile.role === "employee" && profile.employeeId) {
+      return { employeeId: profile.employeeId };
+    }
+    if (profile.role === "trainer") {
+      return { trainerUserId: profile.uid };
+    }
+    if (profile.role === "department_head" && profile.departmentId) {
+      return { departmentId: profile.departmentId };
+    }
+    return undefined;
+  }, [profile]);
+
+  const assignableEmployees = useMemo(() => {
+    if (profile?.role === "department_head" && profile.departmentId) {
+      return employees.filter((e) => e.departmentId === profile.departmentId);
+    }
+    return employees;
+  }, [employees, profile?.departmentId, profile?.role]);
 
   const refresh = useCallback(async () => {
     setLoading(true);
+    setError(null);
     try {
       const staffPromise = canReadUsers
         ? listStaffUsers().catch(() => [] as UserProfile[])
         : Promise.resolve([] as UserProfile[]);
-      const [emps, sopList, staff, asg] = await Promise.all([
-        listEmployeesForLifecycle(),
+
+      // Employees cannot list the employees collection — load self only.
+      const employeesPromise =
+        profile?.role === "employee"
+          ? profile.employeeId
+            ? listEmployeesForLifecycle({ employeeId: profile.employeeId })
+            : Promise.resolve([] as Employee[])
+          : listEmployeesForLifecycle();
+
+      const [emps, sopList, staff, asg, existingTrainers] = await Promise.all([
+        employeesPromise,
         listSopsDetailed({ status: "approved" }),
         staffPromise,
-        listTrainingAssignments(),
+        listTrainingAssignments(assignmentFilters),
+        listTrainers(),
       ]);
       setEmployees(emps);
       setSops(sopList);
       setUsers(staff);
       setAssignments(asg);
-      const trainerProfiles =
-        staff.length > 0
-          ? await ensureTrainerProfilesFromUsers(staff)
-          : await listTrainers();
+      let trainerProfiles = existingTrainers;
+      if (staff.length > 0) {
+        trainerProfiles = await ensureTrainerProfilesFromUsers(staff);
+      }
       setTrainers(trainerProfiles);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load training data");
     } finally {
       setLoading(false);
     }
-  }, [canReadUsers]);
+  }, [canReadUsers, assignmentFilters, profile?.role, profile?.employeeId]);
 
   useEffect(() => {
     void refresh();
@@ -114,9 +150,31 @@ export default function TrainingPage() {
       return;
     }
 
+    const deptMismatch = selectedEmployees.filter((id) => {
+      const emp = employees.find((e) => e.id === id);
+      return emp && emp.departmentId !== departmentId;
+    });
+    if (deptMismatch.length) {
+      toast.error("All selected employees must belong to the same department");
+      return;
+    }
+
+    const lifecycleErrors: string[] = [];
+    for (const empId of selectedEmployees) {
+      try {
+        await validateTrainingAssignmentLifecycle(empId);
+      } catch (err) {
+        lifecycleErrors.push(err instanceof Error ? err.message : String(err));
+      }
+    }
+    if (lifecycleErrors.length) {
+      toast.error(lifecycleErrors[0]!);
+      return;
+    }
+
     setBusy(true);
     try {
-      const { session } = await assignSopTraining({
+      const { session, skipped } = await assignSopTraining({
         employeeIds: selectedEmployees,
         sopId,
         sopVersionId: sop.currentVersionId || sop.version!.id,
@@ -133,15 +191,16 @@ export default function TrainingPage() {
         role: profile.role,
       };
       for (const empId of selectedEmployees) {
-        try {
-          await assignTrainerLifecycle(empId, trainerId, actor);
-          await assignSopLifecycle(empId, sopId, actor);
-        } catch {
-          /* lifecycle may already be ahead */
-        }
+        if (skipped.includes(empId)) continue;
+        await assignTrainerLifecycle(empId, trainerId, actor);
+        await assignSopLifecycle(empId, sopId, actor);
       }
 
-      toast.success(`Training assigned · session ${session.id}`);
+      const msg =
+        skipped.length > 0
+          ? `Training assigned for ${selectedEmployees.length - skipped.length} employee(s) · ${skipped.length} skipped (duplicate)`
+          : `Training assigned · session ${session.id}`;
+      toast.success(msg);
       setSelectedEmployees([]);
       setSopId("");
       setTrainerId("");
@@ -177,6 +236,10 @@ export default function TrainingPage() {
           Assign SOP training, schedule sessions, track progress
         </p>
       </div>
+
+      {error && (
+        <p className="text-sm text-destructive">{error}</p>
+      )}
 
       <RequirePermission permission="training:write" fallback={null}>
         <Card>
@@ -256,7 +319,7 @@ export default function TrainingPage() {
                     )}
                   </p>
                 ) : (
-                  employees.map((e) => (
+                  assignableEmployees.map((e) => (
                     <label
                       key={e.id}
                       className="flex cursor-pointer items-center gap-3 rounded-md p-2 hover:bg-accent/50"

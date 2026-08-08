@@ -10,13 +10,16 @@ import {
   getDocs,
   setDoc,
   updateDoc,
-  deleteDoc,
   query,
   where,
   orderBy,
   limit,
-} from "firebase/firestore";
+  startAfter,
+  type QueryDocumentSnapshot,
+  type DocumentData,
+} from "firebase/firestore/lite";
 import { db, COLLECTIONS } from "@/lib/firebase/client";
+import { auth } from "@/lib/firebase/client";
 import type {
   Employee,
   LifecycleApproval,
@@ -29,13 +32,14 @@ import type {
 import {
   getProgressForStage,
   getStageDefinition,
+  getStageIndex,
   nextStage,
 } from "@/lib/lifecycle/stages";
 import { generateId, nowISO } from "@/lib/services/helpers";
 import { isDemoMode } from "@/lib/demo/data";
+import { createNotification } from "@/lib/services/notifications";
 import {
   appendDemoEvent,
-  appendDemoNotification,
   readLifecycleStore,
   upsertDemoApproval,
   upsertDemoEmployee,
@@ -58,26 +62,7 @@ async function notifyUser(params: {
   link?: string;
   actorId: string;
 }): Promise<void> {
-  const now = nowISO();
-  const notification: Notification = {
-    id: generateId("notif"),
-    userId: params.userId,
-    type: params.type,
-    title: params.title,
-    message: params.message,
-    isRead: false,
-    createdAt: now,
-    updatedAt: now,
-    createdBy: params.actorId,
-    ...(params.link ? { link: params.link } : {}),
-  };
-
-  if (isDemoMode()) {
-    appendDemoNotification(notification);
-    return;
-  }
-
-  await setDoc(doc(db, COLLECTIONS.notifications, notification.id), notification);
+  await createNotification(params);
 }
 
 async function writeEvent(event: LifecycleEvent): Promise<void> {
@@ -224,7 +209,7 @@ export async function listPendingApprovals(): Promise<LifecycleApproval[]> {
   }
 }
 
-/** Super Admin only — removes employee + related lifecycle records. */
+/** Super Admin only — removes employee + related lifecycle records (+ Auth in live mode). */
 export async function deleteEmployeeLifecycle(employeeId: string): Promise<void> {
   if (isDemoMode()) {
     const store = readLifecycleStore();
@@ -235,34 +220,66 @@ export async function deleteEmployeeLifecycle(employeeId: string): Promise<void>
     return;
   }
 
-  await deleteDoc(doc(db, COLLECTIONS.employees, employeeId));
-
-  try {
-    const [eventsSnap, approvalsSnap] = await Promise.all([
-      getDocs(
-        query(collection(db, COLLECTIONS.lifecycleEvents), where("employeeId", "==", employeeId))
-      ),
-      getDocs(
-        query(collection(db, COLLECTIONS.lifecycleApprovals), where("employeeId", "==", employeeId))
-      ),
-    ]);
-    await Promise.all([
-      ...eventsSnap.docs.map((d) => deleteDoc(d.ref)),
-      ...approvalsSnap.docs.map((d) => deleteDoc(d.ref)),
-    ]);
-  } catch {
-    /* related cleanup best-effort */
+  if (!auth.currentUser) {
+    throw new Error("You must be signed in to delete employees");
+  }
+  const token = await auth.currentUser.getIdToken(true);
+  const res = await fetch(`/api/employees/${employeeId}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const json = (await res.json().catch(() => ({}))) as { error?: string };
+  if (!res.ok) {
+    throw new Error(json.error || "Delete failed");
   }
 }
 
-export async function listEmployeesForLifecycle(): Promise<Employee[]> {
+const EMPLOYEE_LIST_PAGE = 200;
+
+export type ListEmployeesOpts = {
+  /** When set, fetch only this employee doc (safe for employee role). */
+  employeeId?: string;
+};
+
+/**
+ * List employees for lifecycle UIs.
+ * Staff roles may list the collection. Pass `employeeId` for self-scoped reads
+ * (employees cannot run an unfiltered collection query under security rules).
+ */
+export async function listEmployeesForLifecycle(
+  opts?: ListEmployeesOpts
+): Promise<Employee[]> {
   if (isDemoMode()) {
-    return readLifecycleStore().employees;
+    const rows = readLifecycleStore().employees;
+    if (opts?.employeeId) {
+      return rows.filter((e) => e.id === opts.employeeId);
+    }
+    return rows;
   }
-  const snap = await getDocs(
-    query(collection(db, COLLECTIONS.employees), orderBy("createdAt", "desc"), limit(100))
-  );
-  return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Employee);
+
+  if (opts?.employeeId) {
+    const snap = await getDoc(doc(db, COLLECTIONS.employees, opts.employeeId));
+    if (!snap.exists()) return [];
+    return [{ id: snap.id, ...snap.data() } as Employee];
+  }
+
+  const all: Employee[] = [];
+  let cursor: QueryDocumentSnapshot<DocumentData> | undefined;
+
+  while (true) {
+    const base = [orderBy("createdAt", "desc"), limit(EMPLOYEE_LIST_PAGE)] as const;
+    const snap = cursor
+      ? await getDocs(
+          query(collection(db, COLLECTIONS.employees), ...base, startAfter(cursor))
+        )
+      : await getDocs(query(collection(db, COLLECTIONS.employees), ...base));
+    if (snap.empty) break;
+    all.push(...snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Employee));
+    if (snap.size < EMPLOYEE_LIST_PAGE) break;
+    cursor = snap.docs[snap.docs.length - 1];
+  }
+
+  return all;
 }
 
 /** Create employee at lifecycle stage `created` and queue HR verification approval. */
@@ -394,6 +411,14 @@ export async function advanceLifecycle(params: {
 }): Promise<Employee> {
   const { employee } = await getEmployeeLifecycle(params.employeeId);
   if (!employee) throw new Error("Employee not found");
+
+  const fromIdx = getStageIndex(employee.lifecycleStage);
+  const toIdx = getStageIndex(params.toStage);
+  if (toIdx < fromIdx && params.toStage !== employee.lifecycleStage) {
+    throw new Error(
+      `Cannot regress lifecycle from ${employee.lifecycleStage} to ${params.toStage}`
+    );
+  }
 
   const def = getStageDefinition(params.toStage);
   const alreadyAtStage = employee.lifecycleStage === params.toStage;
@@ -604,6 +629,9 @@ export async function assignInductionLifecycle(
 ): Promise<Employee> {
   const { employee } = await getEmployeeLifecycle(employeeId);
   if (!employee) throw new Error("Employee not found");
+  if (!employee.verifiedAt) {
+    throw new Error("Complete HR verification before assigning induction modules");
+  }
 
   const { assignInductionModules } = await import("@/lib/services/induction");
   await assignInductionModules(employeeId, moduleIds, actor.uid);
@@ -635,6 +663,9 @@ export async function completeInductionLifecycle(
     );
   }
 
+  const { assertEmployeeInductionComplete } = await import("@/lib/services/induction");
+  await assertEmployeeInductionComplete(employeeId);
+
   return advanceLifecycle({
     employeeId,
     toStage: "induction_completed",
@@ -661,9 +692,20 @@ export async function handoverLifecycle(
   departmentId: string,
   actor: LifecycleActor
 ): Promise<Employee> {
+  const { listDepartments } = await import("@/lib/services/departments");
+  const departments = await listDepartments().catch(() => []);
+  const department = departments.find((d) => d.id === departmentId);
+  if (!department) {
+    throw new Error("Department not found");
+  }
+  if (!department.isActive) {
+    throw new Error(`Department "${department.name}" is inactive`);
+  }
+  const departmentName = department.name || department.code;
+
   if (!isDemoMode()) {
     const { handoverEmployee } = await import("@/lib/services/employees");
-    await handoverEmployee(employeeId, departmentId, actor.uid);
+    await handoverEmployee(employeeId, departmentId, actor.uid, departmentName);
   }
 
   return advanceLifecycle({
@@ -671,9 +713,10 @@ export async function handoverLifecycle(
     toStage: "department_handover",
     actor,
     description: "Employee handed over to department",
-    metadata: { departmentId },
+    metadata: { departmentId, ...(departmentName ? { departmentName } : {}) },
     employeePatch: {
       departmentId,
+      ...(departmentName ? { departmentName } : {}),
       handedOverAt: nowISO(),
       handedOverBy: actor.uid,
       status: "handed_over",
@@ -686,14 +729,44 @@ export async function createJdLifecycle(
   jdId: string,
   actor: LifecycleActor
 ): Promise<Employee> {
-  return advanceLifecycle({
-    employeeId,
-    toStage: "jd_created",
-    actor,
-    description: "Job description created",
-    metadata: { jdId },
-    employeePatch: { jdId, status: "active" },
-  });
+  const { employee } = await getEmployeeLifecycle(employeeId);
+  if (!employee) throw new Error("Employee not found");
+
+  if (employee.jdId && employee.jdId !== jdId) {
+    throw new Error("Employee already linked to another Job Description");
+  }
+
+  const postHandover = [
+    "department_handover",
+    "jd_created",
+    "tni_created",
+    "trainer_assigned",
+    "sop_assigned",
+    "training",
+    "exam",
+    "passed",
+    "certified",
+    "qualified",
+  ];
+  if (!postHandover.includes(employee.lifecycleStage)) {
+    throw new Error("Complete department handover before creating a Job Description");
+  }
+
+  if (employee.lifecycleStage === "department_handover") {
+    return advanceLifecycle({
+      employeeId,
+      toStage: "jd_created",
+      actor,
+      description: "Job description created",
+      metadata: { jdId },
+      employeePatch: { jdId, status: "active" },
+    });
+  }
+
+  await patchEmployee(employeeId, { jdId, updatedAt: nowISO(), updatedBy: actor.uid });
+  const { employee: updated } = await getEmployeeLifecycle(employeeId);
+  if (!updated) throw new Error("Employee not found");
+  return updated;
 }
 
 export async function createTniLifecycle(
@@ -701,14 +774,43 @@ export async function createTniLifecycle(
   tniId: string,
   actor: LifecycleActor
 ): Promise<Employee> {
-  return advanceLifecycle({
-    employeeId,
-    toStage: "tni_created",
-    actor,
-    description: "Training Need Identification created",
-    metadata: { tniId },
-    employeePatch: { tniId },
-  });
+  const { employee } = await getEmployeeLifecycle(employeeId);
+  if (!employee) throw new Error("Employee not found");
+
+  if (employee.tniId && employee.tniId !== tniId) {
+    throw new Error("Employee already linked to another TNI");
+  }
+
+  const postJd = [
+    "jd_created",
+    "tni_created",
+    "trainer_assigned",
+    "sop_assigned",
+    "training",
+    "exam",
+    "passed",
+    "certified",
+    "qualified",
+  ];
+  if (!postJd.includes(employee.lifecycleStage)) {
+    throw new Error("Create an approved Job Description before submitting TNI");
+  }
+
+  if (employee.lifecycleStage === "jd_created") {
+    return advanceLifecycle({
+      employeeId,
+      toStage: "tni_created",
+      actor,
+      description: "Training Need Identification created",
+      metadata: { tniId },
+      employeePatch: { tniId },
+    });
+  }
+
+  await patchEmployee(employeeId, { tniId, updatedAt: nowISO(), updatedBy: actor.uid });
+  const { employee: updated } = await getEmployeeLifecycle(employeeId);
+  if (!updated) throw new Error("Employee not found");
+  return updated;
 }
 
 export async function assignTrainerLifecycle(
@@ -716,14 +818,42 @@ export async function assignTrainerLifecycle(
   trainerId: string,
   actor: LifecycleActor
 ): Promise<Employee> {
-  return advanceLifecycle({
-    employeeId,
-    toStage: "trainer_assigned",
-    actor,
-    description: "Trainer assigned",
-    metadata: { trainerId },
-    employeePatch: { currentTrainerId: trainerId },
+  const { employee } = await getEmployeeLifecycle(employeeId);
+  if (!employee) throw new Error("Employee not found");
+
+  const postTni = [
+    "tni_created",
+    "trainer_assigned",
+    "sop_assigned",
+    "training",
+    "exam",
+    "passed",
+    "certified",
+    "qualified",
+  ];
+  if (!postTni.includes(employee.lifecycleStage)) {
+    throw new Error("Complete TNI before assigning a trainer");
+  }
+
+  if (employee.lifecycleStage === "tni_created") {
+    return advanceLifecycle({
+      employeeId,
+      toStage: "trainer_assigned",
+      actor,
+      description: "Trainer assigned",
+      metadata: { trainerId },
+      employeePatch: { currentTrainerId: trainerId },
+    });
+  }
+
+  await patchEmployee(employeeId, {
+    currentTrainerId: trainerId,
+    updatedAt: nowISO(),
+    updatedBy: actor.uid,
   });
+  const { employee: updated } = await getEmployeeLifecycle(employeeId);
+  if (!updated) throw new Error("Employee not found");
+  return updated;
 }
 
 export async function assignSopLifecycle(
@@ -731,24 +861,83 @@ export async function assignSopLifecycle(
   sopId: string,
   actor: LifecycleActor
 ): Promise<Employee> {
-  return advanceLifecycle({
-    employeeId,
-    toStage: "sop_assigned",
-    actor,
-    description: "SOP training assigned",
-    metadata: { sopId },
-  });
+  const { employee } = await getEmployeeLifecycle(employeeId);
+  if (!employee) throw new Error("Employee not found");
+
+  const postTrainer = [
+    "trainer_assigned",
+    "sop_assigned",
+    "training",
+    "exam",
+    "passed",
+    "certified",
+    "qualified",
+  ];
+  if (!postTrainer.includes(employee.lifecycleStage)) {
+    throw new Error("Assign a trainer before assigning SOP training");
+  }
+
+  if (employee.lifecycleStage === "trainer_assigned") {
+    return advanceLifecycle({
+      employeeId,
+      toStage: "sop_assigned",
+      actor,
+      description: "SOP training assigned",
+      metadata: { sopId },
+    });
+  }
+
+  const { employee: updated } = await getEmployeeLifecycle(employeeId);
+  if (!updated) throw new Error("Employee not found");
+  return updated;
+}
+
+export async function validateTrainingAssignmentLifecycle(
+  employeeId: string
+): Promise<Employee> {
+  const { employee } = await getEmployeeLifecycle(employeeId);
+  if (!employee) throw new Error("Employee not found");
+
+  const allowed = [
+    "tni_created",
+    "trainer_assigned",
+    "sop_assigned",
+    "training",
+    "exam",
+    "passed",
+    "certified",
+    "qualified",
+  ];
+  if (!allowed.includes(employee.lifecycleStage)) {
+    throw new Error(
+      `${employee.firstName} ${employee.lastName}: complete TNI before assigning training (stage: ${employee.lifecycleStage})`
+    );
+  }
+  return employee;
 }
 
 export async function markTrainingLifecycle(
   employeeId: string,
   actor: LifecycleActor
 ): Promise<Employee> {
+  const { employee } = await getEmployeeLifecycle(employeeId);
+  if (!employee) throw new Error("Employee not found");
+
+  const atOrAfterTraining = ["training", "exam", "passed", "certified", "qualified"];
+  if (atOrAfterTraining.includes(employee.lifecycleStage)) {
+    return employee;
+  }
+
+  const canAdvanceFrom = ["sop_assigned", "trainer_assigned"];
+  if (!canAdvanceFrom.includes(employee.lifecycleStage)) {
+    throw new Error("Assign SOP training before completing a training session");
+  }
+
   return advanceLifecycle({
     employeeId,
     toStage: "training",
     actor,
-    description: "Training in progress / completed session",
+    description: "Training session completed",
   });
 }
 
@@ -818,22 +1007,36 @@ export async function advanceToNext(
   switch (next) {
     case "hr_verification":
       return verifyEmployee(employeeId, actor);
-    case "induction_assigned":
-      return assignInductionLifecycle(employeeId, ["ind_001"], actor);
+    case "induction_assigned": {
+      const { listInductionModules } = await import("@/lib/services/induction");
+      const catalog = await listInductionModules();
+      const moduleIds = catalog.filter((m) => m.isMandatory).map((m) => m.id);
+      if (!moduleIds.length && catalog.length) moduleIds.push(catalog[0].id);
+      if (!moduleIds.length) {
+        throw new Error("No induction modules in catalog — create modules first");
+      }
+      return assignInductionLifecycle(employeeId, moduleIds, actor);
+    }
     case "induction_completed":
       return completeInductionLifecycle(employeeId, actor);
-    case "department_handover":
-      return handoverLifecycle(
-        employeeId,
-        employee.departmentId || "dept_qa",
-        actor
-      );
+    case "department_handover": {
+      if (!employee.departmentId) {
+        throw new Error("Employee has no department — assign a department before handover");
+      }
+      return handoverLifecycle(employeeId, employee.departmentId, actor);
+    }
     case "jd_created":
-      return createJdLifecycle(employeeId, generateId("jd"), actor);
+      throw new Error(
+        "Create a Job Description on the JD page first — admin catch-up cannot skip JD content"
+      );
     case "tni_created":
-      return createTniLifecycle(employeeId, generateId("tni"), actor);
+      throw new Error(
+        "Create a TNI on the TNI page first — admin catch-up cannot skip TNI content"
+      );
     case "trainer_assigned":
-      return assignTrainerLifecycle(employeeId, "user_trainer", actor);
+      throw new Error(
+        "Assign a trainer from the Training page — admin catch-up cannot skip trainer selection"
+      );
     case "sop_assigned":
       return assignSopLifecycle(employeeId, "sop_001", actor);
     case "training":

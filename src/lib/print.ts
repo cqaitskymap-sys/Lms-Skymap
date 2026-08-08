@@ -2,6 +2,15 @@
  * Print HTML without opening a popup (uses a hidden iframe).
  * Avoids Chrome popup blockers that block window.open().
  */
+export function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 export function printHtml(html: string, title = "Print"): void {
   if (typeof window === "undefined" || typeof document === "undefined") return;
 

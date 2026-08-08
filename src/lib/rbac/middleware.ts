@@ -5,6 +5,7 @@ import { COLLECTIONS } from "@/lib/firebase/client";
 import type { UserProfile, UserRole, AuditAction } from "@/types";
 import { hasPermission, type Permission } from "@/lib/rbac/permissions";
 import { generateId } from "@/lib/utils";
+import { stripUndefined } from "@/lib/services/helpers";
 
 export interface AuthenticatedRequest {
   uid: string;
@@ -120,10 +121,12 @@ export async function writeAuditLog(params: {
   userAgent?: string;
 }) {
   const id = generateId("audit");
-  await adminDb.collection(COLLECTIONS.auditLogs).doc(id).set({
-    id,
-    timestamp: new Date().toISOString(),
-    ...params,
-  });
+  await adminDb.collection(COLLECTIONS.auditLogs).doc(id).set(
+    stripUndefined({
+      id,
+      timestamp: new Date().toISOString(),
+      ...params,
+    })
+  );
   return id;
 }

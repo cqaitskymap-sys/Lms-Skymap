@@ -71,9 +71,13 @@ export const onSopVersionApproved = onDocumentUpdated(
     const batch = db.batch();
     const now = new Date().toISOString();
     let count = 0;
+    const assignedEmployees = new Set<string>();
 
     for (const doc of prev.docs) {
       const prevData = doc.data();
+      const employeeId = prevData.employeeId as string;
+      if (assignedEmployees.has(employeeId)) continue;
+      assignedEmployees.add(employeeId);
       const newId = id("ta");
       const ref = db.collection("training_assignments").doc(newId);
       batch.set(ref, {
@@ -129,6 +133,8 @@ export const onSopVersionApproved = onDocumentUpdated(
 
 /**
  * Evaluate assessment attempt on submit — authoritative server-side scoring.
+ * Prefer Next.js /api/assessments/submit which uses the shared engine + Admin SDK.
+ * This callable is kept for compatibility; it rehydrates answer keys from the bank.
  */
 export const submitAssessment = onCall(async (request) => {
   if (!request.auth) throw new HttpsError("unauthenticated", "Sign in required");
@@ -151,145 +157,149 @@ export const submitAssessment = onCall(async (request) => {
     throw new HttpsError("failed-precondition", "Attempt already submitted");
   }
 
+  const employeeId = attempt.employeeId as string;
+  if (
+    employeeId !== request.auth.uid &&
+    attempt.createdBy !== request.auth.uid
+  ) {
+    // Allow if caller profile employeeId matches — best-effort without users join
+    const userSnap = await db.collection("users").doc(request.auth.uid).get();
+    const profileEmp = userSnap.data()?.employeeId as string | undefined;
+    if (profileEmp !== employeeId) {
+      throw new HttpsError("permission-denied", "Not your attempt");
+    }
+  }
+
   const examSnap = await db.collection("exams").doc(attempt.examId).get();
+  if (!examSnap.exists) throw new HttpsError("not-found", "Exam not found");
   const exam = examSnap.data()!;
   const now = new Date();
   const expired = now > new Date(attempt.expiresAt);
 
+  // Rehydrate keys from question bank
+  const bankIds = [exam.bankId as string, ...((exam.bankIds as string[]) || [])];
+  const keyById = new Map<string, string[]>();
+  for (const bankId of bankIds) {
+    const qSnap = await db
+      .collection("questions")
+      .where("bankId", "==", bankId)
+      .where("isActive", "==", true)
+      .get();
+    for (const d of qSnap.docs) {
+      const q = d.data();
+      const correct = ((q.options as Array<{ id: string; isCorrect?: boolean }>) || [])
+        .filter((o) => o.isCorrect)
+        .map((o) => o.id);
+      keyById.set(d.id, correct);
+    }
+  }
+
   let totalMarks = 0;
   let earnedMarks = 0;
+  let negativeApplied = 0;
+  const negEnabled = !!exam.negativeMarkingEnabled;
 
-  const questions = (attempt.questions as Array<{
-    questionId: string;
-    marks: number;
-    correctOptionIds: string[];
-    selectedOptionIds: string[];
-  }>).map((q) => {
+  const questions = (
+    attempt.questions as Array<{
+      questionId: string;
+      marks: number;
+      negativeMarks?: number;
+      correctOptionIds: string[];
+      selectedOptionIds: string[];
+    }>
+  ).map((q) => {
     const selected = answers[q.questionId] || q.selectedOptionIds || [];
-    const correct = new Set(q.correctOptionIds);
+    const correctIds = keyById.get(q.questionId) || q.correctOptionIds || [];
+    const correct = new Set(correctIds);
     const sel = new Set(selected);
     const isCorrect =
       correct.size === sel.size && [...correct].every((x) => sel.has(x));
     totalMarks += q.marks;
-    const earned = isCorrect ? q.marks : 0;
+    let earned = 0;
+    if ((selected.length || 0) > 0) {
+      if (isCorrect) earned = q.marks;
+      else if (negEnabled) {
+        const penalty = q.negativeMarks || exam.defaultNegativeMarks || 0;
+        earned = -penalty;
+        negativeApplied += penalty;
+      }
+    }
     earnedMarks += earned;
-    return { ...q, selectedOptionIds: selected, earnedMarks: earned, isCorrect };
+    return {
+      ...q,
+      selectedOptionIds: selected,
+      correctOptionIds: correctIds,
+      earnedMarks: earned,
+      isCorrect,
+      isAnswered: selected.length > 0,
+    };
   });
 
   const percentage =
     totalMarks === 0 ? 0 : Math.round((earnedMarks / totalMarks) * 10000) / 100;
   const passed = !expired && percentage >= (exam.passPercentage as number);
+  const certThreshold =
+    (exam.certificatePassPercentage as number) ?? (exam.passPercentage as number);
+  const certificateEligible = !expired && percentage >= certThreshold;
 
   await attemptRef.update({
     questions,
-    status: passed ? "passed" : "failed",
+    answersDraft: answers,
+    status: expired ? "expired" : passed ? "passed" : "failed",
     submittedAt: now.toISOString(),
     score: earnedMarks,
+    maxScore: totalMarks,
     percentage,
     passed,
+    certificateEligible,
+    negativeMarksApplied: negativeApplied,
     updatedAt: now.toISOString(),
   });
 
-  if (attempt.assignmentId) {
+  if (attempt.assignmentId && passed) {
     const assignRef = db.collection("training_assignments").doc(attempt.assignmentId);
-    if (passed) {
-      const certId = id("cert");
-      const certNumber = `CERT-${now.getFullYear()}-${Math.floor(100000 + Math.random() * 900000)}`;
-      const assignSnap = await assignRef.get();
-      const assignment = assignSnap.data()!;
-      const hash = crypto
-        .createHash("sha256")
-        .update(`${certNumber}|${attempt.employeeId}|${assignment.sopId}|${percentage}`)
-        .digest("hex");
-
-      await db.collection("certificates").doc(certId).set({
-        id: certId,
-        certificateNumber: certNumber,
-        employeeId: attempt.employeeId,
-        trainingAssignmentId: attempt.assignmentId,
-        sopId: assignment.sopId,
-        sopVersionId: assignment.sopVersionId,
-        examId: attempt.examId,
-        attemptId,
-        title: "Certificate of Training",
-        issuedAt: now.toISOString(),
-        score: earnedMarks,
-        percentage,
-        qrCodeData: `${process.env.APP_URL || ""}/verify/${certNumber}`,
-        verificationHash: hash,
-        isRevoked: false,
-        createdAt: now.toISOString(),
-        updatedAt: now.toISOString(),
-        createdBy: "system",
-      });
-
-      await assignRef.update({
-        status: "passed",
-        score: percentage,
-        passed: true,
-        certificateId: certId,
-        assessmentAttemptId: attemptId,
-        updatedAt: now.toISOString(),
-      });
-
-      const emp = await db.collection("employees").doc(attempt.employeeId).get();
-      if (emp.data()?.userId) {
-        await notify(
-          emp.data()!.userId,
-          "certificate",
-          "Certificate Issued",
-          `Certificate ${certNumber} has been issued.`,
-          "/dashboard/certificates"
-        );
-      }
-    } else {
-      // Auto schedule retraining
-      const assignSnap = await assignRef.get();
-      const prev = assignSnap.data()!;
-      await assignRef.update({
-        status: "failed",
-        score: percentage,
-        passed: false,
-        assessmentAttemptId: attemptId,
-        updatedAt: now.toISOString(),
-      });
-
-      const retrainId = id("ta");
-      const due = new Date(now);
-      due.setDate(due.getDate() + 7);
-      await db.collection("training_assignments").doc(retrainId).set({
-        id: retrainId,
-        employeeId: prev.employeeId,
-        sopId: prev.sopId,
-        sopVersionId: prev.sopVersionId,
-        trainerId: prev.trainerId || null,
-        assignedBy: "system",
-        departmentId: prev.departmentId,
-        status: "retraining",
-        dueDate: due.toISOString(),
-        attemptCount: (prev.attemptCount || 0) + 1,
-        isRetraining: true,
-        previousAssignmentId: attempt.assignmentId,
-        triggeredBySopRevision: false,
-        createdAt: now.toISOString(),
-        updatedAt: now.toISOString(),
-        createdBy: "system",
-      });
-
-      const emp = await db.collection("employees").doc(attempt.employeeId).get();
-      if (emp.data()?.userId) {
-        await notify(
-          emp.data()!.userId,
-          "retraining",
-          "Retraining Scheduled",
-          "You did not pass the assessment. Retraining has been scheduled.",
-          "/dashboard/training"
-        );
-      }
-    }
+    await assignRef.update({
+      status: "passed",
+      score: percentage,
+      passed: true,
+      assessmentAttemptId: attemptId,
+      updatedAt: now.toISOString(),
+    });
+  } else if (attempt.assignmentId && !passed) {
+    const assignRef = db.collection("training_assignments").doc(attempt.assignmentId);
+    const assignSnap = await assignRef.get();
+    const prev = assignSnap.data() || {};
+    await assignRef.update({
+      status: "failed",
+      score: percentage,
+      passed: false,
+      assessmentAttemptId: attemptId,
+      updatedAt: now.toISOString(),
+    });
+    const retrainId = id("ta");
+    const due = new Date(now);
+    due.setDate(due.getDate() + 7);
+    await db.collection("training_assignments").doc(retrainId).set({
+      id: retrainId,
+      employeeId: prev.employeeId,
+      sopId: prev.sopId,
+      sopVersionId: prev.sopVersionId,
+      trainerId: prev.trainerId || null,
+      assignedBy: "system",
+      departmentId: prev.departmentId,
+      status: "retraining",
+      dueDate: due.toISOString(),
+      attemptCount: (prev.attemptCount || 0) + 1,
+      isRetraining: true,
+      previousAssignmentId: attempt.assignmentId,
+      triggeredBySopRevision: false,
+      createdAt: now.toISOString(),
+      updatedAt: now.toISOString(),
+      createdBy: "system",
+    });
   }
 
-  return { passed, percentage, score: earnedMarks };
+  return { passed, percentage, score: earnedMarks, certificateEligible, expired };
 });
 
 /**
@@ -460,21 +470,26 @@ export const onTrainingAssignmentUpdated = onDocumentUpdated(
 );
 
 /**
- * When certificate is issued, mark employee certified → qualified if all required done.
+ * When certificate is issued, advance employee to certified (not auto-qualified).
+ * Full qualification requires all required SOP trainings to be complete.
  */
 export const onCertificateCreated = onDocumentCreated(
   "certificates/{certificateId}",
   async (event) => {
     const data = event.data?.data();
-    if (!data?.employeeId) return;
+    if (!data?.employeeId || data.isRevoked) return;
     const now = new Date().toISOString();
     const empRef = db.collection("employees").doc(data.employeeId);
+    const empSnap = await empRef.get();
+    const current = empSnap.data()?.lifecycleStage as string | undefined;
+    // Don't regress past certified/qualified
+    if (current === "qualified") return;
+
     await empRef.set(
       {
-        lifecycleStage: "qualified",
-        lifecycleProgress: 100,
-        status: "qualified",
-        qualifiedAt: now,
+        lifecycleStage: "certified",
+        lifecycleProgress: 96,
+        status: "active",
         updatedAt: now,
       },
       { merge: true }
@@ -484,9 +499,9 @@ export const onCertificateCreated = onDocumentCreated(
     await db.collection("lifecycle_events").doc(levId).set({
       id: levId,
       employeeId: data.employeeId,
-      stage: "qualified",
-      title: "Qualified Employee",
-      description: `Certificate ${data.certificateNumber} issued — employee qualified`,
+      stage: "certified",
+      title: "Certificate Issued",
+      description: `Certificate ${data.certificateNumber} issued for SOP training`,
       status: "completed",
       actorId: "system",
       actorName: "Cloud Function",
@@ -501,7 +516,7 @@ export const onCertificateCreated = onDocumentCreated(
         emp.data()!.userId,
         "certificate",
         "Certificate issued",
-        "You are now a qualified employee for the assigned SOP.",
+        "Your training certificate is ready. View it under Certificates.",
         "/dashboard/certificates"
       );
     }

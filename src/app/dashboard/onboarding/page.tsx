@@ -178,13 +178,18 @@ export default function FirstLoginOnboardingPage() {
           isDemo={isDemo}
           onDone={async () => {
             if (isDemo) {
-              patchProfile({ mustChangePassword: false, passwordChangedAt: new Date().toISOString() });
+              patchProfile({
+                mustChangePassword: false,
+                passwordChangedAt: new Date().toISOString(),
+              });
               setStep("profile");
               return;
             }
-            const fresh = await refreshProfile();
-            // refreshProfile may not return — read from next tick via flags
-            void fresh;
+            await refreshProfile();
+            patchProfile({
+              mustChangePassword: false,
+              passwordChangedAt: new Date().toISOString(),
+            });
             setStep("profile");
           }}
         />
@@ -200,6 +205,7 @@ export default function FirstLoginOnboardingPage() {
               patchProfile({ mustUpdateProfile: false });
             } else {
               await refreshProfile();
+              patchProfile({ mustUpdateProfile: false });
             }
             setStep("policies");
           }}
@@ -244,6 +250,11 @@ export default function FirstLoginOnboardingPage() {
               const json = await res.json();
               if (!res.ok || !json.success) throw new Error(json.error || "Failed");
               await refreshProfile();
+              patchProfile({
+                mustAcceptPolicies: false,
+                policiesAcceptedAt: new Date().toISOString(),
+                policiesVersion: policyVersion,
+              });
               setStep("done");
             } catch (err) {
               toast.error(err instanceof Error ? err.message : "Could not save acceptance");

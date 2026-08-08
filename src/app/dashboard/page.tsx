@@ -1,12 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
 import { ROLE_DASHBOARD_ROUTES } from "@/lib/rbac/permissions";
-import { listTrainingAssignments } from "@/lib/services/training";
-import { listEmployeesForLifecycle } from "@/lib/services/lifecycle";
 import { DashboardShell } from "@/components/dashboard/dashboard-shell";
 import { MotionItem } from "@/components/dashboard/motion";
 import { GlassCard, GlassCardHeader } from "@/components/dashboard/glass-card";
@@ -19,47 +17,29 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import type { Employee, TrainingAssignment } from "@/types";
 
 export default function DashboardPage() {
-  const { role, profile, isDemo } = useAuth();
+  const { role, profile, isDemo, loading: authLoading } = useAuth();
   const router = useRouter();
-  const [assignments, setAssignments] = useState<TrainingAssignment[]>([]);
-  const [employees, setEmployees] = useState<Employee[]>([]);
-  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (authLoading) return;
     if (role && role !== "super_admin") {
       const route = ROLE_DASHBOARD_ROUTES[role];
       if (route && route !== "/dashboard") router.replace(route);
     }
-  }, [role, router]);
+  }, [role, router, authLoading]);
 
-  const refresh = useCallback(async () => {
-    setLoading(true);
-    try {
-      const [asg, emps] = await Promise.all([
-        listTrainingAssignments(),
-        listEmployeesForLifecycle(),
-      ]);
-      setAssignments(asg);
-      setEmployees(emps);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void refresh();
-    const onUpdate = () => void refresh();
-    window.addEventListener("pharma-training-updated", onUpdate);
-    return () => window.removeEventListener("pharma-training-updated", onUpdate);
-  }, [refresh]);
-
-  const empName = (id: string) => {
-    const e = employees.find((x) => x.id === id);
-    return e ? `${e.firstName} ${e.lastName}` : id;
-  };
+  // Never mount the admin snapshot fetch for non-admins — it queries collections
+  // employees cannot list and floods the console with permission-denied errors.
+  if (authLoading || !role || role !== "super_admin") {
+    return (
+      <div className="flex min-h-[40vh] items-center justify-center gap-2 text-muted-foreground">
+        <Loader2 className="h-5 w-5 animate-spin" />
+        Loading dashboard…
+      </div>
+    );
+  }
 
   return (
     <DashboardShell
@@ -67,52 +47,61 @@ export default function DashboardPage() {
       title={`Welcome, ${profile?.displayName?.split(" ")[0] || "Admin"}`}
       subtitle={`Enterprise compliance command center${isDemo ? " · Demo data" : ""}`}
     >
-      <MotionItem>
-        <GlassCard>
-          <GlassCardHeader
-            title="Training assignments snapshot"
-            description="Latest SOP training status across the org"
-          />
-          <div className="overflow-x-auto">
-            {loading ? (
-              <div className="flex items-center gap-2 py-6 text-muted-foreground">
-                <Loader2 className="h-4 w-4 animate-spin" /> Loading…
-              </div>
-            ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Assignment</TableHead>
-                    <TableHead>Employee</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Score</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {assignments.length === 0 ? (
+      {({ view, loading }) => (
+        <MotionItem>
+          <GlassCard>
+            <GlassCardHeader
+              title="Training assignments snapshot"
+              description="Latest SOP training status across the org"
+            />
+            <div className="overflow-x-auto">
+              {loading && view.assignmentRows.length === 0 ? (
+                <div className="flex items-center gap-2 py-6 text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" /> Loading…
+                </div>
+              ) : (
+                <Table>
+                  <TableHeader>
                     <TableRow>
-                      <TableCell colSpan={4} className="text-center text-muted-foreground">
-                        No training assignments yet.
-                      </TableCell>
+                      <TableHead>Assignment</TableHead>
+                      <TableHead>Employee</TableHead>
+                      <TableHead>SOP</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead>Score</TableHead>
                     </TableRow>
-                  ) : (
-                    assignments.slice(0, 8).map((a) => (
-                      <TableRow key={a.id}>
-                        <TableCell className="font-mono text-xs">{a.id}</TableCell>
-                        <TableCell>{empName(a.employeeId)}</TableCell>
-                        <TableCell>
-                          <StatusBadge status={a.status} />
+                  </TableHeader>
+                  <TableBody>
+                    {view.assignmentRows.length === 0 ? (
+                      <TableRow>
+                        <TableCell
+                          colSpan={5}
+                          className="text-center text-muted-foreground"
+                        >
+                          No training assignments yet.
                         </TableCell>
-                        <TableCell>{a.score != null ? `${a.score}%` : "—"}</TableCell>
                       </TableRow>
-                    ))
-                  )}
-                </TableBody>
-              </Table>
-            )}
-          </div>
-        </GlassCard>
-      </MotionItem>
+                    ) : (
+                      view.assignmentRows.slice(0, 8).map((a) => (
+                        <TableRow key={a.id}>
+                          <TableCell className="font-mono text-xs">{a.id}</TableCell>
+                          <TableCell>{a.employee}</TableCell>
+                          <TableCell>{a.sop}</TableCell>
+                          <TableCell>
+                            <StatusBadge status={a.status} />
+                          </TableCell>
+                          <TableCell>
+                            {a.score != null ? `${a.score}%` : "—"}
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
+              )}
+            </div>
+          </GlassCard>
+        </MotionItem>
+      )}
     </DashboardShell>
   );
 }

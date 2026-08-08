@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { Plus, FileText, Eye, PenLine } from "lucide-react";
+import { Plus, FileText, Eye, PenLine, Loader2 } from "lucide-react";
 import { RequirePermission } from "@/components/auth/require-permission";
 import { AdminDeleteButton } from "@/components/auth/admin-delete-button";
 import { StatusBadge } from "@/components/shared/status-badge";
@@ -25,7 +25,7 @@ import { SopLoading } from "@/components/sops/sop-media-preview";
 import type { SopStatus } from "@/types";
 
 export default function SopsPage() {
-  const { sops, loading, refresh } = useSopDirectory();
+  const { sops, loading, error, refresh } = useSopDirectory();
   const { departments } = useDepartments();
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("");
@@ -48,6 +48,19 @@ export default function SopsPage() {
       .join(", ");
 
   if (loading) return <SopLoading />;
+
+  if (error) {
+    return (
+      <RequirePermission permission={["sops:read"]}>
+        <div className="py-16 text-center">
+          <p className="text-destructive">{error}</p>
+          <Button className="mt-4" variant="outline" onClick={() => void refresh()}>
+            Retry
+          </Button>
+        </div>
+      </RequirePermission>
+    );
+  }
 
   return (
     <RequirePermission permission={["sops:read"]}>
@@ -125,12 +138,14 @@ export default function SopsPage() {
             if (key === "status") setStatus(value);
           }}
           actions={
-            <Button size="sm" variant="outline" asChild>
-              <Link href="/dashboard/sops/new">
-                <Plus className="mr-2 h-4 w-4" />
-                New SOP
-              </Link>
-            </Button>
+            <RequirePermission permission="sops:write" hideOnDeny>
+              <Button size="sm" variant="outline" asChild>
+                <Link href="/dashboard/sops/new">
+                  <Plus className="mr-2 h-4 w-4" />
+                  New SOP
+                </Link>
+              </Button>
+            </RequirePermission>
           }
         />
 
@@ -154,7 +169,25 @@ export default function SopsPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filtered.map((s) => (
+                {filtered.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={9} className="py-12 text-center text-muted-foreground">
+                      {sops.length === 0 ? (
+                        <div className="space-y-2">
+                          <p>No SOPs in the library yet.</p>
+                          <RequirePermission permission="sops:write" hideOnDeny>
+                            <Button size="sm" asChild>
+                              <Link href="/dashboard/sops/new">Create first SOP</Link>
+                            </Button>
+                          </RequirePermission>
+                        </div>
+                      ) : (
+                        "No SOPs match your filters."
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  filtered.map((s) => (
                   <TableRow key={s.id}>
                     <TableCell>
                       <Link
@@ -194,7 +227,8 @@ export default function SopsPage() {
                       />
                     </TableCell>
                   </TableRow>
-                ))}
+                  ))
+                )}
               </TableBody>
             </Table>
           </CardContent>

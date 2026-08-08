@@ -15,7 +15,7 @@ import {
   signOut as firebaseSignOut,
   type User,
 } from "firebase/auth";
-import { doc, getDoc, setDoc, updateDoc } from "firebase/firestore";
+import { doc, getDoc, setDoc, updateDoc } from "firebase/firestore/lite";
 import { auth, db, COLLECTIONS, connectEmulators } from "@/lib/firebase/client";
 import type { UserProfile, UserRole } from "@/types";
 import { hasPermission, type Permission } from "@/lib/rbac/permissions";

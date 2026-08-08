@@ -62,7 +62,16 @@ async function authHeaders(): Promise<HeadersInit> {
 
 async function readError(res: Response): Promise<string> {
   try {
-    const body = (await res.json()) as { error?: string };
+    const body = (await res.json()) as {
+      error?: string;
+      details?: Record<string, string[] | undefined>;
+    };
+    if (body.details) {
+      const fromFields = Object.values(body.details)
+        .flat()
+        .filter((m): m is string => Boolean(m));
+      if (fromFields.length) return fromFields.join("; ");
+    }
     return body.error || `Request failed (${res.status})`;
   } catch {
     return `Request failed (${res.status})`;

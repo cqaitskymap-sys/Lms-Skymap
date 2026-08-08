@@ -147,6 +147,36 @@ export async function DELETE(
     );
   }
 
+  const users = await adminDb
+    .collection(COLLECTIONS.users)
+    .where("departmentId", "==", id)
+    .limit(1)
+    .get();
+  if (!users.empty) {
+    return NextResponse.json(
+      {
+        success: false,
+        error: "Cannot delete — staff accounts are linked to this department. Deactivate it instead.",
+      },
+      { status: 409 }
+    );
+  }
+
+  const sops = await adminDb
+    .collection(COLLECTIONS.sops)
+    .where("departmentIds", "array-contains", id)
+    .limit(1)
+    .get();
+  if (!sops.empty) {
+    return NextResponse.json(
+      {
+        success: false,
+        error: "Cannot delete — SOPs reference this department. Deactivate it instead.",
+      },
+      { status: 409 }
+    );
+  }
+
   await ref.delete();
 
   await writeAuditLog({

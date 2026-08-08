@@ -54,6 +54,7 @@ export type Permission =
   | "exams:delete"
   | "certificates:read"
   | "certificates:issue"
+  | "certificates:revoke"
   | "certificates:delete"
   | "reports:read"
   | "reports:export"
@@ -121,6 +122,7 @@ const ALL_PERMISSIONS: Permission[] = [
   "exams:delete",
   "certificates:read",
   "certificates:issue",
+  "certificates:revoke",
   "certificates:delete",
   "reports:read",
   "reports:export",
@@ -152,6 +154,7 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     "induction:write",
     "induction:assign",
     "departments:read",
+    "departments:write",
     "jd:read",
     "tni:read",
     "trainers:read",
@@ -162,12 +165,12 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     "exams:read",
     "exams:write",
     "certificates:read",
+    "certificates:issue",
     "reports:read",
     "reports:export",
     "notifications:read",
     "audit:read",
     "dashboard:hr",
-    "users:read",
     "training:read",
     "settings:write",
   ],
@@ -186,6 +189,8 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     "exams:read",
     "exams:write",
     "certificates:read",
+    "certificates:issue",
+    "certificates:revoke",
     "reports:read",
     "reports:export",
     "notifications:read",

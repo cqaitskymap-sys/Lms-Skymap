@@ -72,7 +72,8 @@ export function AiGenerateQuestionsDialog({ banks, onSaved }: Props) {
   }
 
   async function handleGenerate() {
-    if (!topic.trim()) {
+    const trimmedTopic = topic.trim();
+    if (!trimmedTopic) {
       toast.error("Enter a topic");
       return;
     }
@@ -84,9 +85,9 @@ export function AiGenerateQuestionsDialog({ banks, onSaved }: Props) {
     setDrafts([]);
     try {
       const { questions, model } = await generateQuestionsWithAi({
-        topic: topic.trim(),
+        topic: trimmedTopic,
         context: context.trim() || undefined,
-        count: Math.min(10, Math.max(1, Number(count) || 5)),
+        count: Math.min(10, Math.max(1, Number.parseInt(count, 10) || 5)),
         difficulty,
         types: types as Array<"mcq" | "true_false" | "multi_select" | "scenario">,
       });
@@ -117,6 +118,7 @@ export function AiGenerateQuestionsDialog({ banks, onSaved }: Props) {
     }
 
     setSaving(true);
+    let saved = 0;
     try {
       for (const q of toSave) {
         await createQuestion(
@@ -135,15 +137,18 @@ export function AiGenerateQuestionsDialog({ banks, onSaved }: Props) {
           },
           profile.uid
         );
+        saved++;
       }
-      toast.success(`Added ${toSave.length} question(s) to bank`);
+      toast.success(`Added ${saved} question(s) to bank`);
       setOpen(false);
       setDrafts([]);
       setTopic("");
       setContext("");
       await onSaved();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to save questions");
+      const msg = err instanceof Error ? err.message : "Failed to save questions";
+      toast.error(saved > 0 ? `Saved ${saved} then failed: ${msg}` : msg);
+      if (saved > 0) await onSaved();
     } finally {
       setSaving(false);
     }

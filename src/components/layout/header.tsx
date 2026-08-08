@@ -1,5 +1,6 @@
 "use client";
 
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { Menu, Bell, LogOut, User } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
@@ -16,6 +17,11 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ThemeToggle } from "@/components/layout/theme-toggle";
+import {
+  getUnreadNotificationCount,
+  NOTIFICATIONS_UPDATED_EVENT,
+} from "@/lib/services/notifications";
+import { TRAINING_UPDATED_EVENT } from "@/lib/training/demo-store";
 
 interface HeaderProps {
   onMenuClick?: () => void;
@@ -23,6 +29,34 @@ interface HeaderProps {
 
 export function Header({ onMenuClick }: HeaderProps) {
   const { profile, signOut } = useAuth();
+  const [unread, setUnread] = useState(0);
+
+  const refreshUnread = useCallback(async () => {
+    if (!profile?.uid) {
+      setUnread(0);
+      return;
+    }
+    try {
+      setUnread(await getUnreadNotificationCount(profile.uid));
+    } catch {
+      /* non-blocking */
+    }
+  }, [profile?.uid]);
+
+  useEffect(() => {
+    void refreshUnread();
+    const onUpdate = () => void refreshUnread();
+    window.addEventListener(NOTIFICATIONS_UPDATED_EVENT, onUpdate);
+    window.addEventListener(TRAINING_UPDATED_EVENT, onUpdate);
+    window.addEventListener("pharma-lifecycle-updated", onUpdate);
+    const interval = window.setInterval(() => void refreshUnread(), 60_000);
+    return () => {
+      window.removeEventListener(NOTIFICATIONS_UPDATED_EVENT, onUpdate);
+      window.removeEventListener(TRAINING_UPDATED_EVENT, onUpdate);
+      window.removeEventListener("pharma-lifecycle-updated", onUpdate);
+      window.clearInterval(interval);
+    };
+  }, [refreshUnread]);
 
   return (
     <header className="sticky top-0 z-40 flex h-14 items-center gap-3 border-b bg-background/95 px-4 backdrop-blur supports-[backdrop-filter]:bg-background/60">
@@ -34,9 +68,14 @@ export function Header({ onMenuClick }: HeaderProps) {
 
       <ThemeToggle />
 
-      <Button variant="ghost" size="icon" asChild>
-        <Link href="/dashboard/notifications">
+      <Button variant="ghost" size="icon" className="relative" asChild>
+        <Link href="/dashboard/notifications" aria-label="Notifications">
           <Bell className="h-4 w-4" />
+          {unread > 0 && (
+            <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-medium text-destructive-foreground">
+              {unread > 99 ? "99+" : unread}
+            </span>
+          )}
         </Link>
       </Button>
 

@@ -15,13 +15,13 @@ import { generateId } from "@/lib/utils";
 import type { QuestionDifficulty, QuestionType } from "@/types";
 
 const bodySchema = z.object({
-  topic: z.string().min(3).max(500),
-  context: z.string().max(8000).optional(),
-  count: z.number().int().min(1).max(10).default(5),
+  topic: z.string().trim().min(1, "Topic is required").max(500),
+  context: z.string().max(8000).optional().or(z.literal("")),
+  count: z.coerce.number().int().min(1).max(10).default(5),
   difficulty: z.enum(["easy", "medium", "hard", "mixed"]).default("mixed"),
   types: z
     .array(z.enum(["mcq", "true_false", "multi_select", "scenario"]))
-    .min(1)
+    .min(1, "Select at least one question type")
     .default(["mcq", "true_false"]),
 });
 
@@ -66,11 +66,17 @@ export async function POST(request: NextRequest) {
 
   const parsed = bodySchema.safeParse(raw);
   if (!parsed.success) {
+    const fieldErrors = parsed.error.flatten().fieldErrors;
+    const message =
+      Object.values(fieldErrors)
+        .flat()
+        .filter(Boolean)
+        .join("; ") || "Validation failed";
     return NextResponse.json(
       {
         success: false,
-        error: "Validation failed",
-        details: parsed.error.flatten().fieldErrors,
+        error: message,
+        details: fieldErrors,
       },
       { status: 400 }
     );

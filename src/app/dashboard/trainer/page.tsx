@@ -18,15 +18,20 @@ export default function TrainerDashboardPage() {
   const { profile } = useAuth();
   const [sessions, setSessions] = useState<TrainingSession[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
+    setError(null);
     try {
       const all = await listTrainingSessions();
       const mine = profile?.uid
         ? all.filter((s) => s.trainerId === profile.uid || s.createdBy === profile.uid)
-        : all;
-      setSessions(mine.length ? mine : all);
+        : [];
+      setSessions(mine);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load sessions");
+      setSessions([]);
     } finally {
       setLoading(false);
     }
@@ -48,6 +53,13 @@ export default function TrainerDashboardPage() {
       {loading ? (
         <div className="flex items-center gap-2 text-muted-foreground">
           <Loader2 className="h-4 w-4 animate-spin" /> Loading sessions…
+        </div>
+      ) : error ? (
+        <div className="space-y-3">
+          <p className="text-sm text-destructive">{error}</p>
+          <Button variant="outline" size="sm" onClick={() => void refresh()}>
+            Retry
+          </Button>
         </div>
       ) : sessions.length === 0 ? (
         <p className="text-sm text-muted-foreground">

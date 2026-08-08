@@ -7,11 +7,17 @@ import {
   updatePassword,
   updateProfile,
 } from "firebase/auth";
-import { doc, updateDoc } from "firebase/firestore";
+import { deleteField, doc, updateDoc } from "firebase/firestore/lite";
 import { auth, db, COLLECTIONS } from "@/lib/firebase/client";
 import { validatePassword } from "@/lib/auth/password-policy";
 import { logActivity } from "@/lib/services/activity";
-import { isDemoMode } from "@/lib/demo/data";
+import {
+  findDemoAdminUserByUid,
+  getAllDemoUserEntries,
+  isDemoMode,
+  setDemoPasswordOverride,
+  updateDemoAdminUser,
+} from "@/lib/demo/data";
 
 export async function requestPasswordReset(email: string): Promise<void> {
   if (isDemoMode()) {
@@ -33,12 +39,38 @@ export async function changeUserPassword(params: {
   }
 
   if (isDemoMode()) {
-    throw new Error("Password change is not available in demo mode");
+    const email = params.email.trim().toLowerCase();
+    const entry = getAllDemoUserEntries()[email];
+    if (!entry || entry.profile.uid !== params.userId) {
+      throw new Error("Demo account not found");
+    }
+    if (entry.password !== params.currentPassword) {
+      throw new Error("Current password is incorrect");
+    }
+
+    const admin = findDemoAdminUserByUid(params.userId);
+    if (admin) {
+      updateDemoAdminUser(admin[0], {
+        password: params.newPassword,
+        profile: {
+          ...admin[1].profile,
+          mustChangePassword: false,
+          passwordChangedAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+      });
+    } else {
+      setDemoPasswordOverride(email, params.newPassword);
+    }
+    return;
   }
 
   const user = auth.currentUser;
   if (!user || !user.email) {
     throw new Error("You must be signed in to change your password");
+  }
+  if (user.uid !== params.userId) {
+    throw new Error("You can only change your own password");
   }
 
   const credential = EmailAuthProvider.credential(user.email, params.currentPassword);
@@ -60,6 +92,18 @@ export async function changeUserPassword(params: {
     verb: "password_changed",
     summary: "Password changed successfully",
   });
+
+  try {
+    const { recordAuditEvent } = await import("@/lib/services/audit-logs");
+    await recordAuditEvent({
+      action: "update",
+      resourceType: "user",
+      resourceId: params.userId,
+      description: "Password changed from Settings",
+    });
+  } catch {
+    /* non-blocking */
+  }
 }
 
 export async function updateUserProfile(params: {
@@ -71,20 +115,27 @@ export async function updateUserProfile(params: {
     return;
   }
 
+  const user = auth.currentUser;
+  if (!user) {
+    throw new Error("You must be signed in to update your profile");
+  }
+  if (user.uid !== params.userId) {
+    throw new Error("You can only update your own profile");
+  }
+
   const now = new Date().toISOString();
-  const payload: Record<string, string | boolean> = {
+  const payload: Record<string, unknown> = {
     displayName: params.displayName.trim(),
     updatedAt: now,
   };
   if (params.phone !== undefined) {
-    payload.phone = params.phone.trim();
+    const phone = params.phone.trim();
+    payload.phone = phone ? phone : deleteField();
   }
 
   await updateDoc(doc(db, COLLECTIONS.users, params.userId), payload);
 
-  if (auth.currentUser) {
-    await updateProfile(auth.currentUser, { displayName: params.displayName.trim() });
-  }
+  await updateProfile(user, { displayName: params.displayName.trim() });
 
   await logActivity({
     userId: params.userId,

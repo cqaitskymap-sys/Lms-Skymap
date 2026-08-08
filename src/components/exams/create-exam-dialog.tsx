@@ -49,6 +49,18 @@ export function CreateExamDialog({ banks, onCreated }: Props) {
       toast.error("Exam title required");
       return;
     }
+    if (questionCount < 1) {
+      toast.error("Question count must be at least 1");
+      return;
+    }
+    if (durationMinutes < 1 || durationMinutes > 480) {
+      toast.error("Duration must be between 1 and 480 minutes");
+      return;
+    }
+    if (passPercentage < 1 || passPercentage > 100) {
+      toast.error("Pass percentage must be between 1 and 100");
+      return;
+    }
     setBusy(true);
     try {
       let resolvedBankId = bankId;

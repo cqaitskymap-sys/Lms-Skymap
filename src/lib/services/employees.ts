@@ -10,7 +10,7 @@ import {
   orderBy,
   limit,
   type QueryConstraint,
-} from "firebase/firestore";
+} from "firebase/firestore/lite";
 import { db, COLLECTIONS } from "@/lib/firebase/client";
 import type { Employee, PaginatedResult } from "@/types";
 import { generateId, nowISO } from "@/lib/services/helpers";
@@ -94,11 +94,13 @@ export async function listEmployees(params: {
 export async function handoverEmployee(
   employeeId: string,
   departmentId: string,
-  actorId: string
+  actorId: string,
+  departmentName?: string
 ): Promise<void> {
   await updateDoc(doc(db, COLLECTIONS.employees, employeeId), {
     status: "handed_over",
     departmentId,
+    ...(departmentName ? { departmentName } : {}),
     handedOverAt: nowISO(),
     handedOverBy: actorId,
     updatedAt: nowISO(),

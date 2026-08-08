@@ -1,7 +1,7 @@
 "use client";
 
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { toast } from "sonner";
 import {
@@ -20,6 +20,7 @@ import {
   startAssessment,
   submitAssessment,
 } from "@/lib/services/assessments";
+import { getEmployeeAssignments } from "@/lib/services/training";
 import { ExamTimer } from "@/components/exams/exam-timer";
 import { ExamProgressNav } from "@/components/exams/exam-progress-nav";
 import { QuestionRenderer } from "@/components/exams/question-renderer";
@@ -36,12 +37,13 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import type { AssessmentAttempt, Exam } from "@/types";
+import type { AssessmentAttempt, Exam, TrainingAssignment } from "@/types";
 
 type Phase = "list" | "exam" | "result" | "review";
 
 function ExamsPageInner() {
   const searchParams = useSearchParams();
+  const router = useRouter();
   const { profile } = useAuth();
   const { exams, loading: examsLoading, refresh: refreshExams } = useExams();
   const { banks } = useQuestionBank();
@@ -55,7 +57,23 @@ function ExamsPageInner() {
   const [saving, setSaving] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
   const [selectedExamId, setSelectedExamId] = useState<string>("");
+  const [pendingTraining, setPendingTraining] = useState<TrainingAssignment[]>([]);
   const submittingRef = useRef(false);
+  const deepLinkStarted = useRef(false);
+  const answersRef = useRef(answers);
+  answersRef.current = answers;
+
+  const isEmployee = profile?.role === "employee";
+
+  useEffect(() => {
+    if (!profile?.employeeId) {
+      setPendingTraining([]);
+      return;
+    }
+    void getEmployeeAssignments(profile.employeeId).then((rows) =>
+      setPendingTraining(rows.filter((a) => a.status === "assessment_pending"))
+    );
+  }, [profile?.employeeId, phase]);
 
   const { entries: leaderboard } = useExamLeaderboard(
     phase === "list" || phase === "result" ? selectedExamId : undefined
@@ -65,7 +83,11 @@ function ExamsPageInner() {
   );
 
   const startExam = useCallback(
-    async (examId: string, inductionAssignmentId?: string | null) => {
+    async (
+      examId: string,
+      inductionAssignmentId?: string | null,
+      assignmentId?: string
+    ) => {
       if (!profile?.employeeId && !profile?.uid) {
         toast.error("Sign in as an employee-linked user to take exams");
         return;
@@ -79,6 +101,7 @@ function ExamsPageInner() {
           employeeId: profile.employeeId || profile.uid,
           employeeName: profile.displayName,
           inductionAssignmentId: inductionAssignmentId || undefined,
+          assignmentId: assignmentId || undefined,
           actorId: profile.uid,
         });
         setExam(examDoc);
@@ -88,31 +111,37 @@ function ExamsPageInner() {
         setLastSavedAt(started.lastSavedAt || null);
         setSelectedExamId(examId);
         setPhase("exam");
-        toast.success("Exam started — answers autosave while you work");
+        router.replace("/dashboard/exams");
+        toast.success(
+          started.status === "in_progress" && started.answersDraft
+            ? "Resumed in-progress exam"
+            : "Exam started — answers autosave while you work"
+        );
       } catch (e) {
         toast.error(e instanceof Error ? e.message : "Could not start exam");
       } finally {
         setBusy(false);
       }
     },
-    [profile]
+    [profile, router]
   );
 
   useEffect(() => {
     const examParam = searchParams.get("exam");
     const inda = searchParams.get("inda");
-    if (examParam && phase === "list" && profile) {
+    if (examParam && phase === "list" && profile && !deepLinkStarted.current) {
+      deepLinkStarted.current = true;
       void startExam(examParam, inda);
     }
   }, [searchParams, phase, profile, startExam]);
 
-  // Autosave
+  // Autosave — stable interval; always flush latest answers from ref
   useEffect(() => {
     if (phase !== "exam" || !attempt || !exam?.autoSaveEnabled || !profile) return;
     const interval = (exam.autoSaveIntervalSeconds || 15) * 1000;
     const id = setInterval(() => {
       setSaving(true);
-      void autoSaveAssessment(attempt.id, answers, profile.uid)
+      void autoSaveAssessment(attempt.id, answersRef.current, profile.uid)
         .then(() => setLastSavedAt(new Date().toISOString()))
         .catch((err) => {
           console.warn("[exam] autosave failed:", err);
@@ -120,7 +149,7 @@ function ExamsPageInner() {
         .finally(() => setSaving(false));
     }, interval);
     return () => clearInterval(id);
-  }, [phase, attempt, exam, answers, profile]);
+  }, [phase, attempt?.id, exam?.autoSaveEnabled, exam?.autoSaveIntervalSeconds, profile?.uid]);
 
   const setAnswer = (questionId: string, optionIds: string[]) => {
     setAnswers((prev) => ({ ...prev, [questionId]: optionIds }));
@@ -131,9 +160,10 @@ function ExamsPageInner() {
     submittingRef.current = true;
     setBusy(true);
     try {
-      const result = await submitAssessment(attempt.id, answers, profile.uid);
-      // Reload with answers revealed
-      const full = await getAttempt(result.id, { revealAnswers: true });
+      const result = await submitAssessment(attempt.id, answersRef.current, profile.uid);
+      const full = await getAttempt(result.id, {
+        revealAnswers: !!(exam?.allowReview && exam?.showResultsImmediately),
+      });
       setAttempt(full || result);
       if (exam?.showResultsImmediately) {
         setPhase("result");
@@ -143,20 +173,30 @@ function ExamsPageInner() {
       }
       if (result.passed) {
         toast.success(`Passed with ${result.percentage}%`);
+        if (result.certificateEligible) {
+          toast.success("Certificate will appear under Certificates when issued");
+        }
       } else {
-        toast.error(`Score ${result.percentage}% — below pass mark`);
+        toast.error(
+          result.status === "expired"
+            ? "Time expired — attempt recorded as expired"
+            : `Did not pass (${result.percentage}%)`
+        );
       }
+      void getEmployeeAssignments(profile.employeeId || "").then((rows) =>
+        setPendingTraining(rows.filter((a) => a.status === "assessment_pending"))
+      );
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Submit failed");
     } finally {
       submittingRef.current = false;
       setBusy(false);
     }
-  }, [attempt, answers, profile, exam]);
+  }, [attempt, profile, exam]);
 
   const onExpire = useCallback(() => {
     if (!exam?.autoSubmitOnTimeout) {
-      toast.warning("Time expired");
+      toast.warning("Time expired — submit when ready (attempt will not pass after expiry)");
       return;
     }
     toast.warning("Time expired — auto-submitting");
@@ -298,6 +338,49 @@ function ExamsPageInner() {
           </TabsList>
 
           <TabsContent value="exams" className="space-y-4">
+            {pendingTraining.length > 0 && (
+              <Card className="border-primary/30">
+                <CardHeader>
+                  <CardTitle className="text-base">Pending training assessments</CardTitle>
+                  <CardDescription>
+                    Complete these assessments after your training session
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {pendingTraining.map((a) => {
+                    const examForSop = exams.find((e) => e.sopId === a.sopId && e.isActive);
+                    return (
+                      <div
+                        key={a.id}
+                        className="flex flex-wrap items-center justify-between gap-3 rounded-md border p-3"
+                      >
+                        <div>
+                          <p className="font-medium text-sm">
+                            {examForSop?.title || `SOP ${a.sopId}`}
+                          </p>
+                          <p className="text-xs text-muted-foreground font-mono">{a.id}</p>
+                        </div>
+                        {examForSop ? (
+                          <Button
+                            size="sm"
+                            disabled={busy}
+                            onClick={() => void startExam(examForSop.id, null, a.id)}
+                          >
+                            <Play className="mr-1.5 h-3.5 w-3.5" />
+                            Take assessment
+                          </Button>
+                        ) : (
+                          <p className="text-xs text-muted-foreground">
+                            No exam linked to this SOP yet
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })}
+                </CardContent>
+              </Card>
+            )}
+
             {examsLoading ? (
               <div className="flex items-center gap-2 text-muted-foreground">
                 <Loader2 className="h-4 w-4 animate-spin" /> Loading exams…
@@ -358,17 +441,19 @@ function ExamsPageInner() {
                             }
                           }}
                         />
-                        <Button
-                          size="sm"
-                          disabled={busy}
-                          onClick={(ev) => {
-                            ev.stopPropagation();
-                            void startExam(e.id);
-                          }}
-                        >
-                          <Play className="mr-1.5 h-3.5 w-3.5" />
-                          Start
-                        </Button>
+                        {!isEmployee && (
+                          <Button
+                            size="sm"
+                            disabled={busy}
+                            onClick={(ev) => {
+                              ev.stopPropagation();
+                              void startExam(e.id);
+                            }}
+                          >
+                            <Play className="mr-1.5 h-3.5 w-3.5" />
+                            Start
+                          </Button>
+                        )}
                       </div>
                     </CardContent>
                   </Card>

@@ -18,15 +18,29 @@ import type { Department } from "@/types";
 interface ReportFiltersBarProps {
   filters: ReportFilters;
   onChange: (next: ReportFilters) => void;
+  /** When set, department filter is locked (department heads). */
+  lockedDepartmentId?: string;
 }
 
-export function ReportFiltersBar({ filters, onChange }: ReportFiltersBarProps) {
+export function ReportFiltersBar({
+  filters,
+  onChange,
+  lockedDepartmentId,
+}: ReportFiltersBarProps) {
   const [departments, setDepartments] = useState<Department[]>([]);
   const set = (patch: Partial<ReportFilters>) => onChange({ ...filters, ...patch });
 
   useEffect(() => {
-    void listDepartments().then(setDepartments);
-  }, []);
+    void listDepartments()
+      .then((rows) => {
+        if (lockedDepartmentId) {
+          setDepartments(rows.filter((d) => d.id === lockedDepartmentId));
+        } else {
+          setDepartments(rows);
+        }
+      })
+      .catch(() => setDepartments([]));
+  }, [lockedDepartmentId]);
 
   return (
     <div className="grid gap-3 rounded-lg border bg-card p-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -45,14 +59,20 @@ export function ReportFiltersBar({ filters, onChange }: ReportFiltersBarProps) {
       <div className="space-y-1.5">
         <Label>Department</Label>
         <Select
-          value={filters.departmentId}
-          onValueChange={(v) => set({ departmentId: v })}
+          value={lockedDepartmentId || filters.departmentId}
+          onValueChange={(v) => {
+            if (lockedDepartmentId) return;
+            set({ departmentId: v });
+          }}
+          disabled={!!lockedDepartmentId}
         >
           <SelectTrigger>
             <SelectValue placeholder="All departments" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">All departments</SelectItem>
+            {!lockedDepartmentId && (
+              <SelectItem value="all">All departments</SelectItem>
+            )}
             {departments.map((d) => (
               <SelectItem key={d.id} value={d.id}>
                 {d.code} — {d.name}

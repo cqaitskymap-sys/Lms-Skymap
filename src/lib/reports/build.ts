@@ -2,7 +2,15 @@
  * Build filtered report datasets from Firestore-backed LMS services.
  */
 
-import { collection, getDocs, limit, orderBy, query } from "firebase/firestore";
+import {
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  limit,
+  orderBy,
+  query,
+} from "firebase/firestore/lite";
 import { db, COLLECTIONS } from "@/lib/firebase/client";
 import { listAuditLogs } from "@/lib/services/audit-logs";
 import { listCertificates } from "@/lib/services/certificates";
@@ -13,6 +21,16 @@ import {
   listTrainers,
   listTrainingAssignments,
 } from "@/lib/services/training";
+import { readAssessmentStore } from "@/lib/assessments/demo-store";
+import { isDemoMode } from "@/lib/demo/data";
+import {
+  latestAssignmentsByCell,
+  matrixCellLabel,
+  matrixCellStatus,
+  resolveLatestAssignment,
+  scopeMatrixEmployees,
+  filterMatrixSops,
+} from "@/lib/training/matrix";
 import { formatDate } from "@/lib/utils";
 import type {
   AuditLog,
@@ -23,6 +41,7 @@ import type {
   SopDocument,
   TrainerProfile,
   TrainingAssignment,
+  UserProfile,
 } from "@/types";
 import type {
   ChartPoint,
@@ -32,7 +51,12 @@ import type {
 } from "@/lib/reports/types";
 import { REPORT_CATALOG } from "@/lib/reports/types";
 
-const TODAY = new Date();
+export type ReportLoadOptions = {
+  /** Force department scope (department heads). */
+  departmentId?: string;
+  /** Load audit trail (requires audit:read). */
+  includeAudit?: boolean;
+};
 
 type ReportSnapshot = {
   employees: Employee[];
@@ -43,6 +67,8 @@ type ReportSnapshot = {
   certificates: Certificate[];
   examResults: ExamResult[];
   auditLogs: AuditLog[];
+  trainerNames: Record<string, string>;
+  warnings: string[];
 };
 
 let snap: ReportSnapshot | null = null;
@@ -52,7 +78,32 @@ function data(): ReportSnapshot {
   return snap;
 }
 
+function today(): Date {
+  return new Date();
+}
+
+async function soft<T>(
+  label: string,
+  promise: Promise<T>,
+  fallback: T,
+  warnings: string[]
+): Promise<T> {
+  try {
+    return await promise;
+  } catch (err) {
+    warnings.push(
+      `${label}: ${err instanceof Error ? err.message : "failed to load"}`
+    );
+    return fallback;
+  }
+}
+
 async function loadExamResults(): Promise<ExamResult[]> {
+  if (isDemoMode()) {
+    return [...readAssessmentStore().results].sort((a, b) =>
+      b.createdAt.localeCompare(a.createdAt)
+    );
+  }
   try {
     const q = query(
       collection(db, COLLECTIONS.examResults),
@@ -62,31 +113,97 @@ async function loadExamResults(): Promise<ExamResult[]> {
     const docs = await getDocs(q);
     return docs.docs.map((d) => ({ id: d.id, ...d.data() }) as ExamResult);
   } catch {
-    const docs = await getDocs(collection(db, COLLECTIONS.examResults));
+    const docs = await getDocs(
+      query(collection(db, COLLECTIONS.examResults), limit(500))
+    );
     return docs.docs.map((d) => ({ id: d.id, ...d.data() }) as ExamResult);
   }
 }
 
-export async function loadReportSnapshot(): Promise<ReportSnapshot> {
-  const [
-    employees,
-    departments,
-    sops,
-    assignments,
-    trainers,
-    certificates,
-    examResults,
-    auditLogs,
-  ] = await Promise.all([
-    listEmployeesForLifecycle().catch(() => [] as Employee[]),
-    listDepartments().catch(() => [] as Department[]),
-    listSopsDetailed().catch(() => [] as SopDocument[]),
-    listTrainingAssignments().catch(() => [] as TrainingAssignment[]),
-    listTrainers().catch(() => [] as TrainerProfile[]),
-    listCertificates().catch(() => [] as Certificate[]),
-    loadExamResults().catch(() => [] as ExamResult[]),
-    listAuditLogs(300).catch(() => [] as AuditLog[]),
+async function loadTrainerNames(
+  trainers: TrainerProfile[],
+  employees: Employee[]
+): Promise<Record<string, string>> {
+  const names: Record<string, string> = {};
+  const byEmployee = new Map(
+    employees.map((e) => [e.id, `${e.firstName} ${e.lastName}`.trim()])
+  );
+
+  for (const t of trainers) {
+    if (t.employeeId && byEmployee.has(t.employeeId)) {
+      const n = byEmployee.get(t.employeeId)!;
+      names[t.id] = n;
+      names[t.userId] = n;
+    }
+  }
+
+  const missing = trainers.filter((t) => !names[t.id] && t.userId);
+  await Promise.all(
+    missing.map(async (t) => {
+      try {
+        if (isDemoMode()) {
+          names[t.id] = t.userId;
+          names[t.userId] = t.userId;
+          return;
+        }
+        const snapUser = await getDoc(doc(db, COLLECTIONS.users, t.userId));
+        if (snapUser.exists()) {
+          const u = snapUser.data() as UserProfile;
+          const n = (u.displayName || u.email || t.userId).trim();
+          names[t.id] = n;
+          names[t.userId] = n;
+        }
+      } catch {
+        /* leave unresolved */
+      }
+    })
+  );
+
+  return names;
+}
+
+export async function loadReportSnapshot(
+  opts: ReportLoadOptions = {}
+): Promise<ReportSnapshot> {
+  const warnings: string[] = [];
+  const deptId = opts.departmentId;
+
+  const [employeesRaw, departmentsRaw, sopsRaw, assignments, trainers] =
+    await Promise.all([
+      listEmployeesForLifecycle(),
+      listDepartments(),
+      listSopsDetailed(),
+      listTrainingAssignments(deptId ? { departmentId: deptId } : undefined),
+      listTrainers(),
+    ]);
+
+  let employees = employeesRaw;
+  let departments = departmentsRaw;
+  let sops = sopsRaw;
+
+  if (deptId) {
+    employees = employees.filter((e) => e.departmentId === deptId);
+    departments = departments.filter((d) => d.id === deptId);
+    sops = filterMatrixSops(sops, deptId);
+  }
+
+  const [certificatesRaw, examResultsRaw, auditLogs] = await Promise.all([
+    soft("Certificates", listCertificates(), [] as Certificate[], warnings),
+    soft("Exam results", loadExamResults(), [] as ExamResult[], warnings),
+    opts.includeAudit
+      ? soft("Audit logs", listAuditLogs(300), [] as AuditLog[], warnings)
+      : Promise.resolve([] as AuditLog[]),
   ]);
+
+  let certificates = certificatesRaw;
+  let examResults = examResultsRaw;
+  if (deptId) {
+    certificates = certificates.filter((c) => c.departmentId === deptId);
+    const empIds = new Set(employees.map((e) => e.id));
+    examResults = examResults.filter((r) => empIds.has(r.employeeId));
+  }
+
+  const trainerNames = await loadTrainerNames(trainers, employeesRaw);
 
   return {
     employees,
@@ -97,6 +214,8 @@ export async function loadReportSnapshot(): Promise<ReportSnapshot> {
     certificates,
     examResults,
     auditLogs,
+    trainerNames,
+    warnings,
   };
 }
 
@@ -149,9 +268,13 @@ function sopTitle(id: string) {
 }
 
 function trainerName(id?: string) {
-  if (!id) return "—";
+  if (!id || id === "unassigned") return "—";
+  const mapped = data().trainerNames[id];
+  if (mapped) return mapped;
   const t = data().trainers.find((x) => x.id === id || x.userId === id);
-  if (t) return t.userId || t.id;
+  if (t) {
+    return data().trainerNames[t.id] || data().trainerNames[t.userId] || "Trainer";
+  }
   return id;
 }
 
@@ -190,8 +313,9 @@ function assignments(filters: ReportFilters) {
 
 function isOverdue(a: TrainingAssignment) {
   if (!a.dueDate) return false;
-  if (a.status === "passed") return false;
-  return new Date(a.dueDate) < TODAY;
+  // Graded outcomes are complete — not overdue.
+  if (a.status === "passed" || a.status === "failed") return false;
+  return new Date(a.dueDate) < today();
 }
 
 function catalogMeta(type: ReportType) {
@@ -265,22 +389,22 @@ function buildDepartmentCompliance(filters: ReportFilters): ReportDataset {
       filters.departmentId === "all" || a.departmentId === filters.departmentId
   );
 
-  const byDept = allDepartments().filter(
-    (d) => filters.departmentId === "all" || d.id === filters.departmentId
-  ).map((d) => {
-    const list = asg.filter((a) => a.departmentId === d.id);
-    const passed = list.filter((a) => a.status === "passed").length;
-    const overdue = list.filter(isOverdue).length;
-    const rate = list.length ? Math.round((passed / list.length) * 100) : 0;
-    return {
-      department: d.name,
-      code: d.code,
-      assignments: list.length,
-      completed: passed,
-      overdue,
-      complianceRate: rate,
-    };
-  });
+  const byDept = allDepartments()
+    .filter((d) => filters.departmentId === "all" || d.id === filters.departmentId)
+    .map((d) => {
+      const list = asg.filter((a) => a.departmentId === d.id);
+      const passed = list.filter((a) => a.status === "passed").length;
+      const overdue = list.filter(isOverdue).length;
+      const rate = list.length ? Math.round((passed / list.length) * 100) : 0;
+      return {
+        department: d.name,
+        code: d.code,
+        assignments: list.length,
+        completed: passed,
+        overdue,
+        complianceRate: rate,
+      };
+    });
 
   const filtered = byDept.filter((r) =>
     matchesSearch(`${r.department} ${r.code}`, filters.search)
@@ -386,29 +510,8 @@ function buildTrainerPerformance(filters: ReportFilters): ReportDataset {
 }
 
 function buildExamResults(filters: ReportFilters): ReportDataset {
-  let results = data().examResults;
-  if (!results.length) {
-    results = allAssignments()
-      .filter((a) => a.score != null)
-      .map((a, i) => ({
-        id: `res_asg_${i}`,
-        attemptId: `att_asg_${i}`,
-        examId: "exam_from_assignment",
-        examTitle: `${sopLabel(a.sopId)} Assessment`,
-        employeeId: a.employeeId,
-        employeeName: empName(a.employeeId),
-        percentage: a.score!,
-        score: a.score!,
-        maxScore: 100,
-        passed: !!a.passed,
-        certificateEligible: !!a.passed && (a.score || 0) >= 80,
-        timeSpentSeconds: 600 + i * 40,
-        rank: i + 1,
-        createdAt: a.updatedAt,
-        updatedAt: a.updatedAt,
-        createdBy: "system",
-      }));
-  }
+  // Only real exam_results — never synthesize from assignment scores.
+  const results = data().examResults;
 
   const rows = results
     .filter((r) => inDateRange(r.createdAt, filters))
@@ -496,18 +599,20 @@ function buildPassFail(filters: ReportFilters): ReportDataset {
   const fail = decided.filter((a) => a.status === "failed").length;
   const total = decided.length || 1;
 
-  const byDept = allDepartments().map((d) => {
-    const list = decided.filter((a) => a.departmentId === d.id);
-    const p = list.filter((a) => a.status === "passed").length;
-    const f = list.filter((a) => a.status === "failed").length;
-    return {
-      department: d.name,
-      passed: p,
-      failed: f,
-      passPct: list.length ? Math.round((p / list.length) * 100) : 0,
-      failPct: list.length ? Math.round((f / list.length) * 100) : 0,
-    };
-  }).filter((r) => matchesSearch(r.department, filters.search));
+  const byDept = allDepartments()
+    .map((d) => {
+      const list = decided.filter((a) => a.departmentId === d.id);
+      const p = list.filter((a) => a.status === "passed").length;
+      const f = list.filter((a) => a.status === "failed").length;
+      return {
+        department: d.name,
+        passed: p,
+        failed: f,
+        passPct: list.length ? Math.round((p / list.length) * 100) : 0,
+        failPct: list.length ? Math.round((f / list.length) * 100) : 0,
+      };
+    })
+    .filter((r) => matchesSearch(r.department, filters.search));
 
   return {
     ...catalogMeta("pass_fail"),
@@ -558,7 +663,7 @@ function buildOverdue(filters: ReportFilters): ReportDataset {
       daysOverdue: a.dueDate
         ? Math.max(
             0,
-            Math.floor((TODAY.getTime() - new Date(a.dueDate).getTime()) / 86400000)
+            Math.floor((today().getTime() - new Date(a.dueDate).getTime()) / 86400000)
           )
         : 0,
       trainer: trainerName(a.trainerId),
@@ -606,39 +711,42 @@ function buildOverdue(filters: ReportFilters): ReportDataset {
 }
 
 function buildUpcomingExpiry(filters: ReportFilters): ReportDataset {
-  const certs = data().certificates.map((c) => ({
-    type: "Certificate",
-    reference: c.certificateNumber,
-    subject: c.employeeName,
-    department: c.departmentName,
-    item: c.sopNumber,
-    expiry: c.expiresAt
-      ? formatDate(c.expiresAt)
-      : formatDate(
-          new Date(
-            new Date(c.issuedAt).getTime() + 365 * 86400000
-          ).toISOString()
-        ),
-    daysLeft: Math.floor(
-      ((c.expiresAt
-        ? new Date(c.expiresAt).getTime()
-        : new Date(c.issuedAt).getTime() + 365 * 86400000) -
-        TODAY.getTime()) /
-        86400000
-    ),
-  }));
+  const now = today();
+  const certs = data()
+    .certificates.filter((c) => !c.isRevoked)
+    .map((c) => ({
+      type: "Certificate",
+      reference: c.certificateNumber,
+      subject: c.employeeName,
+      department: c.departmentName,
+      item: c.sopNumber,
+      expiry: c.expiresAt
+        ? formatDate(c.expiresAt)
+        : formatDate(
+            new Date(new Date(c.issuedAt).getTime() + 365 * 86400000).toISOString()
+          ),
+      daysLeft: Math.floor(
+        ((c.expiresAt
+          ? new Date(c.expiresAt).getTime()
+          : new Date(c.issuedAt).getTime() + 365 * 86400000) -
+          now.getTime()) /
+          86400000
+      ),
+    }));
 
-  const sops = allSops().filter((s) => s.reviewDate).map((s) => ({
-    type: "SOP review",
-    reference: s.sopNumber,
-    subject: s.title,
-    department: s.departmentIds.map(deptCode).join(", "),
-    item: s.sopNumber,
-    expiry: formatDate(s.reviewDate),
-    daysLeft: Math.floor(
-      (new Date(s.reviewDate!).getTime() - TODAY.getTime()) / 86400000
-    ),
-  }));
+  const sops = allSops()
+    .filter((s) => s.reviewDate)
+    .map((s) => ({
+      type: "SOP review",
+      reference: s.sopNumber,
+      subject: s.title,
+      department: s.departmentIds.map(deptCode).join(", "),
+      item: s.sopNumber,
+      expiry: formatDate(s.reviewDate),
+      daysLeft: Math.floor(
+        (new Date(s.reviewDate!).getTime() - now.getTime()) / 86400000
+      ),
+    }));
 
   const rows = [...certs, ...sops]
     .filter((r) => r.daysLeft >= 0 && r.daysLeft <= 180)
@@ -774,7 +882,8 @@ function buildCertificateStatus(filters: ReportFilters): ReportDataset {
 
 function buildSopCoverage(filters: ReportFilters): ReportDataset {
   const asg = assignments({ ...filters, departmentId: "all" });
-  const rows = allSops().filter((s) => s.status === "approved" || s.status === "under_review")
+  const rows = allSops()
+    .filter((s) => s.status === "approved" || s.status === "under_review")
     .filter((s) =>
       filters.departmentId === "all"
         ? true
@@ -838,11 +947,15 @@ function buildSopCoverage(filters: ReportFilters): ReportDataset {
 }
 
 function buildTrainingMatrix(filters: ReportFilters): ReportDataset {
-  const employees = allEmployees().filter(
-    (e) => filters.departmentId === "all" || e.departmentId === filters.departmentId
+  const employees = scopeMatrixEmployees(
+    allEmployees(),
+    filters.departmentId === "all" ? undefined : filters.departmentId
   );
-  const sops = allSops().filter((s) => s.status === "approved");
-  const asg = allAssignments();
+  const sops = filterMatrixSops(
+    allSops(),
+    filters.departmentId === "all" ? undefined : filters.departmentId
+  );
+  const asg = latestAssignmentsByCell(allAssignments());
 
   const rows = employees
     .filter((e) =>
@@ -855,14 +968,8 @@ function buildTrainingMatrix(filters: ReportFilters): ReportDataset {
         department: deptName(e.departmentId),
       };
       for (const s of sops) {
-        const a = asg.find((x) => x.employeeId === e.id && x.sopId === s.id);
-        row[s.sopNumber] = a
-          ? a.status === "passed"
-            ? "Pass"
-            : a.status === "failed"
-              ? "Fail"
-              : "In progress"
-          : "—";
+        const a = resolveLatestAssignment(asg, e.id, s.id);
+        row[s.sopNumber] = matrixCellLabel(matrixCellStatus(a, s));
       }
       return row;
     });
@@ -1001,12 +1108,15 @@ export async function buildReport(
   }
 }
 
-export function emptyFilters(): ReportFilters {
+export function emptyFilters(departmentId?: string): ReportFilters {
+  const now = new Date();
+  const y = now.getFullYear();
+  const pad = (n: number) => String(n).padStart(2, "0");
   return {
     search: "",
-    departmentId: "all",
-    dateFrom: "2026-01-01",
-    dateTo: "2026-12-31",
+    departmentId: departmentId || "all",
+    dateFrom: `${y}-01-01`,
+    dateTo: `${y}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`,
   };
 }
 

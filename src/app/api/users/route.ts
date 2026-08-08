@@ -175,12 +175,50 @@ export async function POST(request: NextRequest) {
     createdBy: verified.auth.uid,
   };
 
-  await adminDb.collection(COLLECTIONS.users).doc(uid).set(userProfile);
+  try {
+    await adminDb.collection(COLLECTIONS.users).doc(uid).set(userProfile);
 
-  if (input.role === "department_head" && input.departmentId) {
-    await adminDb.collection(COLLECTIONS.departments).doc(input.departmentId).set(
-      { headUserId: uid, updatedAt: now },
-      { merge: true }
+    if (input.role === "department_head" && input.departmentId) {
+      await adminDb.collection(COLLECTIONS.departments).doc(input.departmentId).set(
+        { headUserId: uid, updatedAt: now },
+        { merge: true }
+      );
+    }
+
+    if (input.role === "trainer") {
+      const trainerId = `tr_${uid.slice(0, 12)}`;
+      const existingTrainer = await adminDb
+        .collection(COLLECTIONS.trainers)
+        .where("userId", "==", uid)
+        .limit(1)
+        .get();
+      if (existingTrainer.empty) {
+        await adminDb.collection(COLLECTIONS.trainers).doc(trainerId).set({
+          id: trainerId,
+          userId: uid,
+          specializations: ["GMP", "SOP Training"],
+          departmentIds: input.departmentId ? [input.departmentId] : [],
+          qualifications: [],
+          isActive: true,
+          totalSessionsConducted: 0,
+          createdAt: now,
+          updatedAt: now,
+          createdBy: verified.auth.uid,
+        });
+      }
+    }
+  } catch (err) {
+    try {
+      await adminAuth.deleteUser(uid);
+    } catch {
+      /* best effort */
+    }
+    return NextResponse.json(
+      {
+        success: false,
+        error: err instanceof Error ? err.message : "Failed to save user profile",
+      },
+      { status: 500 }
     );
   }
 

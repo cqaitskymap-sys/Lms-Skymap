@@ -86,6 +86,8 @@ async function onboardLocally(
     actor
   );
 
+  window.dispatchEvent(new Event("pharma-lifecycle-updated"));
+
   return {
     employee,
     credentials: {
@@ -135,8 +137,17 @@ export async function onboardEmployee(
   }
 
   if (!res.ok || !json.success) {
+    const details = json.details as Record<string, string[] | undefined> | undefined;
+    if (details && typeof details === "object") {
+      const first = Object.entries(details).find(([, msgs]) => msgs?.length);
+      if (first) {
+        const [field, msgs] = first;
+        throw new Error(`${field}: ${msgs![0]}`);
+      }
+    }
     throw new Error(json.error || `Failed to onboard employee (${res.status})`);
   }
+  window.dispatchEvent(new Event("pharma-lifecycle-updated"));
   return json.data as OnboardResult;
 }
 
@@ -148,12 +159,14 @@ export async function reissueCredentials(
   email: OnboardResult["email"];
 }> {
   if (isDemoMode()) {
+    const emp = readLifecycleStore().employees.find((e) => e.id === employeeId);
+    if (!emp) throw new Error("Employee not found");
     const temporaryPassword = localTempPassword();
     return {
       credentials: {
-        username: "EMP000001",
-        employeeCode: "EMP000001",
-        email: "demo@pharma.local",
+        username: emp.username || emp.employeeCode,
+        employeeCode: emp.employeeCode,
+        email: emp.email,
         temporaryPassword,
         loginUrl: `${window.location.origin}/login`,
         oneTime: true,
@@ -231,7 +244,7 @@ export async function resolveLoginIdentifier(identifier: string): Promise<string
   }
 
   // Client Firestore lookup (works without Admin SDK)
-  const { collection, query, where, getDocs, limit } = await import("firebase/firestore");
+  const { collection, query, where, getDocs, limit } = await import("firebase/firestore/lite");
   const { db, COLLECTIONS } = await import("@/lib/firebase/client");
 
   const userSnap = await getDocs(

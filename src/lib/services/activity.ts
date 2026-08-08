@@ -1,6 +1,6 @@
 "use client";
 
-import { addDoc, collection, serverTimestamp } from "firebase/firestore";
+import { addDoc, collection, serverTimestamp } from "firebase/firestore/lite";
 import { db, COLLECTIONS } from "@/lib/firebase/client";
 import type { ActivityVerb } from "@/types";
 import { generateId } from "@/lib/utils";

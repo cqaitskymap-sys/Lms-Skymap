@@ -6,7 +6,7 @@ import { Plus, Download, Loader2 } from "lucide-react";
 import { listDepartments, departmentLabel } from "@/lib/services/departments";
 import { useLifecycleDirectory } from "@/hooks/use-employee-lifecycle";
 import { deleteEmployeeLifecycle } from "@/lib/services/lifecycle";
-import { RequirePermission } from "@/components/auth/require-permission";
+import { RequirePermission, Can } from "@/components/auth/require-permission";
 import { AdminDeleteButton } from "@/components/auth/admin-delete-button";
 import { DataToolbar } from "@/components/shared/data-toolbar";
 import { StatusBadge } from "@/components/shared/status-badge";
@@ -28,7 +28,7 @@ import * as XLSX from "xlsx";
 import type { Department } from "@/types";
 
 export default function EmployeesPage() {
-  const { employees, loading, refresh } = useLifecycleDirectory();
+  const { employees, loading, error, refresh } = useLifecycleDirectory();
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("");
   const [page, setPage] = useState(1);
@@ -46,8 +46,8 @@ export default function EmployeesPage() {
         `${e.firstName} ${e.lastName} ${e.email} ${e.employeeCode}`
           .toLowerCase()
           .includes(search.toLowerCase());
-      const matchStatus =
-        !status || e.status === status || e.lifecycleStage === status;
+      const stage = e.lifecycleStage || "created";
+      const matchStatus = !status || stage === status;
       return matchSearch && matchStatus;
     });
   }, [employees, search, status]);
@@ -85,6 +85,20 @@ export default function EmployeesPage() {
     );
   }
 
+  if (error) {
+    return (
+      <RequirePermission permission="employees:read">
+        <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-8 text-center">
+          <p className="font-medium text-destructive">Could not load employees</p>
+          <p className="mt-1 text-sm text-muted-foreground">{error}</p>
+          <Button className="mt-4" variant="outline" onClick={() => void refresh()}>
+            Retry
+          </Button>
+        </div>
+      </RequirePermission>
+    );
+  }
+
   return (
     <RequirePermission permission="employees:read">
       <div className="space-y-6">
@@ -98,12 +112,14 @@ export default function EmployeesPage() {
               <Download className="mr-2 h-4 w-4" />
               Export
             </Button>
-            <Button asChild>
-              <Link href="/dashboard/employees/new">
-                <Plus className="mr-2 h-4 w-4" />
-                Onboard employee
-              </Link>
-            </Button>
+            <Can permission="employees:write">
+              <Button asChild>
+                <Link href="/dashboard/employees/new">
+                  <Plus className="mr-2 h-4 w-4" />
+                  Onboard employee
+                </Link>
+              </Button>
+            </Can>
           </div>
         </div>
 
@@ -120,9 +136,10 @@ export default function EmployeesPage() {
               value: status,
               options: [
                 { label: "Pending verification", value: "hr_verification" },
-                { label: "Induction", value: "induction" },
-                { label: "Handed over", value: "handed_over" },
-                { label: "Active", value: "active" },
+                { label: "Induction assigned", value: "induction_assigned" },
+                { label: "Induction completed", value: "induction_completed" },
+                { label: "Handed over", value: "department_handover" },
+                { label: "In training", value: "training" },
                 { label: "Qualified", value: "qualified" },
               ],
             },
@@ -153,7 +170,16 @@ export default function EmployeesPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {pageData.map((e) => (
+                {pageData.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={7} className="py-10 text-center text-muted-foreground">
+                      {employees.length === 0
+                        ? "No employees yet. Onboard your first hire to get started."
+                        : "No employees match your search or filter."}
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  pageData.map((e) => (
                   <TableRow key={e.id}>
                     <TableCell>
                       <Link
@@ -181,7 +207,7 @@ export default function EmployeesPage() {
                     <TableCell>
                       <AdminDeleteButton
                         confirmTitle={`Delete ${e.firstName} ${e.lastName}?`}
-                        confirmDescription="Employee profile and related lifecycle records will be removed permanently."
+                        confirmDescription="Employee profile, lifecycle records, and linked login account (if any) will be removed permanently."
                         successMessage="Employee deleted"
                         onDelete={async () => {
                           await deleteEmployeeLifecycle(e.id);
@@ -190,7 +216,8 @@ export default function EmployeesPage() {
                       />
                     </TableCell>
                   </TableRow>
-                ))}
+                  ))
+                )}
               </TableBody>
             </Table>
             <div className="mt-4">

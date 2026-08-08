@@ -188,7 +188,36 @@ export function findDemoAdminUserByUid(
   return entry ? [entry[0], entry[1]] : null;
 }
 
-/** Built-in demo accounts + Super Admin–created demo staff. */
+const DEMO_PW_OVERRIDE_KEY = "pharma_lms_demo_pw_overrides";
+
+function getDemoPasswordOverrides(): Record<string, string> {
+  if (typeof window === "undefined") return {};
+  try {
+    return JSON.parse(localStorage.getItem(DEMO_PW_OVERRIDE_KEY) || "{}");
+  } catch {
+    return {};
+  }
+}
+
+/** Persist password change for built-in demo accounts (session / browser only). */
+export function setDemoPasswordOverride(email: string, password: string): void {
+  if (typeof window === "undefined") return;
+  const all = getDemoPasswordOverrides();
+  all[email.trim().toLowerCase()] = password;
+  localStorage.setItem(DEMO_PW_OVERRIDE_KEY, JSON.stringify(all));
+}
+
+/** Built-in demo accounts + Super Admin–created demo staff (+ password overrides). */
 export function getAllDemoUserEntries(): Record<string, { password: string; profile: UserProfile }> {
-  return { ...DEMO_USERS, ...getDemoAdminUsers() };
+  const base: Record<string, { password: string; profile: UserProfile }> = {
+    ...DEMO_USERS,
+    ...getDemoAdminUsers(),
+  };
+  const overrides = getDemoPasswordOverrides();
+  for (const [email, password] of Object.entries(overrides)) {
+    if (base[email]) {
+      base[email] = { ...base[email], password };
+    }
+  }
+  return base;
 }

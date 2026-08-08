@@ -36,7 +36,7 @@ export function ComplianceTrendChart({
       <GlassCard className="flex h-full flex-col">
         <GlassCardHeader
           title="Compliance trend"
-          description="Organization pass rate (live)"
+          description="Organization pass rate · last 6 months"
         />
         <div className="h-56 w-full min-h-[14rem] flex-1 sm:h-64">
           <ResponsiveContainer width="100%" height="100%">
@@ -168,6 +168,12 @@ export function ComplianceRing({ value = 0 }: { value?: number }) {
     { name: "Compliant", value },
     { name: "Gap", value: Math.max(0, 100 - value) },
   ];
+  const fill =
+    value >= 90
+      ? "hsl(152, 61%, 40%)"
+      : value >= 60
+        ? "hsl(38, 92%, 50%)"
+        : "hsl(0, 72%, 51%)";
   return (
     <MotionItem>
       <GlassCard className="flex flex-col items-center justify-center text-center">
@@ -186,7 +192,7 @@ export function ComplianceRing({ value = 0 }: { value?: number }) {
                 endAngle={-270}
                 strokeWidth={0}
               >
-                <Cell fill="hsl(152, 61%, 40%)" />
+                <Cell fill={fill} />
                 <Cell fill="hsl(var(--muted))" />
               </Pie>
             </PieChart>

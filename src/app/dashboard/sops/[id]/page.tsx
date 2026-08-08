@@ -42,7 +42,7 @@ export default function SopDetailPage({ params }: { params: Promise<{ id: string
   const { id } = use(params);
   const { profile, can } = useAuth();
   const { departments } = useDepartments();
-  const { sop, versions, currentVersion, views, acknowledgements, loading, refresh } =
+  const { sop, versions, currentVersion, views, acknowledgements, loading, error, refresh } =
     useSopDetail(id);
 
   const [selected, setSelected] = useState<SopVersion | null>(null);
@@ -85,6 +85,21 @@ export default function SopDetailPage({ params }: { params: Promise<{ id: string
   }, [sop, activeVersion, actor, refresh]);
 
   if (loading) return <SopLoading />;
+  if (error) {
+    return (
+      <div className="space-y-4 py-12 text-center">
+        <p className="text-destructive">{error}</p>
+        <div className="flex justify-center gap-2">
+          <Button variant="outline" onClick={() => void refresh()}>
+            Retry
+          </Button>
+          <Button variant="outline" asChild>
+            <Link href="/dashboard/sops">Back to SOPs</Link>
+          </Button>
+        </div>
+      </div>
+    );
+  }
   if (!sop || !activeVersion) {
     return (
       <div className="space-y-4">
@@ -183,8 +198,7 @@ export default function SopDetailPage({ params }: { params: Promise<{ id: string
             </Can>
 
             <Can permission="sops:approve">
-              {(activeVersion.status === "under_review" ||
-                activeVersion.status === "draft") && (
+              {activeVersion.status === "under_review" && (
                 <Button
                   size="sm"
                   disabled={busy}
@@ -237,8 +251,8 @@ export default function SopDetailPage({ params }: { params: Promise<{ id: string
             <CardHeader>
               <CardTitle className="text-base">Upload revision</CardTitle>
               <CardDescription>
-                Archives previous current version. On approval, affected employees are
-                auto-reassigned training.
+                Previous approved version stays effective until this revision is approved.
+                On approval, affected employees are auto-reassigned training.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -463,8 +477,8 @@ export default function SopDetailPage({ params }: { params: Promise<{ id: string
               <CardHeader>
                 <CardTitle className="text-base">Lifecycle audit</CardTitle>
                 <CardDescription>
-                  Creates, revisions, approvals, acknowledgements, and retraining are
-                  logged to the audit trail
+                  Version lifecycle on this SOP. Critical approve/submit/archive actions are also
+                  written to the append-only audit trail.
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-2 text-sm">

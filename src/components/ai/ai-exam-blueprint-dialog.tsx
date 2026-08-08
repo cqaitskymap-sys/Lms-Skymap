@@ -91,7 +91,10 @@ export function AiExamBlueprintDialog({ banks, onSaved }: Props) {
         const { questions } = await generateQuestionsWithAi({
           topic: topic.trim() || blueprint.title,
           context: context.trim() || blueprint.description,
-          count: Math.min(10, blueprint.questionCount),
+          count: Math.min(
+            10,
+            Math.max(1, Math.round(Number(blueprint.questionCount)) || 5)
+          ),
           difficulty: "mixed",
           types: ["mcq", "true_false", "scenario"],
         });

@@ -11,7 +11,7 @@ import {
 import type { CreateDepartmentInput, UpdateDepartmentInput } from "@/lib/auth/department-schemas";
 import type { Department } from "@/types";
 import { generateId } from "@/lib/utils";
-import { collection, getDocs, orderBy, query } from "firebase/firestore";
+import { collection, getDocs, orderBy, query } from "firebase/firestore/lite";
 
 export const DEPARTMENTS_UPDATED_EVENT = "pharma-departments-updated";
 const DEMO_DEPT_KEY = "pharma_lms_departments";
@@ -191,8 +191,9 @@ export async function updateDepartment(
 
 export async function deleteDepartment(id: string): Promise<void> {
   if (isDemoMode()) {
-    const all = readDemoDepartments().filter((d) => d.id !== id);
-    if (all.length === readDemoDepartments().length) {
+    const before = readDemoDepartments();
+    const all = before.filter((d) => d.id !== id);
+    if (all.length === before.length) {
       throw new Error("Department not found");
     }
     writeDemoDepartments(all);

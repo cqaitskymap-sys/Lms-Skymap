@@ -15,9 +15,9 @@ import {
   where,
   orderBy,
   limit,
-} from "firebase/firestore";
+} from "firebase/firestore/lite";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
-import { db, storage, COLLECTIONS } from "@/lib/firebase/client";
+import { auth, db, storage, COLLECTIONS } from "@/lib/firebase/client";
 import type {
   SopAcknowledgement,
   SopAttachment,
@@ -28,7 +28,7 @@ import type {
   TrainingAssignment,
   UserRole,
 } from "@/types";
-import { generateId, nowISO, addDays } from "@/lib/services/helpers";
+import { generateId, nowISO, addDays, stripUndefined } from "@/lib/services/helpers";
 import { isDemoMode } from "@/lib/demo/data";
 import {
   detectAttachmentType,
@@ -37,6 +37,10 @@ import {
   writeSopStore,
 } from "@/lib/sops/demo-store";
 import { logActivity } from "@/lib/services/activity";
+import {
+  readTrainingStore,
+  writeTrainingStore,
+} from "@/lib/training/demo-store";
 
 export interface SopActor {
   uid: string;
@@ -113,23 +117,22 @@ async function writeAuditClient(params: {
     metadata: { action: params.action },
   });
 
-  if (isDemoMode()) return;
-  try {
-    const id = generateId("audit");
-    await setDoc(doc(db, COLLECTIONS.auditLogs, id), {
-      id,
-      timestamp: nowISO(),
-      actorId: params.actor.uid,
-      actorEmail: params.actor.email,
-      actorRole: params.actor.role,
-      action: params.action,
-      resourceType: "sop",
-      resourceId: params.resourceId,
-      description: params.description,
-    });
-  } catch {
-    /* non-blocking */
-  }
+  const { recordAuditEvent } = await import("@/lib/services/audit-logs");
+  const action = (
+    ["create", "update", "delete", "approve", "reject", "submit", "assign", "sign"].includes(
+      params.action
+    )
+      ? params.action
+      : "update"
+  ) as import("@/types").AuditAction;
+
+  await recordAuditEvent({
+    action,
+    resourceType: "sop",
+    resourceId: params.resourceId,
+    description: params.description,
+    after: { action: params.action, actorRole: params.actor.role },
+  });
 }
 
 export async function listSopsDetailed(filters?: {
@@ -170,12 +173,96 @@ export async function listSopsDetailed(filters?: {
     );
     const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }) as SopDocument);
     return applyFilters(list);
-  } catch {
-    return [];
+  } catch (err) {
+    throw new Error(err instanceof Error ? err.message : "Failed to load SOPs");
   }
 }
 
-export async function getSopBundle(sopId: string): Promise<{
+/** Roles allowed to list all views / acks for a SOP (matches firestore.rules). */
+const SOP_VIEW_LIST_ROLES: UserRole[] = [
+  "super_admin",
+  "qa",
+  "hr",
+  "department_head",
+];
+
+export type GetSopBundleOpts = {
+  /** Prefer profile role so employees never hit org-wide view queries. */
+  role?: UserRole | string;
+  userId?: string;
+};
+
+async function listSopViewsForBundle(
+  sopId: string,
+  opts: { canListAll: boolean; userId?: string }
+): Promise<SopViewRecord[]> {
+  const mapDocs = (docs: { id: string; data: () => Record<string, unknown> }[]) =>
+    docs.map((d) => ({ id: d.id, ...d.data() }) as SopViewRecord);
+
+  if (opts.canListAll) {
+    const snap = await getDocs(
+      query(
+        collection(db, COLLECTIONS.sopViews),
+        where("sopId", "==", sopId),
+        orderBy("viewedAt", "desc"),
+        limit(100)
+      )
+    );
+    return mapDocs(snap.docs);
+  }
+
+  if (!opts.userId) return [];
+
+  // Employees may only read their own rows — filter by userId (rules-safe), then sopId.
+  const snap = await getDocs(
+    query(
+      collection(db, COLLECTIONS.sopViews),
+      where("userId", "==", opts.userId),
+      limit(100)
+    )
+  );
+  return mapDocs(snap.docs)
+    .filter((v) => v.sopId === sopId)
+    .sort((a, b) => b.viewedAt.localeCompare(a.viewedAt));
+}
+
+async function listSopAcksForBundle(
+  sopId: string,
+  opts: { canListAll: boolean; userId?: string }
+): Promise<SopAcknowledgement[]> {
+  const mapDocs = (docs: { id: string; data: () => Record<string, unknown> }[]) =>
+    docs.map((d) => ({ id: d.id, ...d.data() }) as SopAcknowledgement);
+
+  if (opts.canListAll) {
+    const snap = await getDocs(
+      query(
+        collection(db, COLLECTIONS.sopAcknowledgements),
+        where("sopId", "==", sopId),
+        orderBy("acknowledgedAt", "desc"),
+        limit(100)
+      )
+    );
+    return mapDocs(snap.docs);
+  }
+
+  if (!opts.userId) return [];
+
+  const snap = await getDocs(
+    query(
+      collection(db, COLLECTIONS.sopAcknowledgements),
+      where("userId", "==", opts.userId),
+      limit(100)
+    )
+  );
+  return mapDocs(snap.docs)
+    .filter((a) => a.sopId === sopId)
+    .sort((a, b) => b.acknowledgedAt.localeCompare(a.acknowledgedAt));
+}
+
+export async function getSopBundle(
+  sopId: string,
+  opts?: GetSopBundleOpts
+): Promise<{
   sop: SopDocument | null;
   versions: SopVersion[];
   currentVersion: SopVersion | null;
@@ -204,11 +291,15 @@ export async function getSopBundle(sopId: string): Promise<{
 
   if (isDemoMode()) return fromStore();
 
+  const role = opts?.role;
+  const userId = opts?.userId || auth.currentUser?.uid || undefined;
+  const canListAll =
+    !!role && SOP_VIEW_LIST_ROLES.includes(role as UserRole);
+
   try {
     const sopSnap = await getDoc(doc(db, COLLECTIONS.sops, sopId));
     if (!sopSnap.exists()) {
-      // May be a demo-seeded id
-      return fromStore();
+      throw new Error("SOP not found");
     }
     const sop = { id: sopSnap.id, ...sopSnap.data() } as SopDocument;
 
@@ -224,34 +315,25 @@ export async function getSopBundle(sopId: string): Promise<{
       (d) => ({ id: d.id, ...d.data() }) as SopVersion
     );
 
-    const viewsSnap = await getDocs(
-      query(
-        collection(db, COLLECTIONS.sopViews),
-        where("sopId", "==", sopId),
-        orderBy("viewedAt", "desc"),
-        limit(100)
-      )
-    );
-    const ackSnap = await getDocs(
-      query(
-        collection(db, COLLECTIONS.sopAcknowledgements),
-        where("sopId", "==", sopId),
-        orderBy("acknowledgedAt", "desc"),
-        limit(100)
-      )
-    );
+    // Views / acks must not break SOP load; scope by role to avoid console 403s.
+    const [views, acknowledgements] = await Promise.all([
+      listSopViewsForBundle(sopId, { canListAll, userId }).catch(
+        () => [] as SopViewRecord[]
+      ),
+      listSopAcksForBundle(sopId, { canListAll, userId }).catch(
+        () => [] as SopAcknowledgement[]
+      ),
+    ]);
 
     return {
       sop,
       versions,
       currentVersion: versions.find((v) => v.id === sop.currentVersionId) || null,
-      views: viewsSnap.docs.map((d) => ({ id: d.id, ...d.data() }) as SopViewRecord),
-      acknowledgements: ackSnap.docs.map(
-        (d) => ({ id: d.id, ...d.data() }) as SopAcknowledgement
-      ),
+      views,
+      acknowledgements,
     };
-  } catch {
-    return fromStore();
+  } catch (err) {
+    throw new Error(err instanceof Error ? err.message : "Failed to load SOP");
   }
 }
 
@@ -271,6 +353,19 @@ export async function createSopWithFiles(
   actor: SopActor
 ): Promise<{ sop: SopDocument; version: SopVersion }> {
   if (!data.files.length) throw new Error("Upload at least one file (PDF recommended)");
+
+  const sopNumber = data.sopNumber.trim().toUpperCase();
+  if (isDemoMode()) {
+    const dup = readSopStore().sops.some((s) => s.sopNumber === sopNumber);
+    if (dup) throw new Error(`SOP number "${sopNumber}" already exists`);
+  } else {
+    const dupSnap = await getDocs(
+      query(collection(db, COLLECTIONS.sops), where("sopNumber", "==", sopNumber), limit(1))
+    );
+    if (!dupSnap.empty) {
+      throw new Error(`SOP number "${sopNumber}" already exists`);
+    }
+  }
 
   const sopId = generateId("sop");
   const versionId = generateId("sopv");
@@ -306,7 +401,7 @@ export async function createSopWithFiles(
 
   const sop: SopDocument = {
     id: sopId,
-    sopNumber: data.sopNumber.trim().toUpperCase(),
+    sopNumber,
     title: data.title.trim(),
     description: data.description.trim(),
     departmentIds: data.departmentIds,
@@ -331,15 +426,8 @@ export async function createSopWithFiles(
     store.versions.unshift(version);
     writeSopStore(store);
   } else {
-    try {
-      await setDoc(doc(db, COLLECTIONS.sops, sopId), sop);
-      await setDoc(doc(db, COLLECTIONS.sopVersions, versionId), version);
-    } catch {
-      const store = readSopStore();
-      store.sops.unshift(sop);
-      store.versions.unshift(version);
-      writeSopStore(store);
-    }
+    await setDoc(doc(db, COLLECTIONS.sops, sopId), sop);
+    await setDoc(doc(db, COLLECTIONS.sopVersions, versionId), version);
   }
 
   await writeAuditClient({
@@ -374,20 +462,15 @@ export async function reviseSopWithFiles(
   const now = nowISO();
 
   if (!params.files.length) throw new Error("Upload revision files");
+  if (current.status === "under_review") {
+    throw new Error("Complete or withdraw the in-review version before uploading a new revision");
+  }
 
   const attachments: SopAttachment[] = [];
   for (const file of params.files) {
     attachments.push(await uploadAttachment(sopId, versionNumber, file, actor.uid));
   }
   const primary = primaryPdf(attachments)!;
-
-  // Archive / supersede previous current
-  const superseded: Partial<SopVersion> = {
-    status: "superseded",
-    archivedAt: now,
-    updatedAt: now,
-    updatedBy: actor.uid,
-  };
 
   const version: SopVersion = {
     id: versionId,
@@ -414,9 +497,6 @@ export async function reviseSopWithFiles(
 
   if (await preferLocalSopStore(sopId)) {
     const store = readSopStore();
-    store.versions = store.versions.map((v) =>
-      v.id === current.id ? { ...v, ...superseded, status: "superseded" } : v
-    );
     store.versions.unshift(version);
     store.sops = store.sops.map((s) =>
       s.id === sopId
@@ -432,7 +512,6 @@ export async function reviseSopWithFiles(
     );
     writeSopStore(store);
   } else {
-    await updateDoc(doc(db, COLLECTIONS.sopVersions, current.id), superseded);
     await setDoc(doc(db, COLLECTIONS.sopVersions, versionId), version);
     await updateDoc(doc(db, COLLECTIONS.sops, sopId), {
       currentVersionId: versionId,
@@ -514,7 +593,11 @@ export async function approveSopVersionFull(
   if (await preferLocalSopStore(sopId)) {
     const store = readSopStore();
     const version = store.versions.find((v) => v.id === versionId);
-    const isRevision = Boolean(version?.supersedesVersionId);
+    if (!version) throw new Error("SOP version not found");
+    if (version.status !== "under_review") {
+      throw new Error("Submit the version for QA review before approval");
+    }
+    const isRevision = Boolean(version.supersedesVersionId);
 
     store.versions = store.versions.map((v) => {
       if (v.id === versionId) {
@@ -528,6 +611,9 @@ export async function approveSopVersionFull(
           reviewDate,
           updatedAt: now,
         };
+      }
+      if (v.id === version.supersedesVersionId) {
+        return { ...v, status: "superseded", archivedAt: now, updatedAt: now };
       }
       if (v.sopId === sopId && v.id !== versionId && v.status === "approved") {
         return { ...v, status: "obsolete", archivedAt: now, updatedAt: now };
@@ -555,7 +641,11 @@ export async function approveSopVersionFull(
     writeSopStore(store);
   } else {
     const versionSnap = await getDoc(doc(db, COLLECTIONS.sopVersions, versionId));
-    const version = versionSnap.data() as SopVersion;
+    if (!versionSnap.exists()) throw new Error("SOP version not found");
+    const version = { id: versionSnap.id, ...versionSnap.data() } as SopVersion;
+    if (version.status !== "under_review") {
+      throw new Error("Submit the version for QA review before approval");
+    }
     const isRevision = Boolean(version.supersedesVersionId);
 
     await updateDoc(doc(db, COLLECTIONS.sopVersions, versionId), {
@@ -568,6 +658,15 @@ export async function approveSopVersionFull(
       updatedAt: now,
       updatedBy: actor.uid,
     });
+
+    if (version.supersedesVersionId) {
+      await updateDoc(doc(db, COLLECTIONS.sopVersions, version.supersedesVersionId), {
+        status: "superseded",
+        archivedAt: now,
+        updatedAt: now,
+        updatedBy: actor.uid,
+      });
+    }
 
     // Archive other approved versions
     const others = await getDocs(
@@ -621,14 +720,18 @@ function autoRetrainDemo(
   newVersionId: string,
   actorId: string
 ): number {
-  const prev = store.trainingAssignments.filter(
+  const trainingStore = readTrainingStore();
+  const prev = trainingStore.assignments.filter(
     (a) =>
       a.sopId === sopId &&
       ["passed", "training_completed", "assessment_pending"].includes(a.status)
   );
   const now = nowISO();
   let count = 0;
+  const assignedEmployees = new Set<string>();
   for (const p of prev) {
+    if (assignedEmployees.has(p.employeeId)) continue;
+    assignedEmployees.add(p.employeeId);
     const id = generateId("ta");
     const assignment: TrainingAssignment = {
       id,
@@ -647,9 +750,10 @@ function autoRetrainDemo(
       updatedAt: now,
       createdBy: actorId,
     };
-    store.trainingAssignments.unshift(assignment);
+    trainingStore.assignments.unshift(assignment);
     count++;
   }
+  writeTrainingStore(trainingStore);
   store.versions = store.versions.map((v) =>
     v.id === newVersionId ? { ...v, retrainAssignedCount: count } : v
   );
@@ -676,9 +780,12 @@ export async function reassignTrainingOnRevision(
   const snap = await getDocs(q);
   const now = nowISO();
   let count = 0;
+  const assignedEmployees = new Set<string>();
 
   for (const d of snap.docs) {
     const prev = d.data() as TrainingAssignment;
+    if (assignedEmployees.has(prev.employeeId)) continue;
+    assignedEmployees.add(prev.employeeId);
     const id = generateId("ta");
     const assignment: TrainingAssignment = {
       id,
@@ -697,25 +804,21 @@ export async function reassignTrainingOnRevision(
       updatedAt: now,
       createdBy: actorId,
     };
-    await setDoc(doc(db, COLLECTIONS.trainingAssignments, id), assignment);
+    await setDoc(doc(db, COLLECTIONS.trainingAssignments, id), stripUndefined(assignment));
 
     // Notify via notifications collection if user linked
     try {
       const empSnap = await getDoc(doc(db, COLLECTIONS.employees, prev.employeeId));
       const userId = empSnap.data()?.userId as string | undefined;
       if (userId) {
-        const notifId = generateId("notif");
-        await setDoc(doc(db, COLLECTIONS.notifications, notifId), {
-          id: notifId,
+        const { createNotification } = await import("@/lib/services/notifications");
+        await createNotification({
           userId,
           type: "sop_revision",
           title: "SOP Revised — Retraining Required",
           message: "An SOP you were trained on has been revised. Complete updated training.",
           link: "/dashboard/training",
-          isRead: false,
-          createdAt: now,
-          updatedAt: now,
-          createdBy: actorId,
+          actorId,
         });
       }
     } catch {
@@ -803,7 +906,8 @@ export async function recordSopView(params: {
   }
 
   try {
-    await setDoc(doc(db, COLLECTIONS.sopViews, record.id), record);
+    // Admin/HR/QA users often have no employeeId — Firestore rejects undefined fields.
+    await setDoc(doc(db, COLLECTIONS.sopViews, record.id), stripUndefined(record));
     const vSnap = await getDoc(doc(db, COLLECTIONS.sopVersions, params.versionId));
     const count = ((vSnap.data()?.viewCount as number) || 0) + 1;
     await updateDoc(doc(db, COLLECTIONS.sopVersions, params.versionId), { viewCount: count });
@@ -811,10 +915,8 @@ export async function recordSopView(params: {
     await updateDoc(doc(db, COLLECTIONS.sops, params.sopId), {
       viewCount: ((sSnap.data()?.viewCount as number) || 0) + 1,
     });
-  } catch {
-    const store = readSopStore();
-    store.views.unshift(record);
-    writeSopStore(store);
+  } catch (err) {
+    console.error("[recordSopView]", err);
   }
 }
 
@@ -859,10 +961,26 @@ export async function acknowledgeSop(params: {
     );
     writeSopStore(store);
   } else {
-    await setDoc(doc(db, COLLECTIONS.sopAcknowledgements, ack.id), ack);
+    const dupSnap = await getDocs(
+      query(
+        collection(db, COLLECTIONS.sopAcknowledgements),
+        where("versionId", "==", params.versionId),
+        where("userId", "==", params.actor.uid),
+        limit(1)
+      )
+    );
+    if (!dupSnap.empty) {
+      throw new Error("You have already acknowledged this version");
+    }
+
+    await setDoc(doc(db, COLLECTIONS.sopAcknowledgements, ack.id), stripUndefined(ack));
     const vSnap = await getDoc(doc(db, COLLECTIONS.sopVersions, params.versionId));
     await updateDoc(doc(db, COLLECTIONS.sopVersions, params.versionId), {
       acknowledgementCount: ((vSnap.data()?.acknowledgementCount as number) || 0) + 1,
+    });
+    const sSnap = await getDoc(doc(db, COLLECTIONS.sops, params.sopId));
+    await updateDoc(doc(db, COLLECTIONS.sops, params.sopId), {
+      acknowledgementCount: ((sSnap.data()?.acknowledgementCount as number) || 0) + 1,
     });
   }
 
@@ -957,8 +1075,10 @@ export async function deleteSop(sopId: string): Promise<void> {
     store.versions = store.versions.filter((v) => v.sopId !== sopId);
     store.views = store.views.filter((v) => v.sopId !== sopId);
     store.acknowledgements = store.acknowledgements.filter((a) => a.sopId !== sopId);
-    store.trainingAssignments = store.trainingAssignments.filter((a) => a.sopId !== sopId);
     writeSopStore(store);
+    const trainingStore = readTrainingStore();
+    trainingStore.assignments = trainingStore.assignments.filter((a) => a.sopId !== sopId);
+    writeTrainingStore(trainingStore);
     return;
   }
 

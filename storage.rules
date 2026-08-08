@@ -43,7 +43,7 @@ service firebase.storage {
     }
 
     match /certificates/{fileName} {
-      allow read: if true;
+      allow read: if isSignedIn();
       allow write: if hasRole(['super_admin', 'qa', 'hr'])
         && request.resource.size < 15 * 1024 * 1024
         && request.resource.contentType == 'application/pdf';

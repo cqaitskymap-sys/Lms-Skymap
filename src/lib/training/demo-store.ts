@@ -54,7 +54,13 @@ export function readTrainingStore(): TrainingStore {
 export function writeTrainingStore(store: TrainingStore): void {
   if (typeof window === "undefined") return;
   localStorage.setItem(STORE_KEY, JSON.stringify(store));
-  window.dispatchEvent(new CustomEvent(TRAINING_UPDATED_EVENT));
+  notifyTrainingUpdated();
+}
+
+export function notifyTrainingUpdated(): void {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent(TRAINING_UPDATED_EVENT));
+  }
 }
 
 export function preferTrainingLocal(): boolean {

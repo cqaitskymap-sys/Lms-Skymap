@@ -29,29 +29,41 @@ import {
 } from "@/lib/dashboard/live";
 import type { UserRole } from "@/types";
 
+export type DashboardView = ReturnType<typeof buildDashboardView>;
+
 interface DashboardShellProps {
   role: UserRole | "super_admin";
   title: string;
   subtitle: string;
-  children?: React.ReactNode;
+  children?:
+    | React.ReactNode
+    | ((ctx: { view: DashboardView; loading: boolean }) => React.ReactNode);
 }
 
 export function DashboardShell({ role, title, subtitle, children }: DashboardShellProps) {
-  const { profile } = useAuth();
+  const { profile, loading: authLoading } = useAuth();
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState(() =>
     buildDashboardView(emptyDashboardSnapshot(), role)
   );
 
+  // Prefer signed-in profile role for Firestore scoping (prop may be wrong during redirects).
+  const dataRole = profile?.role;
+
   const refresh = useCallback(async () => {
+    if (authLoading || !profile?.role) return;
     setLoading(true);
     try {
-      const snap = await fetchDashboardSnapshot(profile?.uid);
+      const snap = await fetchDashboardSnapshot({
+        userId: profile.uid,
+        role: dataRole,
+        employeeId: profile.employeeId,
+      });
       setView(buildDashboardView(snap, role));
     } finally {
       setLoading(false);
     }
-  }, [profile?.uid, role]);
+  }, [authLoading, profile, dataRole, role]);
 
   useEffect(() => {
     void refresh();
@@ -69,6 +81,8 @@ export function DashboardShell({ role, title, subtitle, children }: DashboardShe
   }, [refresh]);
 
   const actions = roleQuickActions(role);
+  const slot =
+    typeof children === "function" ? children({ view, loading }) : children;
 
   return (
     <MotionSection className="space-y-5 md:space-y-6">
@@ -110,7 +124,7 @@ export function DashboardShell({ role, title, subtitle, children }: DashboardShe
         )}
       </div>
 
-      {children}
+      {slot}
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         <UpcomingTrainingList items={view.upcoming} />

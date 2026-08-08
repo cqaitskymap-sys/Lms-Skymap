@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
+import { FieldValue } from "firebase-admin/firestore";
 import {
   unauthorized,
   verifyAuthDetailed,
@@ -85,14 +86,19 @@ export async function PATCH(
   }
 
   const now = new Date().toISOString();
-  const updates: Partial<UserProfile> = { updatedAt: now };
+  // Firestore rejects `undefined`; use FieldValue.delete() to clear optional fields.
+  const updates: Record<string, unknown> = { updatedAt: now };
 
   if (input.displayName !== undefined) updates.displayName = input.displayName;
-  if (input.phone !== undefined) updates.phone = input.phone || undefined;
+  if (input.phone !== undefined) {
+    updates.phone = input.phone ? input.phone : FieldValue.delete();
+  }
   if (input.isActive !== undefined) updates.isActive = input.isActive;
   if (input.role !== undefined) updates.role = input.role;
   if (input.departmentId !== undefined) {
-    updates.departmentId = input.departmentId || undefined;
+    updates.departmentId = input.departmentId
+      ? input.departmentId
+      : FieldValue.delete();
   }
 
   const nextRole = input.role ?? before.role;
@@ -103,53 +109,169 @@ export async function PATCH(
     );
   }
 
-  await ref.update(updates);
-
-  const authUpdates: { disabled?: boolean; displayName?: string } = {};
-  if (input.isActive !== undefined) authUpdates.disabled = !input.isActive;
-  if (input.displayName !== undefined) authUpdates.displayName = input.displayName;
-  if (Object.keys(authUpdates).length > 0) {
-    await adminAuth.updateUser(id, authUpdates);
+  // Drop department when role no longer needs it (hr/qa).
+  let clearDepartment = false;
+  if (
+    input.role !== undefined &&
+    input.role !== "department_head" &&
+    input.role !== "trainer" &&
+    input.departmentId === undefined
+  ) {
+    updates.departmentId = FieldValue.delete();
+    clearDepartment = true;
   }
 
-  const nextDept = input.departmentId !== undefined ? input.departmentId || undefined : before.departmentId;
+  try {
+    await ref.update(updates);
 
-  const claims: Record<string, string> = { role: nextRole };
-  if (nextDept) claims.departmentId = nextDept;
-  await adminAuth.setCustomUserClaims(id, claims);
+    const authUpdates: { disabled?: boolean; displayName?: string } = {};
+    if (input.isActive !== undefined) authUpdates.disabled = !input.isActive;
+    if (input.displayName !== undefined) authUpdates.displayName = input.displayName;
+    if (Object.keys(authUpdates).length > 0) {
+      await adminAuth.updateUser(id, authUpdates);
+    }
 
-  if (nextRole === "department_head" && nextDept) {
-    await adminDb.collection(COLLECTIONS.departments).doc(nextDept).set(
-      { headUserId: id, updatedAt: now },
-      { merge: true }
+    const nextDept = clearDepartment
+      ? undefined
+      : input.departmentId !== undefined
+        ? input.departmentId || undefined
+        : before.departmentId;
+
+    const claims: Record<string, string> = { role: nextRole };
+    if (nextDept) claims.departmentId = nextDept;
+    await adminAuth.setCustomUserClaims(id, claims);
+
+    const wasHead = before.role === "department_head" && before.departmentId;
+    const isHead = nextRole === "department_head" && nextDept;
+
+    if (wasHead && (!isHead || before.departmentId !== nextDept)) {
+      const oldDeptRef = adminDb.collection(COLLECTIONS.departments).doc(before.departmentId!);
+      const oldDeptSnap = await oldDeptRef.get();
+      if (oldDeptSnap.exists && oldDeptSnap.data()?.headUserId === id) {
+        await oldDeptRef.update({
+          headUserId: FieldValue.delete(),
+          updatedAt: now,
+        });
+      }
+    }
+
+    if (isHead && nextDept) {
+      await adminDb.collection(COLLECTIONS.departments).doc(nextDept).set(
+        { headUserId: id, updatedAt: now },
+        { merge: true }
+      );
+    }
+
+    // Ensure trainer profile exists when promoted to trainer
+    if (nextRole === "trainer" && before.role !== "trainer") {
+      const existingTrainer = await adminDb
+        .collection(COLLECTIONS.trainers)
+        .where("userId", "==", id)
+        .limit(1)
+        .get();
+      if (existingTrainer.empty) {
+        const trainerId = `tr_${id.slice(0, 12)}`;
+        await adminDb.collection(COLLECTIONS.trainers).doc(trainerId).set({
+          id: trainerId,
+          userId: id,
+          specializations: ["GMP", "SOP Training"],
+          departmentIds: nextDept ? [nextDept] : [],
+          qualifications: [],
+          isActive: true,
+          totalSessionsConducted: 0,
+          createdAt: now,
+          updatedAt: now,
+          createdBy: verified.auth.uid,
+        });
+      }
+    }
+
+    // Soft-deactivate trainer profiles when leaving trainer role or account disabled
+    if (
+      (before.role === "trainer" && nextRole !== "trainer") ||
+      (input.isActive === false && before.role === "trainer")
+    ) {
+      const trainerSnap = await adminDb
+        .collection(COLLECTIONS.trainers)
+        .where("userId", "==", id)
+        .get();
+      for (const d of trainerSnap.docs) {
+        await d.ref.update({
+          isActive: false,
+          updatedAt: now,
+          updatedBy: verified.auth.uid,
+        });
+      }
+    } else if (input.isActive === true && nextRole === "trainer") {
+      const trainerSnap = await adminDb
+        .collection(COLLECTIONS.trainers)
+        .where("userId", "==", id)
+        .get();
+      for (const d of trainerSnap.docs) {
+        await d.ref.update({
+          isActive: true,
+          updatedAt: now,
+          updatedBy: verified.auth.uid,
+        });
+      }
+    }
+
+    const after: UserProfile = {
+      ...before,
+      updatedAt: now,
+      ...(input.displayName !== undefined ? { displayName: input.displayName } : {}),
+      ...(input.isActive !== undefined ? { isActive: input.isActive } : {}),
+      ...(input.role !== undefined ? { role: input.role } : {}),
+      ...(input.allowedModules !== undefined || input.role !== undefined
+        ? {
+            allowedModules: updates.allowedModules as UserProfile["allowedModules"],
+          }
+        : {}),
+    };
+    if (input.phone !== undefined) {
+      if (input.phone) after.phone = input.phone;
+      else delete after.phone;
+    }
+    if (clearDepartment) {
+      delete after.departmentId;
+    } else if (input.departmentId !== undefined) {
+      if (input.departmentId) after.departmentId = input.departmentId;
+      else delete after.departmentId;
+    }
+
+    await writeAuditLog({
+      actorId: verified.auth.uid,
+      actorEmail: verified.auth.email,
+      actorRole: verified.auth.role,
+      action: "update",
+      resourceType: "user",
+      resourceId: id,
+      description: `Updated staff account ${before.displayName} (${before.email})`,
+      before: {
+        role: before.role,
+        isActive: before.isActive,
+        departmentId: before.departmentId ?? null,
+        allowedModules: before.allowedModules ?? null,
+      },
+      after: {
+        role: after.role,
+        isActive: after.isActive,
+        departmentId: after.departmentId ?? null,
+        allowedModules: after.allowedModules ?? null,
+      },
+    });
+
+    return NextResponse.json({ success: true, user: after });
+  } catch (err) {
+    console.error("[api/users PATCH]", err);
+    return NextResponse.json(
+      {
+        success: false,
+        error: err instanceof Error ? err.message : "Failed to update user",
+      },
+      { status: 500 }
     );
   }
-
-  const after = { ...before, ...updates };
-
-  await writeAuditLog({
-    actorId: verified.auth.uid,
-    actorEmail: verified.auth.email,
-    actorRole: verified.auth.role,
-    action: "update",
-    resourceType: "user",
-    resourceId: id,
-    description: `Updated staff account ${before.displayName} (${before.email})`,
-    before: {
-      role: before.role,
-      isActive: before.isActive,
-      departmentId: before.departmentId ?? null,
-      allowedModules: before.allowedModules ?? null,
-    },
-    after: {
-      role: after.role,
-      isActive: after.isActive,
-      departmentId: after.departmentId ?? null,
-      allowedModules: after.allowedModules ?? null,
-    },
-  });
-
-  return NextResponse.json({ success: true, user: after });
 }
 
 export async function DELETE(
@@ -198,6 +320,30 @@ export async function DELETE(
       { success: false, error: "Super Admin accounts cannot be deleted from here" },
       { status: 400 }
     );
+  }
+
+  if (user.role === "department_head" && user.departmentId) {
+    const deptRef = adminDb.collection(COLLECTIONS.departments).doc(user.departmentId);
+    const deptSnap = await deptRef.get();
+    if (deptSnap.exists && deptSnap.data()?.headUserId === id) {
+      await deptRef.update({
+        headUserId: FieldValue.delete(),
+        updatedAt: new Date().toISOString(),
+      });
+    }
+  }
+
+  // Remove linked trainer profiles (by userId)
+  try {
+    const trainerSnap = await adminDb
+      .collection(COLLECTIONS.trainers)
+      .where("userId", "==", id)
+      .get();
+    for (const d of trainerSnap.docs) {
+      await d.ref.delete();
+    }
+  } catch {
+    /* non-blocking */
   }
 
   try {

@@ -15,13 +15,16 @@ import {
   Target,
   Briefcase,
 } from "lucide-react";
+import { latestAssignmentsByCell } from "@/lib/training/matrix";
 import { listEmployeesForLifecycle, lifecycleDashboardStats } from "@/lib/services/lifecycle";
+import { getEmployee } from "@/lib/services/employees";
 import { listDepartments } from "@/lib/services/departments";
 import { listSopsDetailed } from "@/lib/services/sops";
 import {
   listJobDescriptions,
   listTNIs,
   listTrainingAssignments,
+  getEmployeeAssignments,
   listTrainingSessions,
   getUserNotifications,
   listTrainers,
@@ -48,6 +51,7 @@ import type {
   TrainingAssignment,
   TrainingNeedIdentification,
   TrainingSession,
+  UserRole,
 } from "@/types";
 
 export interface DashboardSnapshot {
@@ -82,7 +86,55 @@ export function emptyDashboardSnapshot(): DashboardSnapshot {
   };
 }
 
-export async function fetchDashboardSnapshot(userId?: string): Promise<DashboardSnapshot> {
+export type DashboardSnapshotOpts = {
+  userId?: string;
+  /** Used to avoid Firestore list queries the role cannot read. */
+  role?: UserRole | "super_admin" | string;
+  employeeId?: string;
+};
+
+export async function fetchDashboardSnapshot(
+  opts?: DashboardSnapshotOpts | string
+): Promise<DashboardSnapshot> {
+  // Back-compat: older callers passed userId as a bare string.
+  const normalized: DashboardSnapshotOpts =
+    typeof opts === "string" ? { userId: opts } : opts || {};
+  const { userId, role, employeeId } = normalized;
+  // Missing role → treat as restricted (avoid collection-wide lists that 403).
+  const isEmployee = !role || role === "employee";
+  const canListOrg =
+    role === "super_admin" ||
+    role === "hr" ||
+    role === "qa" ||
+    role === "dept_head" ||
+    role === "trainer";
+  const canReadAudit =
+    role === "super_admin" || role === "hr" || role === "qa";
+
+  const employeesPromise = canListOrg
+    ? listEmployeesForLifecycle().catch(() => [] as Employee[])
+    : employeeId
+      ? getEmployee(employeeId)
+          .then((e) => (e ? [e] : []))
+          .catch(() => [] as Employee[])
+      : Promise.resolve([] as Employee[]);
+
+  const assignmentsPromise = canListOrg
+    ? listTrainingAssignments().catch(() => [] as TrainingAssignment[])
+    : employeeId
+      ? getEmployeeAssignments(employeeId).catch(() => [] as TrainingAssignment[])
+      : Promise.resolve([] as TrainingAssignment[]);
+
+  const certificatesPromise = canListOrg
+    ? listCertificates().catch(() => [] as Certificate[])
+    : employeeId
+      ? listCertificates({ employeeId }).catch(() => [] as Certificate[])
+      : Promise.resolve([] as Certificate[]);
+
+  const auditPromise = canReadAudit
+    ? listAuditLogs(50).catch(() => [] as AuditLog[])
+    : Promise.resolve([] as AuditLog[]);
+
   const [
     employees,
     departments,
@@ -96,17 +148,23 @@ export async function fetchDashboardSnapshot(userId?: string): Promise<Dashboard
     notifications,
     audit,
   ] = await Promise.all([
-    listEmployeesForLifecycle().catch(() => [] as Employee[]),
+    employeesPromise,
     listDepartments().catch(() => [] as Department[]),
     listSopsDetailed().catch(() => [] as SopDocument[]),
-    listTrainingAssignments().catch(() => [] as TrainingAssignment[]),
+    assignmentsPromise,
     listTrainingSessions().catch(() => [] as TrainingSession[]),
-    listCertificates().catch(() => [] as Certificate[]),
-    listJobDescriptions().catch(() => [] as JobDescription[]),
-    listTNIs().catch(() => [] as TrainingNeedIdentification[]),
-    listTrainers().catch(() => [] as TrainerProfile[]),
+    certificatesPromise,
+    isEmployee
+      ? Promise.resolve([] as JobDescription[])
+      : listJobDescriptions().catch(() => [] as JobDescription[]),
+    isEmployee
+      ? Promise.resolve([] as TrainingNeedIdentification[])
+      : listTNIs().catch(() => [] as TrainingNeedIdentification[]),
+    isEmployee
+      ? Promise.resolve([] as TrainerProfile[])
+      : listTrainers().catch(() => [] as TrainerProfile[]),
     userId ? getUserNotifications(userId).catch(() => [] as Notification[]) : Promise.resolve([]),
-    listAuditLogs(50).catch(() => [] as AuditLog[]),
+    auditPromise,
   ]);
 
   return {
@@ -131,9 +189,58 @@ function isOverdue(dueDate?: string, status?: string) {
 }
 
 function complianceRate(asg: TrainingAssignment[]): number {
-  if (!asg.length) return 0;
-  const passed = asg.filter((a) => a.status === "passed").length;
-  return Math.round((passed / asg.length) * 1000) / 10;
+  const latest = latestAssignmentsByCell(asg);
+  if (!latest.length) return 0;
+  const passed = latest.filter((a) => a.status === "passed").length;
+  return Math.round((passed / latest.length) * 1000) / 10;
+}
+
+/** Tone for compliance KPI cards — red/amber until near target (90%). */
+function complianceTone(rate: number): "success" | "warning" | "danger" {
+  if (rate >= 90) return "success";
+  if (rate >= 60) return "warning";
+  return "danger";
+}
+
+/**
+ * Real last-6-month pass rate: for each month-end, assignments that existed
+ * by then, counting only those marked passed by that date.
+ */
+function buildComplianceTrend(
+  asg: TrainingAssignment[]
+): { month: string; rate: number }[] {
+  const now = new Date();
+  const points: { month: string; rate: number }[] = [];
+
+  for (let i = 5; i >= 0; i--) {
+    const monthStart = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const monthEnd = new Date(
+      monthStart.getFullYear(),
+      monthStart.getMonth() + 1,
+      0,
+      23,
+      59,
+      59,
+      999
+    );
+    const label = monthStart.toLocaleString("en-US", { month: "short" });
+    const existed = asg.filter((a) => new Date(a.createdAt).getTime() <= monthEnd.getTime());
+    if (!existed.length) {
+      points.push({ month: label, rate: 0 });
+      continue;
+    }
+    const passed = existed.filter((a) => {
+      if (a.status !== "passed") return false;
+      const doneAt = a.trainingCompletedAt || a.updatedAt || a.createdAt;
+      return new Date(doneAt).getTime() <= monthEnd.getTime();
+    }).length;
+    points.push({
+      month: label,
+      rate: Math.round((passed / existed.length) * 1000) / 10,
+    });
+  }
+
+  return points;
 }
 
 export function buildDashboardView(snap: DashboardSnapshot, role: string) {
@@ -142,19 +249,9 @@ export function buildDashboardView(snap: DashboardSnapshot, role: string) {
   const overdueCount = asg.filter((a) => isOverdue(a.dueDate, a.status)).length;
   const active = asg.filter((a) => !["passed", "failed"].includes(a.status)).length;
   const stats = lifecycleDashboardStats(snap.employees);
+  const cmpTone = complianceTone(compliance);
 
-  const months = ["Feb", "Mar", "Apr", "May", "Jun", "Jul"];
-  const complianceTrend =
-    compliance === 0 && !asg.length
-      ? months.map((month) => ({ month, rate: 0 }))
-      : months.map((month, i) => ({
-          month,
-          rate: Math.max(
-            0,
-            Math.min(100, Math.round(compliance * (0.7 + i * 0.06) * 10) / 10)
-          ),
-        }));
-
+  const complianceTrend = buildComplianceTrend(asg);
   const trainingProgress = [
     {
       name: "Now",
@@ -376,7 +473,7 @@ export function buildDashboardView(snap: DashboardSnapshot, role: string) {
         title: "Compliance",
         value: `${compliance}%`,
         icon: Shield,
-        tone: "success",
+        tone: cmpTone,
       },
     ];
   } else if (role === "department_head") {
@@ -397,7 +494,7 @@ export function buildDashboardView(snap: DashboardSnapshot, role: string) {
         title: "Dept compliance",
         value: `${compliance}%`,
         icon: Shield,
-        tone: "success",
+        tone: cmpTone,
       },
     ];
   } else if (role === "trainer") {
@@ -440,7 +537,7 @@ export function buildDashboardView(snap: DashboardSnapshot, role: string) {
         title: "My compliance",
         value: `${compliance}%`,
         icon: Shield,
-        tone: "success",
+        tone: cmpTone,
       },
     ];
   } else {
@@ -455,7 +552,7 @@ export function buildDashboardView(snap: DashboardSnapshot, role: string) {
         title: "Compliance",
         value: `${compliance}%`,
         icon: Shield,
-        tone: "success",
+        tone: cmpTone,
       },
       {
         title: "Active trainings",

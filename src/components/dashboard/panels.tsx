@@ -23,6 +23,9 @@ export function NotificationsPanel({ items }: { items: DashNotification[] }) {
           }
         />
         <div className="space-y-2">
+          {items.length === 0 && (
+            <p className="text-sm text-muted-foreground">No notifications yet.</p>
+          )}
           {items.map((n) => (
             <Link
               key={n.id}
@@ -151,6 +154,9 @@ export function AlertsPanel({
       <GlassCard className="h-full">
         <GlassCardHeader title={title} description={description} />
         <div className="space-y-2">
+          {alerts.length === 0 && (
+            <p className="text-sm text-muted-foreground">No alerts right now.</p>
+          )}
           {alerts.map((a) => (
             <Link
               key={a.id}

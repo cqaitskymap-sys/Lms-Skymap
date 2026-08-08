@@ -17,7 +17,7 @@ import { resolveStaffAuthEmail } from "@/lib/auth/user-admin-schemas";
 import { normalizeAllowedModules } from "@/lib/rbac/modules";
 import type { UserProfile } from "@/types";
 import { generateId } from "@/lib/utils";
-import { collection, getDocs, query, where } from "firebase/firestore";
+import { collection, getDocs, query, where } from "firebase/firestore/lite";
 
 export interface StaffCredentials {
   /** Login ID shown on the credentials card / used at sign-in */
@@ -129,6 +129,19 @@ export async function createStaffUser(
     };
 
     saveDemoAdminUser(email, { password: temporaryPassword, profile });
+
+    if (input.role === "trainer") {
+      void import("@/lib/services/training").then(({ ensureTrainerProfilesFromUsers }) =>
+        ensureTrainerProfilesFromUsers([
+          {
+            uid,
+            displayName: input.displayName,
+            departmentId: input.departmentId || undefined,
+            role: "trainer",
+          },
+        ]).catch(() => undefined)
+      );
+    }
 
     return {
       user: profile,
