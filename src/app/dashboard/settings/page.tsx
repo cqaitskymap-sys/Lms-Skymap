@@ -17,6 +17,7 @@ import {
 import { PASSWORD_POLICY_HINT, SESSION_IDLE_TIMEOUT_MS } from "@/constants/auth";
 import { changeUserPassword, updateUserProfile } from "@/lib/services/auth";
 import { validatePassword } from "@/lib/auth/password-policy";
+import { blockPasswordClipboardProps } from "@/lib/auth/password-clipboard";
 import { formatDateTime } from "@/lib/utils";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
@@ -187,11 +188,11 @@ function PasswordTab({
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4" noValidate>
           {(
             [
-              ["currentPassword", "Current password", "current"],
-              ["newPassword", "New password", "next"],
-              ["confirmPassword", "Confirm new password", "confirm"],
+              ["currentPassword", "Current / temporary password", "current", false],
+              ["newPassword", "New password", "next", true],
+              ["confirmPassword", "Confirm new password", "confirm", true],
             ] as const
-          ).map(([name, label, key]) => (
+          ).map(([name, label, key, blockClipboard]) => (
             <div key={name} className="space-y-2">
               <Label htmlFor={name}>{label}</Label>
               <div className="relative">
@@ -201,6 +202,11 @@ function PasswordTab({
                   autoComplete={name === "currentPassword" ? "current-password" : "new-password"}
                   className="pr-10"
                   {...register(name)}
+                  {...(blockClipboard
+                    ? blockPasswordClipboardProps(
+                        name === "confirmPassword" ? "confirm password" : "new password"
+                      )
+                    : {})}
                 />
                 <button
                   type="button"
@@ -210,6 +216,16 @@ function PasswordTab({
                   {show[key] ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </button>
               </div>
+              {blockClipboard && (
+                <p className="text-xs text-muted-foreground">
+                  Copy / paste disabled — type this password manually
+                </p>
+              )}
+              {name === "currentPassword" && (
+                <p className="text-xs text-muted-foreground">
+                  You can paste the temporary password here
+                </p>
+              )}
               {errors[name] && (
                 <p className="text-xs text-destructive">{errors[name]?.message}</p>
               )}

@@ -81,7 +81,7 @@ export async function ensureEmployeeAuthAccount(
     departmentId: employee.departmentId,
     phone: employee.mobile || employee.phone,
     isActive: true,
-    mustChangePassword: true,
+    mustChangePassword: false,
     mustUpdateProfile: true,
     mustAcceptPolicies: true,
     createdAt: now,

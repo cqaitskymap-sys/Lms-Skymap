@@ -11,6 +11,7 @@ import {
   Trophy,
 } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
+import { useExamLock } from "@/contexts/exam-lock-context";
 import { useExamAnalytics, useExamLeaderboard, useExams, useQuestionBank } from "@/hooks/use-assessment";
 import {
   autoSaveAssessment,
@@ -45,6 +46,7 @@ function ExamsPageInner() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const { profile } = useAuth();
+  const { lockExam, unlockExam, isLocked, attemptId: lockedAttemptId } = useExamLock();
   const { exams, loading: examsLoading, refresh: refreshExams } = useExams();
   const { banks } = useQuestionBank();
 
@@ -111,19 +113,21 @@ function ExamsPageInner() {
         setLastSavedAt(started.lastSavedAt || null);
         setSelectedExamId(examId);
         setPhase("exam");
+        lockExam({ attemptId: started.id, examTitle: examDoc.title });
         router.replace("/dashboard/exams");
         toast.success(
           started.status === "in_progress" && started.answersDraft
             ? "Resumed in-progress exam"
-            : "Exam started — answers autosave while you work"
+            : "Exam started — submit to unlock navigation"
         );
       } catch (e) {
+        unlockExam();
         toast.error(e instanceof Error ? e.message : "Could not start exam");
       } finally {
         setBusy(false);
       }
     },
-    [profile, router]
+    [profile, router, lockExam, unlockExam]
   );
 
   useEffect(() => {
@@ -165,6 +169,7 @@ function ExamsPageInner() {
         revealAnswers: !!(exam?.allowReview && exam?.showResultsImmediately),
       });
       setAttempt(full || result);
+      unlockExam();
       if (exam?.showResultsImmediately) {
         setPhase("result");
       } else {
@@ -192,7 +197,49 @@ function ExamsPageInner() {
       submittingRef.current = false;
       setBusy(false);
     }
-  }, [attempt, profile, exam]);
+  }, [attempt, profile, exam, unlockExam]);
+
+  // Keep lock aligned while actively taking the exam (do not unlock on remount)
+  useEffect(() => {
+    if (phase === "exam" && attempt && exam) {
+      lockExam({ attemptId: attempt.id, examTitle: exam.title });
+    }
+  }, [phase, attempt, exam, lockExam]);
+
+  // If chrome was locked but this page remounted on list, restore the in-progress attempt
+  useEffect(() => {
+    if (!isLocked || !lockedAttemptId || phase !== "list" || !profile) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const att = await getAttempt(lockedAttemptId);
+        if (cancelled) return;
+        if (!att || att.status !== "in_progress") {
+          unlockExam();
+          return;
+        }
+        const examDoc = await getExam(att.examId);
+        if (cancelled) return;
+        if (!examDoc) {
+          unlockExam();
+          return;
+        }
+        setExam(examDoc);
+        setAttempt(att);
+        setAnswers(att.answersDraft || {});
+        setCurrentIndex(0);
+        setLastSavedAt(att.lastSavedAt || null);
+        setSelectedExamId(att.examId);
+        setPhase("exam");
+        toast.message("Returned to in-progress exam");
+      } catch {
+        if (!cancelled) unlockExam();
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isLocked, lockedAttemptId, phase, profile, unlockExam]);
 
   const onExpire = useCallback(() => {
     if (!exam?.autoSubmitOnTimeout) {
@@ -296,14 +343,13 @@ function ExamsPageInner() {
             Previous
           </Button>
           <div className="flex gap-2">
-            {currentIndex < attempt.questions.length - 1 ? (
+            {currentIndex < attempt.questions.length - 1 && (
               <Button onClick={() => setCurrentIndex((i) => i + 1)}>Next</Button>
-            ) : (
-              <Button disabled={busy} onClick={() => void handleSubmit()}>
-                {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                Submit assessment
-              </Button>
             )}
+            <Button disabled={busy} onClick={() => void handleSubmit()}>
+              {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Submit assessment
+            </Button>
           </div>
         </div>
       </div>

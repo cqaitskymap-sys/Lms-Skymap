@@ -40,7 +40,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { formatDate } from "@/lib/utils";
-import type { Department, UserRole } from "@/types";
+import { listSopsForEmployee } from "@/lib/services/sops";
+import type { Department, SopDocument, UserRole } from "@/types";
 
 export default function EmployeeDetailPage({
   params,
@@ -54,6 +55,8 @@ export default function EmployeeDetailPage({
   const [selectedModules, setSelectedModules] = useState<string[]>([]);
   const [handoverDept, setHandoverDept] = useState("");
   const [departments, setDepartments] = useState<Department[]>([]);
+  const [assignedSops, setAssignedSops] = useState<(SopDocument & { version?: unknown })[]>([]);
+  const [sopsLoading, setSopsLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [uploadingPaper, setUploadingPaper] = useState(false);
   const paperInputRef = useRef<HTMLInputElement>(null);
@@ -65,6 +68,24 @@ export default function EmployeeDetailPage({
   useEffect(() => {
     void listDepartments().then((list) => setDepartments(list.filter((d) => d.isActive)));
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    setSopsLoading(true);
+    void listSopsForEmployee(id)
+      .then((rows) => {
+        if (!cancelled) setAssignedSops(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setAssignedSops([]);
+      })
+      .finally(() => {
+        if (!cancelled) setSopsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [id, employee?.tniId, employee?.lifecycleStage]);
 
   const actor: LifecycleActor = useMemo(
     () => ({
@@ -243,6 +264,34 @@ export default function EmployeeDetailPage({
                 )}
               </div>
               <div>
+                <p className="text-muted-foreground">Job Description</p>
+                {employee.jdId ? (
+                  <Link
+                    href={`/dashboard/jd?employee=${employee.id}`}
+                    className="inline-flex items-center gap-1 font-medium text-primary hover:underline"
+                  >
+                    {employee.jdId}
+                    <ExternalLink className="h-3.5 w-3.5" />
+                  </Link>
+                ) : (
+                  <p className="font-medium">Not created</p>
+                )}
+              </div>
+              <div>
+                <p className="text-muted-foreground">TNI</p>
+                {employee.tniId ? (
+                  <Link
+                    href={`/dashboard/tni?employee=${employee.id}`}
+                    className="inline-flex items-center gap-1 font-medium text-primary hover:underline"
+                  >
+                    {employee.tniId}
+                    <ExternalLink className="h-3.5 w-3.5" />
+                  </Link>
+                ) : (
+                  <p className="font-medium">Not created</p>
+                )}
+              </div>
+              <div>
                 <p className="text-muted-foreground">Qualified</p>
                 <p className="font-medium">{formatDate(employee.qualifiedAt)}</p>
               </div>
@@ -273,6 +322,59 @@ export default function EmployeeDetailPage({
         <div className="grid gap-6 lg:grid-cols-2">
           <Card>
             <CardHeader>
+              <CardTitle>Assigned SOPs</CardTitle>
+              <CardDescription>
+                Only SOPs linked via Training assignment or this employee&apos;s TNI — not the full
+                library
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {sopsLoading ? (
+                <div className="flex justify-center py-6">
+                  <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                </div>
+              ) : assignedSops.length === 0 ? (
+                <div className="space-y-3 text-sm text-muted-foreground">
+                  <p>No SOPs assigned yet for this employee.</p>
+                  <p>
+                    Add SOP links in TNI, or assign training from the Training page — then they
+                    appear here and in the employee&apos;s SOP module.
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    <Button variant="outline" size="sm" asChild>
+                      <Link href={`/dashboard/tni?employee=${employee.id}`}>Open TNI</Link>
+                    </Button>
+                    <Button variant="outline" size="sm" asChild>
+                      <Link href="/dashboard/training">Assign training</Link>
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <ul className="space-y-2">
+                  {assignedSops.map((s) => (
+                    <li
+                      key={s.id}
+                      className="flex flex-wrap items-center justify-between gap-2 rounded-md border px-3 py-2"
+                    >
+                      <div className="min-w-0">
+                        <p className="font-mono text-xs text-muted-foreground">{s.sopNumber}</p>
+                        <p className="truncate text-sm font-medium">{s.title}</p>
+                      </div>
+                      <Button variant="ghost" size="sm" asChild>
+                        <Link href={`/dashboard/sops/${s.id}`}>
+                          View
+                          <ExternalLink className="ml-1 h-3.5 w-3.5" />
+                        </Link>
+                      </Button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
               <CardTitle>Approval flow</CardTitle>
               <CardDescription>Pending gates for this employee</CardDescription>
             </CardHeader>
@@ -284,8 +386,10 @@ export default function EmployeeDetailPage({
               />
             </CardContent>
           </Card>
+        </div>
 
-          <Card>
+        <div className="grid gap-6 lg:grid-cols-2">
+          <Card className="lg:col-span-2">
             <CardHeader>
               <CardTitle>Workflow actions</CardTitle>
               <CardDescription>

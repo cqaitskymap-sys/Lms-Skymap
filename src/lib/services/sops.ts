@@ -178,6 +178,54 @@ export async function listSopsDetailed(filters?: {
   }
 }
 
+/**
+ * Intended SOP ids for an employee = training assignments + TNI needs with sopId.
+ * Used so employees only see SOPs assigned / planned for them — not the full library.
+ */
+export async function getIntendedSopIdsForEmployee(
+  employeeId: string
+): Promise<Set<string>> {
+  const { getEmployeeAssignments, listTNIs } = await import("@/lib/services/training");
+  const [assignments, tnis] = await Promise.all([
+    getEmployeeAssignments(employeeId).catch(() => []),
+    listTNIs({ employeeId }).catch(() => []),
+  ]);
+  const ids = new Set<string>();
+  for (const a of assignments) {
+    if (a.sopId) ids.add(a.sopId);
+  }
+  for (const tni of tnis) {
+    for (const need of tni.needs || []) {
+      if (need.sopId) ids.add(need.sopId);
+    }
+  }
+  return ids;
+}
+
+/** Employee-facing SOP list: only assigned / TNI-linked SOPs. */
+export async function listSopsForEmployee(
+  employeeId: string,
+  filters?: {
+    status?: SopStatus | "";
+    search?: string;
+  }
+): Promise<(SopDocument & { version?: SopVersion })[]> {
+  const [all, intended] = await Promise.all([
+    listSopsDetailed(filters),
+    getIntendedSopIdsForEmployee(employeeId),
+  ]);
+  if (intended.size === 0) return [];
+  return all.filter((s) => intended.has(s.id));
+}
+
+export async function employeeCanAccessSop(
+  employeeId: string,
+  sopId: string
+): Promise<boolean> {
+  const intended = await getIntendedSopIdsForEmployee(employeeId);
+  return intended.has(sopId);
+}
+
 /** Roles allowed to list all views / acks for a SOP (matches firestore.rules). */
 const SOP_VIEW_LIST_ROLES: UserRole[] = [
   "super_admin",

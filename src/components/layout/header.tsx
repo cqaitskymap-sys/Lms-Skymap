@@ -2,8 +2,9 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { Menu, Bell, LogOut, User } from "lucide-react";
+import { Menu, Bell, LogOut, User, Lock } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
+import { useExamLockOptional } from "@/contexts/exam-lock-context";
 import { ROLE_LABELS } from "@/lib/rbac/permissions";
 import { getInitials } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -25,10 +26,12 @@ import { TRAINING_UPDATED_EVENT } from "@/lib/training/demo-store";
 
 interface HeaderProps {
   onMenuClick?: () => void;
+  examLocked?: boolean;
 }
 
-export function Header({ onMenuClick }: HeaderProps) {
+export function Header({ onMenuClick, examLocked = false }: HeaderProps) {
   const { profile, signOut } = useAuth();
+  const { examTitle } = useExamLockOptional();
   const [unread, setUnread] = useState(0);
 
   const refreshUnread = useCallback(async () => {
@@ -44,6 +47,7 @@ export function Header({ onMenuClick }: HeaderProps) {
   }, [profile?.uid]);
 
   useEffect(() => {
+    if (examLocked) return;
     void refreshUnread();
     const onUpdate = () => void refreshUnread();
     window.addEventListener(NOTIFICATIONS_UPDATED_EVENT, onUpdate);
@@ -56,13 +60,38 @@ export function Header({ onMenuClick }: HeaderProps) {
       window.removeEventListener("pharma-lifecycle-updated", onUpdate);
       window.clearInterval(interval);
     };
-  }, [refreshUnread]);
+  }, [refreshUnread, examLocked]);
+
+  if (examLocked) {
+    return (
+      <header className="sticky top-0 z-40 flex h-14 items-center gap-3 border-b border-amber-500/40 bg-amber-50/95 px-4 backdrop-blur dark:bg-amber-950/40">
+        <div className="flex min-w-0 flex-1 items-center gap-2 text-amber-900 dark:text-amber-100">
+          <Lock className="h-4 w-4 shrink-0" />
+          <div className="min-w-0">
+            <p className="truncate text-sm font-medium">
+              Exam locked{examTitle ? ` — ${examTitle}` : ""}
+            </p>
+            <p className="truncate text-xs opacity-80">
+              Submit the assessment to unlock navigation
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="hidden text-xs font-medium text-amber-800 dark:text-amber-200 sm:inline">
+            {profile?.displayName}
+          </span>
+        </div>
+      </header>
+    );
+  }
 
   return (
     <header className="sticky top-0 z-40 flex h-14 items-center gap-3 border-b bg-background/95 px-4 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-      <Button variant="ghost" size="icon" className="lg:hidden" onClick={onMenuClick}>
-        <Menu className="h-5 w-5" />
-      </Button>
+      {onMenuClick && (
+        <Button variant="ghost" size="icon" className="lg:hidden" onClick={onMenuClick}>
+          <Menu className="h-5 w-5" />
+        </Button>
+      )}
 
       <div className="flex-1" />
 

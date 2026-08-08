@@ -28,6 +28,7 @@ import {
 } from "@/lib/auth/onboarding-schemas";
 import { PASSWORD_POLICY_HINT } from "@/constants/auth";
 import { validatePassword } from "@/lib/auth/password-policy";
+import { blockPasswordClipboardProps } from "@/lib/auth/password-clipboard";
 import { CURRENT_POLICIES_VERSION, DEFAULT_COMPANY_POLICIES } from "@/lib/onboarding/policies";
 import { ROLE_DASHBOARD_ROUTES } from "@/lib/rbac/permissions";
 import { isDemoMode } from "@/lib/demo/data";
@@ -344,11 +345,11 @@ function PasswordStep({
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4" noValidate>
           {(
             [
-              ["currentPassword", "Temporary password", "current"],
-              ["newPassword", "New password", "next"],
-              ["confirmPassword", "Confirm new password", "confirm"],
+              ["currentPassword", "Temporary password", "current", false],
+              ["newPassword", "New password", "next", true],
+              ["confirmPassword", "Confirm new password", "confirm", true],
             ] as const
-          ).map(([name, label, key]) => (
+          ).map(([name, label, key, blockClipboard]) => (
             <div key={name} className="space-y-2">
               <Label htmlFor={name}>{label}</Label>
               <div className="relative">
@@ -356,7 +357,15 @@ function PasswordStep({
                   id={name}
                   type={show[key] ? "text" : "password"}
                   className="pr-10"
+                  autoComplete={
+                    name === "currentPassword" ? "current-password" : "new-password"
+                  }
                   {...register(name)}
+                  {...(blockClipboard
+                    ? blockPasswordClipboardProps(
+                        name === "confirmPassword" ? "confirm password" : "new password"
+                      )
+                    : {})}
                 />
                 <button
                   type="button"
@@ -366,6 +375,16 @@ function PasswordStep({
                   {show[key] ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </button>
               </div>
+              {blockClipboard && (
+                <p className="text-xs text-muted-foreground">
+                  Copy / paste disabled — type this password manually
+                </p>
+              )}
+              {name === "currentPassword" && (
+                <p className="text-xs text-muted-foreground">
+                  You can paste the temporary password from your credentials
+                </p>
+              )}
               {errors[name] && (
                 <p className="text-xs text-destructive">{errors[name]?.message}</p>
               )}

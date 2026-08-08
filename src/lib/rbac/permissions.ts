@@ -243,6 +243,7 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     "certificates:read",
     "notifications:read",
     "jd:read",
+    "tni:read",
     "dashboard:employee",
     "settings:write",
   ],

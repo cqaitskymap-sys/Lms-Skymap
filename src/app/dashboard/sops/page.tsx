@@ -7,6 +7,7 @@ import { RequirePermission } from "@/components/auth/require-permission";
 import { AdminDeleteButton } from "@/components/auth/admin-delete-button";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { DataToolbar } from "@/components/shared/data-toolbar";
+import { useAuth } from "@/contexts/auth-context";
 import { useSopDirectory } from "@/hooks/use-sop";
 import { useDepartments } from "@/hooks/use-departments";
 import { deleteSop } from "@/lib/services/sops";
@@ -25,6 +26,8 @@ import { SopLoading } from "@/components/sops/sop-media-preview";
 import type { SopStatus } from "@/types";
 
 export default function SopsPage() {
+  const { profile } = useAuth();
+  const isEmployee = profile?.role === "employee";
   const { sops, loading, error, refresh } = useSopDirectory();
   const { departments } = useDepartments();
   const [search, setSearch] = useState("");
@@ -67,9 +70,13 @@ export default function SopsPage() {
       <div className="space-y-6">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight">SOP Management</h1>
+            <h1 className="text-2xl font-bold tracking-tight">
+              {isEmployee ? "My SOPs" : "SOP Management"}
+            </h1>
             <p className="text-muted-foreground">
-              Controlled documents · versioning · acknowledgement · auto-retraining
+              {isEmployee
+                ? "Only SOPs assigned to you via Training or listed in your TNI"
+                : "Controlled documents · versioning · acknowledgement · auto-retraining"}
             </p>
           </div>
           <RequirePermission permission="sops:write" hideOnDeny>
@@ -174,12 +181,18 @@ export default function SopsPage() {
                     <TableCell colSpan={9} className="py-12 text-center text-muted-foreground">
                       {sops.length === 0 ? (
                         <div className="space-y-2">
-                          <p>No SOPs in the library yet.</p>
-                          <RequirePermission permission="sops:write" hideOnDeny>
-                            <Button size="sm" asChild>
-                              <Link href="/dashboard/sops/new">Create first SOP</Link>
-                            </Button>
-                          </RequirePermission>
+                          <p>
+                            {isEmployee
+                              ? "No SOPs assigned to you yet. They appear after Training assignment or TNI with linked SOPs."
+                              : "No SOPs in the library yet."}
+                          </p>
+                          {!isEmployee && (
+                            <RequirePermission permission="sops:write" hideOnDeny>
+                              <Button size="sm" asChild>
+                                <Link href="/dashboard/sops/new">Create first SOP</Link>
+                              </Button>
+                            </RequirePermission>
+                          )}
                         </div>
                       ) : (
                         "No SOPs match your filters."

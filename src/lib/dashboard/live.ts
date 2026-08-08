@@ -19,7 +19,7 @@ import { latestAssignmentsByCell } from "@/lib/training/matrix";
 import { listEmployeesForLifecycle, lifecycleDashboardStats } from "@/lib/services/lifecycle";
 import { getEmployee } from "@/lib/services/employees";
 import { listDepartments } from "@/lib/services/departments";
-import { listSopsDetailed } from "@/lib/services/sops";
+import { listSopsDetailed, listSopsForEmployee } from "@/lib/services/sops";
 import {
   listJobDescriptions,
   listTNIs,
@@ -150,7 +150,9 @@ export async function fetchDashboardSnapshot(
   ] = await Promise.all([
     employeesPromise,
     listDepartments().catch(() => [] as Department[]),
-    listSopsDetailed().catch(() => [] as SopDocument[]),
+    isEmployee && employeeId
+      ? listSopsForEmployee(employeeId).catch(() => [] as SopDocument[])
+      : listSopsDetailed().catch(() => [] as SopDocument[]),
     assignmentsPromise,
     listTrainingSessions().catch(() => [] as TrainingSession[]),
     certificatesPromise,
