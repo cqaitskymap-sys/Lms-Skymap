@@ -357,15 +357,15 @@ function PasswordStep({
                   id={name}
                   type={show[key] ? "text" : "password"}
                   className="pr-10"
-                  autoComplete={
-                    name === "currentPassword" ? "current-password" : "new-password"
-                  }
                   {...register(name)}
                   {...(blockClipboard
                     ? blockPasswordClipboardProps(
                         name === "confirmPassword" ? "confirm password" : "new password"
                       )
                     : {})}
+                  autoComplete={
+                    name === "currentPassword" ? "current-password" : "new-password"
+                  }
                 />
                 <button
                   type="button"

@@ -199,7 +199,6 @@ function PasswordTab({
                 <Input
                   id={name}
                   type={show[key] ? "text" : "password"}
-                  autoComplete={name === "currentPassword" ? "current-password" : "new-password"}
                   className="pr-10"
                   {...register(name)}
                   {...(blockClipboard
@@ -207,6 +206,9 @@ function PasswordTab({
                         name === "confirmPassword" ? "confirm password" : "new password"
                       )
                     : {})}
+                  autoComplete={
+                    name === "currentPassword" ? "current-password" : "new-password"
+                  }
                 />
                 <button
                   type="button"
