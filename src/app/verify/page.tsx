@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatDate } from "@/lib/utils";
+import { DeveloperCredit } from "@/components/shared/developer-credit";
 import type { Certificate, CertificateVerification } from "@/types";
 import QRCode from "qrcode";
 
@@ -77,7 +78,7 @@ function VerifyInner() {
           </Link>
           <div className="mt-4 flex items-center justify-center gap-2">
             <ShieldCheck className="h-7 w-7" style={{ color: "#0b3d4a" }} />
-            <h1 className="text-2xl font-bold tracking-tight" style={{ color: "#0b3d4a" }}>
+            <h1 className="font-display text-3xl font-semibold tracking-tight" style={{ color: "#0b3d4a" }}>
               Certificate verification
             </h1>
           </div>
@@ -171,6 +172,7 @@ function VerifyInner() {
             <TrainingCertificate certificate={cert} qrDataUrl={qr} compact />
           </div>
         )}
+        <DeveloperCredit className="pt-4 text-center text-muted-foreground/80" />
       </div>
     </div>
   );

@@ -64,8 +64,13 @@ const config: Config = {
         sm: "calc(var(--radius) - 4px)",
       },
       fontFamily: {
-        sans: ["var(--font-geist-sans)", "system-ui", "sans-serif"],
-        mono: ["var(--font-geist-mono)", "monospace"],
+        sans: ["var(--font-sans)", "system-ui", "sans-serif"],
+        display: ["var(--font-cormorant)", "Georgia", "serif"],
+        mono: ["ui-monospace", "SFMono-Regular", "monospace"],
+      },
+      boxShadow: {
+        soft: "0 1px 2px rgb(15 23 42 / 0.04), 0 10px 28px -12px rgb(15 23 42 / 0.12)",
+        lift: "0 12px 32px -16px rgb(15 23 42 / 0.18)",
       },
       keyframes: {
         "accordion-down": {

@@ -11,8 +11,11 @@ import {
 } from "react";
 import {
   onAuthStateChanged,
+  setPersistence,
   signInWithEmailAndPassword,
   signOut as firebaseSignOut,
+  browserLocalPersistence,
+  browserSessionPersistence,
   type User,
 } from "firebase/auth";
 import { doc, getDoc, setDoc, updateDoc } from "firebase/firestore/lite";
@@ -28,6 +31,7 @@ import {
 } from "@/lib/services/auth";
 import { SESSION_IDLE_TIMEOUT_MS, SESSION_REFRESH_INTERVAL_MS } from "@/constants/auth";
 import { logActivity } from "@/lib/services/activity";
+import { setRememberSessionPref } from "@/lib/auth/remember-login";
 
 interface AuthContextValue {
   user: User | null;
@@ -35,7 +39,7 @@ interface AuthContextValue {
   loading: boolean;
   role: UserRole | null;
   isDemo: boolean;
-  signIn: (email: string, password: string) => Promise<UserProfile>;
+  signIn: (email: string, password: string, rememberMe?: boolean) => Promise<UserProfile>;
   signOut: () => Promise<void>;
   can: (permission: Permission | Permission[]) => boolean;
   canAll: (permissions: Permission[]) => boolean;
@@ -118,6 +122,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signOut = useCallback(async () => {
     if (demo) {
       localStorage.removeItem(DEMO_SESSION_KEY);
+      sessionStorage.removeItem(DEMO_SESSION_KEY);
       setProfile(null);
       setUser(null);
       return;
@@ -189,7 +194,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (demo) {
       try {
-        const raw = localStorage.getItem(DEMO_SESSION_KEY);
+        const raw =
+          localStorage.getItem(DEMO_SESSION_KEY) || sessionStorage.getItem(DEMO_SESSION_KEY);
         if (raw) {
           const p = JSON.parse(raw) as UserProfile;
           setProfile(p);
@@ -215,7 +221,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => unsub();
   }, [demo, fetchProfile]);
 
-  const signIn = async (email: string, password: string): Promise<UserProfile> => {
+  const signIn = async (
+    email: string,
+    password: string,
+    rememberMe = false
+  ): Promise<UserProfile> => {
     const normalized = email.trim().toLowerCase();
 
     if (demo) {
@@ -245,7 +255,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setDemoLockout(normalized, { failedAttempts: 0, lockedUntil: null });
       const now = new Date().toISOString();
       const withLogin: UserProfile = { ...entry.profile, lastLoginAt: now, updatedAt: now };
-      localStorage.setItem(DEMO_SESSION_KEY, JSON.stringify(withLogin));
+      if (rememberMe) {
+        localStorage.setItem(DEMO_SESSION_KEY, JSON.stringify(withLogin));
+        sessionStorage.removeItem(DEMO_SESSION_KEY);
+      } else {
+        sessionStorage.setItem(DEMO_SESSION_KEY, JSON.stringify(withLogin));
+        localStorage.removeItem(DEMO_SESSION_KEY);
+      }
+      setRememberSessionPref(rememberMe);
       setProfile(withLogin);
       setUser({ uid: withLogin.uid, email: withLogin.email } as User);
       return withLogin;
@@ -257,6 +274,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     try {
+      await setPersistence(
+        auth,
+        rememberMe ? browserLocalPersistence : browserSessionPersistence
+      );
+    } catch {
+      /* default persistence still allows sign-in */
+    }
+    try {
       const cred = await signInWithEmailAndPassword(auth, normalized, password);
       const loaded = await fetchProfile(cred.user);
 
@@ -266,7 +291,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       const token = await cred.user.getIdToken(true);
-      const sessionResult = await establishSession(token);
+      const sessionResult = await establishSession(token, rememberMe);
       if (sessionResult.status === 403) {
         await firebaseSignOut(auth);
         throw new Error(sessionResult.error || "Account is deactivated");
@@ -278,6 +303,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         lastLoginAt: now,
         updatedAt: now,
       };
+      setRememberSessionPref(rememberMe);
       setProfile(nextProfile);
       try {
         await updateDoc(doc(db, COLLECTIONS.users, cred.user.uid), {
@@ -337,7 +363,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (!prev) return prev;
       const next = { ...prev, ...patch };
       if (demo) {
-        localStorage.setItem(DEMO_SESSION_KEY, JSON.stringify(next));
+        try {
+          if (localStorage.getItem(DEMO_SESSION_KEY)) {
+            localStorage.setItem(DEMO_SESSION_KEY, JSON.stringify(next));
+          } else if (sessionStorage.getItem(DEMO_SESSION_KEY)) {
+            sessionStorage.setItem(DEMO_SESSION_KEY, JSON.stringify(next));
+          }
+        } catch {
+          /* ignore */
+        }
       }
       return next;
     });

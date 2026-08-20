@@ -25,9 +25,9 @@ export function GlassCard({
   return (
     <div
       className={cn(
-        "glass-panel rounded-xl",
+        "glass-panel rounded-2xl",
         paddingMap[padding],
-        hover && "transition-transform duration-300 hover:-translate-y-0.5",
+        hover && "transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lift",
         className
       )}
       {...props}

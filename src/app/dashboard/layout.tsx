@@ -13,7 +13,7 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
   const { isLocked } = useExamLockOptional();
 
   return (
-    <div className="flex h-screen overflow-hidden">
+    <div className="flex h-screen overflow-hidden bg-background">
       <ExamLockGuard />
       {!isLocked && (
         <Sidebar open={mobileOpen} onClose={() => setMobileOpen(false)} />
@@ -24,7 +24,7 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
           onMenuClick={isLocked ? undefined : () => setMobileOpen(true)}
         />
         <main className="dashboard-atmosphere flex-1 overflow-y-auto p-4 md:p-6 lg:p-8">
-          <div className="mx-auto max-w-7xl">{children}</div>
+          <div className="mx-auto max-w-7xl animate-fade-in">{children}</div>
         </main>
       </div>
       {!isLocked && <AiTrainingChatbot />}

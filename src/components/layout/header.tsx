@@ -64,7 +64,7 @@ export function Header({ onMenuClick, examLocked = false }: HeaderProps) {
 
   if (examLocked) {
     return (
-      <header className="sticky top-0 z-40 flex h-14 items-center gap-3 border-b border-amber-500/40 bg-amber-50/95 px-4 backdrop-blur dark:bg-amber-950/40">
+      <header className="sticky top-0 z-40 flex h-16 items-center gap-3 border-b border-amber-500/40 bg-amber-50/90 px-4 backdrop-blur-xl dark:bg-amber-950/40">
         <div className="flex min-w-0 flex-1 items-center gap-2 text-amber-900 dark:text-amber-100">
           <Lock className="h-4 w-4 shrink-0" />
           <div className="min-w-0">
@@ -86,7 +86,7 @@ export function Header({ onMenuClick, examLocked = false }: HeaderProps) {
   }
 
   return (
-    <header className="sticky top-0 z-40 flex h-14 items-center gap-3 border-b bg-background/95 px-4 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+    <header className="sticky top-0 z-40 flex h-16 items-center gap-2 border-b border-border/70 bg-background/75 px-4 backdrop-blur-xl supports-[backdrop-filter]:bg-background/60">
       {onMenuClick && (
         <Button variant="ghost" size="icon" className="lg:hidden" onClick={onMenuClick}>
           <Menu className="h-5 w-5" />
@@ -97,11 +97,11 @@ export function Header({ onMenuClick, examLocked = false }: HeaderProps) {
 
       <ThemeToggle />
 
-      <Button variant="ghost" size="icon" className="relative" asChild>
+      <Button variant="ghost" size="icon" className="relative rounded-full" asChild>
         <Link href="/dashboard/notifications" aria-label="Notifications">
           <Bell className="h-4 w-4" />
           {unread > 0 && (
-            <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-medium text-destructive-foreground">
+            <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-semibold text-destructive-foreground">
               {unread > 99 ? "99+" : unread}
             </span>
           )}
@@ -110,16 +110,16 @@ export function Header({ onMenuClick, examLocked = false }: HeaderProps) {
 
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button variant="ghost" className="relative h-9 gap-2 px-2">
-            <Avatar className="h-7 w-7">
+          <Button variant="ghost" className="relative h-10 gap-2 rounded-full px-1.5 pr-3">
+            <Avatar className="h-8 w-8 ring-2 ring-border/70">
               <AvatarImage src={profile?.photoURL} />
-              <AvatarFallback className="text-xs">
+              <AvatarFallback className="text-xs font-semibold">
                 {getInitials(profile?.displayName || "U")}
               </AvatarFallback>
             </Avatar>
             <div className="hidden text-left md:block">
-              <p className="text-sm font-medium leading-none">{profile?.displayName}</p>
-              <p className="text-xs text-muted-foreground">
+              <p className="text-sm font-semibold leading-none">{profile?.displayName}</p>
+              <p className="mt-0.5 text-xs text-muted-foreground">
                 {profile?.role ? ROLE_LABELS[profile.role] : ""}
               </p>
             </div>

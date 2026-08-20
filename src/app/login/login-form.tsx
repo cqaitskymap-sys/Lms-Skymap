@@ -11,16 +11,24 @@ import { useAuth } from "@/contexts/auth-context";
 import { loginSchema, type LoginInput } from "@/lib/auth/schemas";
 import { ROLE_DASHBOARD_ROUTES } from "@/lib/rbac/permissions";
 import { resolveLoginIdentifier, needsFirstLoginOnboarding } from "@/lib/services/onboarding";
+import {
+  clearRememberedLogin,
+  loadRememberedLogin,
+  saveRememberedLogin,
+} from "@/lib/auth/remember-login";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { DeveloperCredit } from "@/components/shared/developer-credit";
 
 function LoginForm() {
   const { signIn, isDemo, user, loading } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
   const [showPassword, setShowPassword] = useState(false);
+  const [rememberPassword, setRememberPassword] = useState(false);
 
   useEffect(() => {
     if (!loading && user) {
@@ -42,12 +50,25 @@ function LoginForm() {
     },
   });
 
+  useEffect(() => {
+    const saved = loadRememberedLogin();
+    if (!saved) return;
+    setRememberPassword(true);
+    setValue("email", saved.identifier);
+    if (saved.password) setValue("password", saved.password);
+  }, [setValue]);
+
   const deactivated = searchParams.get("error") === "deactivated";
 
   const onSubmit = async (data: LoginInput) => {
     try {
       const email = await resolveLoginIdentifier(data.email);
-      const profile = await signIn(email, data.password);
+      const profile = await signIn(email, data.password, rememberPassword);
+      if (rememberPassword) {
+        saveRememberedLogin(data.email.trim(), data.password);
+      } else {
+        clearRememberedLogin();
+      }
       toast.success("Signed in successfully");
       if (needsFirstLoginOnboarding(profile)) {
         router.push("/dashboard/onboarding");
@@ -76,8 +97,15 @@ function LoginForm() {
   return (
     <div className="flex min-h-screen">
       <div className="relative hidden w-1/2 overflow-hidden bg-slate-900 lg:block">
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-cyan-700/40 via-slate-900 to-slate-950" />
-        <div className="absolute inset-0 opacity-30 [background-image:linear-gradient(rgba(255,255,255,0.05)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.05)_1px,transparent_1px)] [background-size:48px_48px]" />
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src="/brand/login-bg.jpg"
+          alt=""
+          className="absolute inset-0 h-full w-full object-cover"
+        />
+        <div className="absolute inset-0 bg-slate-950/55" />
+        <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/35 to-slate-900/20" />
+        <div className="absolute inset-0 opacity-20 [background-image:linear-gradient(rgba(255,255,255,0.08)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.08)_1px,transparent_1px)] [background-size:48px_48px]" />
         <div className="relative flex h-full flex-col justify-between p-12 text-white">
           <div className="flex items-center gap-3">
             {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -88,19 +116,22 @@ function LoginForm() {
             />
           </div>
           <div className="space-y-4">
-            <h1 className="max-w-md text-4xl font-bold leading-tight tracking-tight">
+            <h1 className="max-w-md font-display text-4xl font-semibold leading-tight tracking-tight drop-shadow-md md:text-5xl">
               Enterprise training. Audit-ready compliance.
             </h1>
-            <p className="max-w-sm text-slate-300">
+            <p className="max-w-sm text-slate-200 drop-shadow">
               Secure role-based access with session controls, login auditing, and GMP-aligned
               activity trails.
             </p>
           </div>
-          <p className="text-sm text-slate-500">© 2026 SKYMAP · PharmaLMS</p>
+          <div className="space-y-1">
+            <p className="text-sm text-slate-300/80">© 2026 SKYMAP · PharmaLMS</p>
+            <DeveloperCredit className="text-slate-400/90" />
+          </div>
         </div>
       </div>
 
-      <div className="flex w-full flex-col justify-center px-6 py-12 lg:w-1/2">
+      <div className="relative flex w-full flex-col justify-center bg-gradient-to-br from-slate-50 via-white to-cyan-50/50 px-6 py-12 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 lg:w-1/2">
         <div className="mx-auto w-full max-w-md space-y-6">
           <div className="mb-4 flex items-center gap-2 lg:hidden">
             {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -112,14 +143,14 @@ function LoginForm() {
           </div>
 
           {deactivated && (
-            <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            <div className="rounded-xl border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
               Your account has been deactivated. Contact HR.
             </div>
           )}
 
-          <Card>
-            <CardHeader>
-              <CardTitle>Sign in</CardTitle>
+          <Card className="border-border/60 shadow-lift">
+            <CardHeader className="space-y-1.5">
+              <CardTitle className="font-display text-3xl font-semibold">Sign in</CardTitle>
               <CardDescription>
                 Sign in with employee code (e.g. EMP000001) or work email
                 {isDemo && " (Demo mode)"}
@@ -173,7 +204,24 @@ function LoginForm() {
                     <p className="text-xs text-destructive">{errors.password.message}</p>
                   )}
                 </div>
-                <Button type="submit" className="w-full" disabled={isSubmitting}>
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    id="remember-password"
+                    checked={rememberPassword}
+                    onCheckedChange={(checked) => {
+                      const on = checked === true;
+                      setRememberPassword(on);
+                      if (!on) clearRememberedLogin();
+                    }}
+                  />
+                  <Label
+                    htmlFor="remember-password"
+                    className="cursor-pointer text-sm font-normal leading-none"
+                  >
+                    Remember password
+                  </Label>
+                </div>
+                <Button type="submit" className="h-11 w-full" disabled={isSubmitting}>
                   {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                   Sign in
                 </Button>
@@ -198,7 +246,7 @@ function LoginForm() {
                       setValue("email", a.email);
                       setValue("password", a.pass);
                     }}
-                    className="rounded-md border px-2 py-1.5 text-left text-xs transition-colors hover:bg-accent"
+                    className="rounded-xl border border-border/70 bg-background/70 px-3 py-2.5 text-left text-xs transition-all hover:border-primary/30 hover:bg-accent"
                   >
                     <span className="font-medium">{a.role}</span>
                     <br />
@@ -210,10 +258,11 @@ function LoginForm() {
           )}
 
           <p className="text-center text-sm text-muted-foreground">
-            <Link href="/" className="hover:text-foreground">
+            <Link href="/" className="inline-flex items-center gap-1 rounded-full px-3 py-1.5 transition-colors hover:bg-muted hover:text-foreground">
               ← Back to home
             </Link>
           </p>
+          <DeveloperCredit className="text-center text-muted-foreground/80 lg:hidden" />
         </div>
       </div>
     </div>

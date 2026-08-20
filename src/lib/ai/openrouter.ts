@@ -4,9 +4,13 @@
  */
 import "server-only";
 
+export type OpenRouterContentPart =
+  | { type: "text"; text: string }
+  | { type: "image_url"; image_url: { url: string } };
+
 export interface OpenRouterMessage {
   role: "system" | "user" | "assistant";
-  content: string;
+  content: string | OpenRouterContentPart[];
 }
 
 export interface OpenRouterChatOptions {

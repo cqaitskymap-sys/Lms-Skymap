@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { AUTH_COOKIE_NAME, SESSION_MAX_AGE_MS } from "@/constants/auth";
+import {
+  AUTH_COOKIE_NAME,
+  SESSION_MAX_AGE_MS,
+  SESSION_TEMPORARY_MAX_AGE_MS,
+} from "@/constants/auth";
 import { adminAuth, isAdminConfigured } from "@/lib/firebase/admin";
 import {
   recordLoginSuccess,
@@ -10,15 +14,16 @@ import {
 import { COLLECTIONS } from "@/lib/firebase/client";
 import { adminDb } from "@/lib/firebase/admin";
 
-function cookieOptions() {
-  return {
+function cookieOptions(rememberMe = true) {
+  const base = {
     name: AUTH_COOKIE_NAME,
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
     sameSite: "lax" as const,
     path: "/",
-    maxAge: SESSION_MAX_AGE_MS / 1000,
   };
+  if (!rememberMe) return base;
+  return { ...base, maxAge: SESSION_MAX_AGE_MS / 1000 };
 }
 
 /**
@@ -36,6 +41,15 @@ export async function POST(request: NextRequest) {
     const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || undefined;
     const ua = request.headers.get("user-agent") || undefined;
 
+    let rememberMe = true;
+    try {
+      const body = (await request.json()) as { rememberMe?: unknown };
+      if (typeof body?.rememberMe === "boolean") rememberMe = body.rememberMe;
+    } catch {
+      /* no body — keep persistent session (legacy callers) */
+    }
+    const expiresIn = rememberMe ? SESSION_MAX_AGE_MS : SESSION_TEMPORARY_MAX_AGE_MS;
+
     if (!isAdminConfigured()) {
       // Demo / local without Admin SDK — acknowledge login side-effects best-effort
       return NextResponse.json({
@@ -49,7 +63,7 @@ export async function POST(request: NextRequest) {
     let sessionCookie: string;
     try {
       sessionCookie = await adminAuth.createSessionCookie(idToken, {
-        expiresIn: SESSION_MAX_AGE_MS,
+        expiresIn,
       });
     } catch (err) {
       // Common when client refreshes an ID token long after sign-in —
@@ -105,7 +119,7 @@ export async function POST(request: NextRequest) {
     });
 
     const response = NextResponse.json({ success: true, session: true });
-    response.cookies.set({ ...cookieOptions(), value: sessionCookie });
+    response.cookies.set({ ...cookieOptions(rememberMe), value: sessionCookie });
     return response;
   } catch {
     return NextResponse.json({ success: false, error: "Invalid or expired token" }, { status: 401 });
@@ -144,6 +158,6 @@ export async function DELETE(request: NextRequest) {
   }
 
   const response = NextResponse.json({ success: true });
-  response.cookies.set({ ...cookieOptions(), value: "", maxAge: 0 });
+  response.cookies.set({ ...cookieOptions(true), value: "", maxAge: 0 });
   return response;
 }

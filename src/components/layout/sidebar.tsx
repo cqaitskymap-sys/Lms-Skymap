@@ -35,6 +35,7 @@ import {
 } from "@/lib/rbac/modules";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
+import { DeveloperCredit } from "@/components/shared/developer-credit";
 
 const MODULE_ICONS: Record<AppModule, LucideIcon> = {
   dashboard: LayoutDashboard,
@@ -82,13 +83,13 @@ export function Sidebar({ open, onClose }: SidebarProps) {
 
   const content = (
     <div className="flex h-full flex-col bg-sidebar text-sidebar-foreground">
-      <div className="flex h-14 items-center justify-between border-b border-sidebar-border px-4">
+      <div className="flex h-16 items-center justify-between border-b border-sidebar-border/80 px-4">
         <Link href="/dashboard" className="flex items-center gap-2 font-semibold tracking-tight">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src="/brand/skymap-logo.png"
             alt="SKYMAP"
-            className="h-8 w-auto max-w-[140px] object-contain"
+            className="h-8 w-auto max-w-[148px] object-contain"
           />
         </Link>
         {onClose && (
@@ -97,8 +98,8 @@ export function Sidebar({ open, onClose }: SidebarProps) {
           </Button>
         )}
       </div>
-      <ScrollArea className="flex-1 px-2 py-3">
-        <nav className="space-y-0.5">
+      <ScrollArea className="flex-1 px-3 py-4">
+        <nav className="space-y-1">
           {items.map((item) => {
             const active =
               item.href === "/dashboard"
@@ -120,21 +121,33 @@ export function Sidebar({ open, onClose }: SidebarProps) {
                 href={item.href}
                 onClick={onClose}
                 className={cn(
-                  "flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors",
+                  "group flex items-center gap-3 rounded-xl px-2.5 py-2 text-sm font-medium transition-all duration-200",
                   active
-                    ? "bg-sidebar-accent text-white"
-                    : "text-sidebar-foreground/70 hover:bg-white/5 hover:text-sidebar-foreground"
+                    ? "bg-white/10 text-white shadow-sm"
+                    : "text-sidebar-foreground/65 hover:bg-white/5 hover:text-white"
                 )}
               >
-                <Icon className="h-4 w-4 shrink-0" />
+                <span
+                  className={cn(
+                    "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-colors",
+                    active
+                      ? "bg-sidebar-accent text-white shadow-sm shadow-cyan-900/30"
+                      : "bg-white/5 text-sidebar-foreground/70 group-hover:bg-white/10"
+                  )}
+                >
+                  <Icon className="h-4 w-4" />
+                </span>
                 {item.title}
               </Link>
             );
           })}
         </nav>
       </ScrollArea>
-      <div className="border-t border-sidebar-border p-3 text-xs text-sidebar-foreground/50">
-        GMP / GDP Compliant Training
+      <div className="border-t border-sidebar-border/80 p-4">
+        <p className="text-[11px] font-medium uppercase tracking-[0.16em] text-sidebar-foreground/40">
+          GMP / GDP Compliant
+        </p>
+        <DeveloperCredit className="mt-1.5 text-sidebar-foreground/35" />
       </div>
     </div>
   );
@@ -142,12 +155,12 @@ export function Sidebar({ open, onClose }: SidebarProps) {
   return (
     <>
       {/* Desktop */}
-      <aside className="hidden w-60 shrink-0 border-r border-sidebar-border lg:block">{content}</aside>
+      <aside className="hidden w-64 shrink-0 lg:block">{content}</aside>
       {/* Mobile overlay */}
       {open && (
         <div className="fixed inset-0 z-50 lg:hidden">
-          <div className="absolute inset-0 bg-black/50" onClick={onClose} />
-          <aside className="absolute left-0 top-0 h-full w-60 shadow-xl">{content}</aside>
+          <div className="absolute inset-0 bg-slate-950/50 backdrop-blur-sm" onClick={onClose} />
+          <aside className="absolute left-0 top-0 h-full w-64 shadow-2xl">{content}</aside>
         </div>
       )}
     </>

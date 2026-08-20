@@ -973,6 +973,7 @@ export async function updateQuestion(
       | "tags"
       | "scenario"
       | "isActive"
+      | "bankId"
     >
   >,
   actorId: string
@@ -986,9 +987,13 @@ export async function updateQuestion(
   }
   if (!current) throw new Error("Question not found");
 
+  const previousBankId = current.bankId;
+  const nextType = patch.type ?? current.type;
   const next: Question = {
     ...current,
     ...patch,
+    type: nextType,
+    scenario: nextType === "scenario" ? patch.scenario ?? current.scenario : undefined,
     updatedAt: nowISO(),
     updatedBy: actorId,
   };
@@ -999,11 +1004,13 @@ export async function updateQuestion(
     store.questions = store.questions.map((q) => (q.id === questionId ? next : q));
     writeAssessmentStore(store);
     await recountBankQuestions(next.bankId);
+    if (previousBankId !== next.bankId) await recountBankQuestions(previousBankId);
     return next;
   }
 
   await setDoc(doc(db, COLLECTIONS.questions, questionId), stripUndefined(next));
   await recountBankQuestions(next.bankId);
+  if (previousBankId !== next.bankId) await recountBankQuestions(previousBankId);
   return next;
 }
 

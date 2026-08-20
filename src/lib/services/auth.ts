@@ -10,6 +10,7 @@ import {
 import { deleteField, doc, updateDoc } from "firebase/firestore/lite";
 import { auth, db, COLLECTIONS } from "@/lib/firebase/client";
 import { validatePassword } from "@/lib/auth/password-policy";
+import { getRememberSessionPref } from "@/lib/auth/remember-login";
 import { logActivity } from "@/lib/services/activity";
 import {
   findDemoAdminUserByUid,
@@ -144,7 +145,10 @@ export async function updateUserProfile(params: {
   });
 }
 
-export async function establishSession(idToken: string): Promise<{
+export async function establishSession(
+  idToken: string,
+  rememberMe = getRememberSessionPref()
+): Promise<{
   ok: boolean;
   status: number;
   error?: string;
@@ -155,6 +159,7 @@ export async function establishSession(idToken: string): Promise<{
       Authorization: `Bearer ${idToken}`,
       "Content-Type": "application/json",
     },
+    body: JSON.stringify({ rememberMe }),
   });
   const data = (await res.json().catch(() => ({}))) as {
     success?: boolean;
@@ -177,7 +182,7 @@ export async function refreshServerSession(force = true): Promise<boolean> {
   if (!user) return false;
   try {
     const token = await user.getIdToken(force);
-    const result = await establishSession(token);
+    const result = await establishSession(token, getRememberSessionPref());
     return result.ok;
   } catch {
     return false;

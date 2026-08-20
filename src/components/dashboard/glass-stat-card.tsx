@@ -39,7 +39,7 @@ export function GlassStatCard({
             <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
               {title}
             </p>
-            <p className="truncate text-2xl font-bold tracking-tight md:text-3xl">{value}</p>
+            <p className="truncate font-display text-2xl font-semibold tracking-tight md:text-3xl">{value}</p>
             {(description || trend) && (
               <p className="text-xs text-muted-foreground">
                 {trend && (
@@ -57,7 +57,7 @@ export function GlassStatCard({
               </p>
             )}
           </div>
-          <div className={cn("rounded-lg p-2.5", toneStyles[tone])}>
+          <div className={cn("rounded-xl p-2.5", toneStyles[tone])}>
             <Icon className="h-4 w-4 md:h-5 md:w-5" />
           </div>
         </div>

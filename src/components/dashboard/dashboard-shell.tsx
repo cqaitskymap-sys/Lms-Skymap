@@ -89,7 +89,7 @@ export function DashboardShell({ role, title, subtitle, children }: DashboardShe
       <MotionItem>
         <div className="flex flex-col gap-1">
           <div className="flex flex-wrap items-center gap-3">
-            <h1 className="text-2xl font-bold tracking-tight md:text-3xl">{title}</h1>
+            <h1 className="font-display text-3xl font-semibold tracking-tight md:text-4xl">{title}</h1>
             {loading && (
               <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
                 <Loader2 className="h-3.5 w-3.5 animate-spin" /> Updating…

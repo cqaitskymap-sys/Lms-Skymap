@@ -11,6 +11,7 @@ import { AdminDeleteButton } from "@/components/auth/admin-delete-button";
 import { AiGenerateQuestionsDialog } from "@/components/ai/ai-generate-questions-dialog";
 import { CreateQuestionBankDialog } from "@/components/exams/create-question-bank-dialog";
 import { CreateQuestionDialog } from "@/components/exams/create-question-dialog";
+import { EditQuestionButton, EditQuestionDialog } from "@/components/exams/edit-question-dialog";
 import { QuestionTypeBadge } from "@/components/exams/question-renderer";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -31,12 +32,14 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Label } from "@/components/ui/label";
+import type { Question } from "@/types";
 
 export default function QuestionsPage() {
   const { profile } = useAuth();
   const [bankId, setBankId] = useState<string>("all");
   const [difficulty, setDifficulty] = useState<string>("all");
   const [type, setType] = useState<string>("all");
+  const [editing, setEditing] = useState<Question | null>(null);
 
   const filters = useMemo(
     () => ({
@@ -211,7 +214,7 @@ export default function QuestionsPage() {
                     <TableHead>Marks</TableHead>
                     <TableHead>−ve</TableHead>
                     <TableHead>Tags</TableHead>
-                    <TableHead className="w-24" />
+                    <TableHead className="w-40" />
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -241,7 +244,8 @@ export default function QuestionsPage() {
                         </div>
                       </TableCell>
                       <TableCell>
-                        <div className="flex items-center gap-1">
+                        <div className="flex items-center justify-end gap-1">
+                          <EditQuestionButton onClick={() => setEditing(q)} />
                           <Can permission="questions:write">
                             <Button
                               size="sm"
@@ -282,6 +286,19 @@ export default function QuestionsPage() {
             )}
           </CardContent>
         </Card>
+
+        <EditQuestionDialog
+          question={editing}
+          banks={banks}
+          open={Boolean(editing)}
+          onOpenChange={(next) => {
+            if (!next) setEditing(null);
+          }}
+          onSaved={() => {
+            setEditing(null);
+            void refresh();
+          }}
+        />
       </div>
     </RequirePermission>
   );

@@ -97,6 +97,33 @@ export async function generateQuestionsWithAi(
   return { questions: body.questions, model: body.model };
 }
 
+export async function importQuestionsFromPaper(input: {
+  fileName: string;
+  paperText: string;
+  images?: string[];
+  maxQuestions?: number;
+}): Promise<{ questions: AiGeneratedQuestion[]; model: string; scanned: boolean }> {
+  const res = await fetch("/api/ai/import-paper", {
+    method: "POST",
+    headers: await authHeaders(),
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  const body = (await res.json()) as {
+    success: boolean;
+    questions: AiGeneratedQuestion[];
+    model: string;
+    scanned?: boolean;
+    error?: string;
+  };
+  if (!body.success) throw new Error(body.error || "Could not read questions from the paper");
+  return {
+    questions: body.questions,
+    model: body.model,
+    scanned: Boolean(body.scanned),
+  };
+}
+
 export async function explainWithAi(
   input: ExplainInput
 ): Promise<{ explanation: string; model: string }> {

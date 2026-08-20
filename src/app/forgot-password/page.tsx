@@ -46,10 +46,10 @@ function ForgotPasswordForm() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-muted/30 px-4">
-      <Card className="w-full max-w-md">
+    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-slate-50 via-white to-cyan-50/50 px-4 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950">
+      <Card className="w-full max-w-md border-border/60 shadow-lift">
         <CardHeader>
-          <CardTitle>Forgot password</CardTitle>
+          <CardTitle className="font-display text-3xl font-semibold">Forgot password</CardTitle>
           <CardDescription>
             Enter your work email and we&apos;ll send a secure reset link.
           </CardDescription>
