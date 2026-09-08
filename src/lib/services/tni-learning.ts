@@ -57,21 +57,22 @@ export async function getEmployeeTniLearning(
     listSopsDetailed().catch(() => []),
     listAcknowledgementsForUser(userId).catch(() => []),
   ]);
-  const acknowledgedSopIds = Array.from(
-    new Set(acks.map((a) => a.sopId).filter(Boolean))
-  );
-  const ackSet = new Set(acknowledgedSopIds);
   const byId = new Map(catalog.map((s) => [s.id, s]));
   const sopIds = tniSopIdsFromNeeds(tnis.flatMap((t) => t.needs || []));
   const items: TniLearningItem[] = sopIds.map((sopId) => {
     const sop = byId.get(sopId);
+    const currentVersionId = sop?.currentVersionId || sop?.version?.id;
+    const acknowledged = acks.some(
+      (a) => a.sopId === sopId && (!currentVersionId || a.versionId === currentVersionId)
+    );
     return {
       sopId,
       title: sop?.title || sopId,
       sopNumber: sop?.sopNumber || "",
-      acknowledged: ackSet.has(sopId),
+      acknowledged,
     };
   });
+  const acknowledgedSopIds = items.filter((i) => i.acknowledged).map((i) => i.sopId);
   const acknowledgedCount = items.filter((i) => i.acknowledged).length;
   return {
     hasTni: tnis.length > 0,
@@ -236,18 +237,22 @@ export async function syncTniLearningAfterAck(actor: SopActor): Promise<void> {
       console.error("[syncTniLearningAfterAck] lifecycle:", err);
     }
 
-    await notifyEmployee({
-      employeeId,
-      type: "assessment",
-      title: progress.allRead
-        ? "TNI SOPs complete — exams unlocked"
-        : "SOP acknowledged — exam unlocked",
-      message: progress.allRead
-        ? "You have acknowledged all TNI SOPs. You can now take the exams."
-        : "You can take the exam for the SOP you just acknowledged.",
-      link: "/dashboard/exams",
-      actorId: actor.uid,
-    });
+    try {
+      await notifyEmployee({
+        employeeId,
+        type: "assessment",
+        title: progress.allRead
+          ? "TNI SOPs complete — exams unlocked"
+          : "SOP acknowledged — exam unlocked",
+        message: progress.allRead
+          ? "You have acknowledged all TNI SOPs. You can now take the exams."
+          : "You can take the exam for the SOP you just acknowledged.",
+        link: "/dashboard/exams",
+        actorId: actor.uid,
+      });
+    } catch (err) {
+      console.error("[syncTniLearningAfterAck] notify:", err);
+    }
   }
 
   notifyTrainingUpdated();
@@ -270,7 +275,8 @@ export async function assertTniSopsReadForExam(params: {
     if (!onTni && !onAssignment) {
       throw new Error("This exam is not linked to your assigned SOPs");
     }
-    if (!progress.acknowledgedSopIds.includes(params.examSopId)) {
+    const item = progress.items.find((i) => i.sopId === params.examSopId);
+    if (!item?.acknowledged) {
       throw new Error("Read and acknowledge this SOP before taking the exam");
     }
     return;

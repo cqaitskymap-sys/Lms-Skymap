@@ -24,6 +24,7 @@ import {
 } from "@/lib/services/assessments";
 import { listSopsDetailed } from "@/lib/services/sops";
 import { getEmployeeAssignments } from "@/lib/services/training";
+import { getEmployeeInductionBundle } from "@/lib/services/induction";
 import { useMyTniLearning } from "@/hooks/use-tni-learning";
 import { TRAINING_UPDATED_EVENT } from "@/lib/training/demo-store";
 import { ExamTimer } from "@/components/exams/exam-timer";
@@ -73,6 +74,9 @@ function ExamsPageInner() {
   const [selectedExamId, setSelectedExamId] = useState<string>("");
   const [pendingTraining, setPendingTraining] = useState<TrainingAssignment[]>([]);
   const [myAssignments, setMyAssignments] = useState<TrainingAssignment[]>([]);
+  const [inductionAssignmentByModule, setInductionAssignmentByModule] = useState<
+    Record<string, string>
+  >({});
   const [sops, setSops] = useState<SopDocument[]>([]);
   const [linkExamId, setLinkExamId] = useState("");
   const [linkSopId, setLinkSopId] = useState("");
@@ -91,6 +95,7 @@ function ExamsPageInner() {
     if (!profile?.employeeId) {
       setPendingTraining([]);
       setMyAssignments([]);
+      setInductionAssignmentByModule({});
       return;
     }
     void getEmployeeAssignments(profile.employeeId).then((rows) => {
@@ -101,6 +106,17 @@ function ExamsPageInner() {
         )
       );
     });
+    void getEmployeeInductionBundle(profile.employeeId)
+      .then((items) => {
+        const map: Record<string, string> = {};
+        for (const item of items) {
+          if (item.assignment.status !== "passed" && item.assignment.status !== "failed") {
+            map[item.module.id] = item.assignment.id;
+          }
+        }
+        setInductionAssignmentByModule(map);
+      })
+      .catch(() => setInductionAssignmentByModule({}));
   }, [profile?.employeeId]);
 
   useEffect(() => {
@@ -164,6 +180,7 @@ function ExamsPageInner() {
             : "Exam started — submit to unlock navigation"
         );
       } catch (e) {
+        deepLinkStarted.current = false;
         unlockExam();
         toast.error(e instanceof Error ? e.message : "Could not start exam");
       } finally {
@@ -195,15 +212,16 @@ function ExamsPageInner() {
   const visibleExams = useMemo(() => {
     if (!isEmployee) return exams;
     return exams.filter((e) => {
-      if (e.inductionModuleId) return true;
+      if (e.inductionModuleId) return Boolean(inductionAssignmentByModule[e.inductionModuleId]);
       if (e.sopId) return intendedSopIds.has(e.sopId);
-      return tniLearning.items.length === 0;
+      return false;
     });
-  }, [isEmployee, exams, intendedSopIds, tniLearning.items.length]);
+  }, [isEmployee, exams, intendedSopIds, inductionAssignmentByModule]);
 
   const canStartExam = (e: Exam) => {
     if (!isEmployee) return true;
-    if (!e.sopId) return tniLearning.items.length === 0 || tniLearning.allRead;
+    if (e.inductionModuleId) return Boolean(inductionAssignmentByModule[e.inductionModuleId]);
+    if (!e.sopId) return false;
     return intendedSopIds.has(e.sopId) && acknowledgedSopIds.has(e.sopId);
   };
 
@@ -255,6 +273,8 @@ function ExamsPageInner() {
         .finally(() => setSaving(false));
     }, interval);
     return () => clearInterval(id);
+    // attempt object changes on autosave; key off id so the interval stays stable
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase, attempt?.id, exam?.autoSaveEnabled, exam?.autoSaveIntervalSeconds, profile?.uid]);
 
   const setAnswer = (questionId: string, optionIds: string[]) => {
@@ -627,6 +647,9 @@ function ExamsPageInner() {
                 {visibleExams.map((e) => {
                   const unlocked = canStartExam(e);
                   const assignmentId = assignmentForExam(e.sopId)?.id;
+                  const inductionAssignmentId = e.inductionModuleId
+                    ? inductionAssignmentByModule[e.inductionModuleId]
+                    : undefined;
                   return (
                   <Card
                     key={e.id}
@@ -693,7 +716,7 @@ function ExamsPageInner() {
                             onClick={(ev) => {
                               ev.stopPropagation();
                               if (!unlocked) return;
-                              void startExam(e.id, null, assignmentId);
+                              void startExam(e.id, inductionAssignmentId || null, assignmentId);
                             }}
                           >
                             <Play className="mr-1.5 h-3.5 w-3.5" />

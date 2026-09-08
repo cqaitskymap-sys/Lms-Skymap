@@ -80,15 +80,15 @@ export default function EmployeeDetailPage({
     };
   }, [id, employee?.tniId, employee?.lifecycleStage]);
 
-  const actor: LifecycleActor = useMemo(
-    () => ({
-      uid: profile?.uid || "system",
-      name: profile?.displayName || "System",
-      role: (profile?.role || "hr") as UserRole,
-      email: profile?.email,
-    }),
-    [profile]
-  );
+  const actor: LifecycleActor | null = useMemo(() => {
+    if (!profile) return null;
+    return {
+      uid: profile.uid,
+      name: profile.displayName,
+      role: profile.role as UserRole,
+      email: profile.email,
+    };
+  }, [profile]);
 
   if (loading) {
     return (
@@ -114,6 +114,14 @@ export default function EmployeeDetailPage({
 
   if (!employee) {
     return <p className="text-muted-foreground">Employee not found.</p>;
+  }
+
+  if (!actor) {
+    return (
+      <div className="flex justify-center py-20">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    );
   }
 
   const stage = employee.lifecycleStage || "created";

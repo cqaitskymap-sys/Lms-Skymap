@@ -22,21 +22,55 @@ type ExamLockState = {
 const ExamLockContext = createContext<ExamLockState | null>(null);
 
 const EXAM_ROUTE = "/dashboard/exams";
+const LOCK_STORAGE_KEY = "pharma-exam-lock";
 const LEAVE_MESSAGE =
   "Exam in progress — submit the assessment before leaving this page.";
+
+function readStoredLock(): { attemptId: string; examTitle: string } | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = sessionStorage.getItem(LOCK_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { attemptId?: string; examTitle?: string };
+    if (!parsed.attemptId) return null;
+    return { attemptId: parsed.attemptId, examTitle: parsed.examTitle || "" };
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredLock(value: { attemptId: string; examTitle: string } | null) {
+  if (typeof window === "undefined") return;
+  try {
+    if (!value) sessionStorage.removeItem(LOCK_STORAGE_KEY);
+    else sessionStorage.setItem(LOCK_STORAGE_KEY, JSON.stringify(value));
+  } catch {
+    /* private mode / quota */
+  }
+}
 
 export function ExamLockProvider({ children }: { children: React.ReactNode }) {
   const [attemptId, setAttemptId] = useState<string | null>(null);
   const [examTitle, setExamTitle] = useState<string | null>(null);
 
+  useEffect(() => {
+    const stored = readStoredLock();
+    if (stored) {
+      setAttemptId(stored.attemptId);
+      setExamTitle(stored.examTitle);
+    }
+  }, []);
+
   const lockExam = useCallback((args: { attemptId: string; examTitle: string }) => {
     setAttemptId(args.attemptId);
     setExamTitle(args.examTitle);
+    writeStoredLock(args);
   }, []);
 
   const unlockExam = useCallback(() => {
     setAttemptId(null);
     setExamTitle(null);
+    writeStoredLock(null);
   }, []);
 
   const value = useMemo(

@@ -42,7 +42,6 @@ export function SopMediaPreview({
 
   const pdfs = attachments.filter((a) => a.type === "pdf");
   const videos = attachments.filter((a) => a.type === "video");
-  const ppts = attachments.filter((a) => a.type === "ppt" || a.type === "other");
   const defaultTab = pdfs[0] ? "pdf" : videos[0] ? "video" : "files";
 
   useEffect(() => {

@@ -68,6 +68,7 @@ export async function POST(request: NextRequest) {
     inductionAssignmentId: parsed.data.inductionAssignmentId,
     actorId: auth.uid,
     enforceMaxAttempts,
+    skipTniGate: auth.role !== "employee",
   });
 
   if (!result.ok) {

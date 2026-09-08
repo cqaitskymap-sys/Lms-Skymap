@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { toast } from "sonner";
@@ -38,7 +38,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { RequirePermission, Can } from "@/components/auth/require-permission";
+import { RequirePermission } from "@/components/auth/require-permission";
 import { AdminDeleteButton } from "@/components/auth/admin-delete-button";
 import { escapeHtml, printHtml } from "@/lib/print";
 import type {
@@ -96,7 +96,7 @@ function statusBadgeVariant(status: TrainingNeedIdentification["status"]) {
   return "outline" as const;
 }
 
-export default function TniPage() {
+function TniPageInner() {
   const searchParams = useSearchParams();
   const employeeFromUrl = searchParams.get("employee") || "";
   const { profile, can } = useAuth();
@@ -931,5 +931,13 @@ export default function TniPage() {
         </Card>
       </div>
     </RequirePermission>
+  );
+}
+
+export default function TniPage() {
+  return (
+    <Suspense fallback={<div className="text-sm text-muted-foreground">Loading TNI…</div>}>
+      <TniPageInner />
+    </Suspense>
   );
 }

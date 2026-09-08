@@ -168,8 +168,18 @@ service cloud.firestore {
       );
       allow create: if hasRole(['super_admin', 'hr']);
       allow update: if hasRole(['super_admin', 'hr']) ||
-        (userDoc().keys().hasAny(['employeeId']) &&
-          resource.data.employeeId == userDoc().employeeId);
+        (
+          isActive()
+          && userDoc().keys().hasAny(['employeeId'])
+          && resource.data.employeeId == userDoc().employeeId
+          && onlyUpdating([
+            'documentsViewed', 'progressPercent', 'status',
+            'startedAt', 'updatedAt', 'updatedBy'
+          ])
+          && request.resource.data.status in [
+            'assigned', 'not_started', 'in_progress', 'assessment_pending'
+          ]
+        );
       allow delete: if isSuperAdmin();
     }
 
@@ -286,9 +296,8 @@ service cloud.firestore {
     }
 
     match /questions/{id} {
-      // Contains answer keys. Prefer Admin SDK for exam assembly.
-      // Client startAssessment still reads banks for employees until a start API exists.
-      allow read: if isActive();
+      // Answer keys stay staff-only. Exam assembly/scoring uses Admin SDK.
+      allow read: if hasRole(['super_admin', 'qa', 'hr', 'department_head', 'trainer']);
       allow create, update: if hasRole(['super_admin', 'qa', 'hr', 'department_head']);
       allow delete: if isSuperAdmin();
     }
@@ -362,7 +371,8 @@ service cloud.firestore {
       allow read: if isActive() && resource.data.userId == request.auth.uid;
       allow update: if isActive() && resource.data.userId == request.auth.uid
         && onlyUpdating(['isRead', 'readAt', 'updatedAt']);
-      allow create: if hasRole(['super_admin', 'hr', 'qa', 'department_head', 'trainer']);
+      allow create: if hasRole(['super_admin', 'hr', 'qa', 'department_head', 'trainer'])
+        || (isActive() && request.resource.data.userId == request.auth.uid);
       allow delete: if isSuperAdmin()
         || (isActive() && resource.data.userId == request.auth.uid);
     }

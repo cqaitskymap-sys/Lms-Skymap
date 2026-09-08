@@ -7,7 +7,7 @@ import "server-only";
 
 import { cookies } from "next/headers";
 import { AUTH_COOKIE_NAME } from "@/constants/auth";
-import { adminAuth, adminDb } from "@/lib/firebase/admin";
+import { adminAuth, adminDb, isAdminConfigured } from "@/lib/firebase/admin";
 import { COLLECTIONS } from "@/lib/firebase/client";
 import type { UserProfile, UserRole } from "@/types";
 import { assertPermission, AuthorizationError } from "@/lib/rbac/assert";
@@ -20,16 +20,10 @@ export interface ServerAuthContext {
   role: UserRole;
 }
 
-function adminReady() {
-  return Boolean(
-    process.env.FIREBASE_ADMIN_CLIENT_EMAIL && process.env.FIREBASE_ADMIN_PRIVATE_KEY
-  );
-}
-
 export async function getServerAuthFromBearer(
   authorizationHeader: string | null
 ): Promise<ServerAuthContext | null> {
-  if (!adminReady()) return null;
+  if (!isAdminConfigured()) return null;
   if (!authorizationHeader?.startsWith("Bearer ")) return null;
 
   try {
@@ -51,7 +45,7 @@ export async function getServerAuthFromBearer(
 }
 
 export async function getServerAuthFromSession(): Promise<ServerAuthContext | null> {
-  if (!adminReady()) return null;
+  if (!isAdminConfigured()) return null;
   try {
     const jar = await cookies();
     const session = jar.get(AUTH_COOKIE_NAME)?.value;

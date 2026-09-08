@@ -71,6 +71,8 @@ export function useQuestionBank(filters?: {
     } finally {
       setLoading(false);
     }
+    // Primitive fields only — parent often passes a new `filters` object each render
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filters?.bankId, filters?.difficulty, filters?.type]);
 
   useEffect(() => {

@@ -6,32 +6,23 @@ import { hasPermission } from "@/lib/rbac/permissions";
 import { unauthorized, verifyAuthDetailed } from "@/lib/rbac/middleware";
 import { adminDb } from "@/lib/firebase/admin";
 import { COLLECTIONS } from "@/lib/firebase/client";
-import type { AssessmentAttempt } from "@/types";
 
 const bodySchema = z.object({
   attemptId: z.string().trim().min(1, "attemptId is required"),
 });
-
-function canIssueForAttempt(
-  auth: { uid: string; profile: { employeeId?: string }; role: string },
-  attempt: AssessmentAttempt
-): boolean {
-  if (hasPermission(auth.role as Parameters<typeof hasPermission>[0], "certificates:issue")) {
-    return true;
-  }
-  const employeeId = auth.profile.employeeId;
-  return (
-    attempt.employeeId === auth.uid ||
-    (!!employeeId && attempt.employeeId === employeeId) ||
-    attempt.createdBy === auth.uid
-  );
-}
 
 export async function POST(request: NextRequest) {
   const verified = await verifyAuthDetailed(request);
   if (!verified.ok) {
     const status = verified.reason === "admin_not_configured" ? 503 : 401;
     return unauthorized(verified.message, status);
+  }
+
+  if (!hasPermission(verified.auth.role, "certificates:issue")) {
+    return NextResponse.json(
+      { success: false, error: "Forbidden: you cannot issue certificates" },
+      { status: 403 }
+    );
   }
 
   let body: unknown;
@@ -57,14 +48,6 @@ export async function POST(request: NextRequest) {
     .get();
   if (!attemptSnap.exists) {
     return NextResponse.json({ success: false, error: "Attempt not found" }, { status: 404 });
-  }
-
-  const attempt = { id: attemptSnap.id, ...attemptSnap.data() } as AssessmentAttempt;
-  if (!canIssueForAttempt(verified.auth, attempt)) {
-    return NextResponse.json(
-      { success: false, error: "Forbidden: you cannot issue a certificate for this attempt" },
-      { status: 403 }
-    );
   }
 
   const result = await issueCertificateForAttemptServer(attemptId, verified.auth.uid);

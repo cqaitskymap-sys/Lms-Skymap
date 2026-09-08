@@ -14,16 +14,36 @@ import {
 } from "@/lib/assessments/engine";
 import { generateId } from "@/lib/services/helpers";
 import { issueCertificateForAttemptServer } from "@/lib/certificates/issue-server";
+import { getProgressForStage, getStageIndex } from "@/lib/lifecycle/stages";
 import type {
   AssessmentAttempt,
   Exam,
   ExamResult,
+  LifecycleStage,
   Question,
   TrainingAssignment,
 } from "@/types";
 
 function stripUndefined<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
+}
+
+async function currentSopVersionId(sopId: string): Promise<string | undefined> {
+  const snap = await adminDb.collection(COLLECTIONS.sops).doc(sopId).get();
+  if (!snap.exists) return undefined;
+  return (snap.data() as { currentVersionId?: string }).currentVersionId;
+}
+
+function ackMatchesVersion(
+  acks: { sopId?: string; versionId?: string }[],
+  sopId: string,
+  currentVersionId?: string
+): boolean {
+  return acks.some((a) => {
+    if (a.sopId !== sopId) return false;
+    if (!currentVersionId) return true;
+    return a.versionId === currentVersionId;
+  });
 }
 
 async function assertTniSopsReadServer(params: {
@@ -58,10 +78,8 @@ async function assertTniSopsReadServer(params: {
         .map((d) => (d.data() as { sopId?: string }).sopId)
         .filter((id): id is string => Boolean(id))
     );
-    const acknowledged = new Set(
-      ackSnap.docs
-        .map((d) => (d.data() as { sopId?: string }).sopId)
-        .filter((id): id is string => Boolean(id))
+    const acks = ackSnap.docs.map(
+      (d) => d.data() as { sopId?: string; versionId?: string }
     );
 
     if (params.examSopId) {
@@ -72,7 +90,8 @@ async function assertTniSopsReadServer(params: {
           error: "This exam is not linked to your assigned SOPs",
         };
       }
-      if (!acknowledged.has(params.examSopId)) {
+      const currentVersionId = await currentSopVersionId(params.examSopId);
+      if (!ackMatchesVersion(acks, params.examSopId, currentVersionId)) {
         return {
           ok: false,
           status: 400,
@@ -84,7 +103,8 @@ async function assertTniSopsReadServer(params: {
 
     if (tniSopIds.size === 0) return null;
     for (const sopId of tniSopIds) {
-      if (!acknowledged.has(sopId)) {
+      const currentVersionId = await currentSopVersionId(sopId);
+      if (!ackMatchesVersion(acks, sopId, currentVersionId)) {
         return {
           ok: false,
           status: 400,
@@ -92,10 +112,15 @@ async function assertTniSopsReadServer(params: {
         };
       }
     }
+    return null;
   } catch (err) {
     console.error("[assertTniSopsReadServer]", err);
+    return {
+      ok: false,
+      status: 503,
+      error: "Could not verify SOP acknowledgement. Try again shortly.",
+    };
   }
-  return null;
 }
 
 async function loadExam(examId: string): Promise<Exam | null> {
@@ -133,10 +158,11 @@ async function listAttemptsForEmployee(
 function attemptForPersistence(attempt: AssessmentAttempt): AssessmentAttempt {
   return {
     ...attempt,
-    questions: attempt.questions.map((q) => {
-      const { explanation: _e, ...rest } = q;
-      return { ...rest, correctOptionIds: [], explanation: undefined };
-    }),
+    questions: attempt.questions.map((q) => ({
+      ...q,
+      correctOptionIds: [],
+      explanation: undefined,
+    })),
   };
 }
 
@@ -149,6 +175,8 @@ export type StartAssessmentServerInput = {
   actorId: string;
   /** When false, admins/testers can start past maxAttempts (preview only). */
   enforceMaxAttempts?: boolean;
+  /** Staff preview should not require the actor's TNI acknowledgements. */
+  skipTniGate?: boolean;
 };
 
 export type StartAssessmentServerResult =
@@ -163,12 +191,14 @@ export async function startAssessmentServer(
     return { ok: false, status: 404, error: "Exam not found or inactive" };
   }
 
-  const tniBlock = await assertTniSopsReadServer({
-    employeeId: input.employeeId,
-    userId: input.actorId,
-    examSopId: exam.sopId,
-  });
-  if (tniBlock) return tniBlock;
+  if (!input.skipTniGate) {
+    const tniBlock = await assertTniSopsReadServer({
+      employeeId: input.employeeId,
+      userId: input.actorId,
+      examSopId: exam.sopId,
+    });
+    if (tniBlock) return tniBlock;
+  }
 
   if (input.assignmentId) {
     const assignSnap = await adminDb
@@ -185,12 +215,39 @@ export async function startAssessmentServer(
     if (exam.sopId && assignment.sopId && exam.sopId !== assignment.sopId) {
       return { ok: false, status: 400, error: "Exam is not linked to this SOP assignment" };
     }
-    const blocked = ["passed", "failed", "expired"].includes(assignment.status);
-    if (blocked) {
+    if (!["assessment_pending", "retraining"].includes(assignment.status)) {
       return {
         ok: false,
         status: 400,
         error: `Training assignment is not ready for assessment (status: ${assignment.status})`,
+      };
+    }
+  }
+
+  if (input.inductionAssignmentId) {
+    const indSnap = await adminDb
+      .collection(COLLECTIONS.inductionAssignments)
+      .doc(input.inductionAssignmentId)
+      .get();
+    if (!indSnap.exists) {
+      return { ok: false, status: 400, error: "Induction assignment not found" };
+    }
+    const induction = indSnap.data() as {
+      employeeId?: string;
+      moduleId?: string;
+      status?: string;
+    };
+    if (induction.employeeId !== input.employeeId) {
+      return { ok: false, status: 403, error: "Induction assignment does not belong to this employee" };
+    }
+    if (exam.inductionModuleId && induction.moduleId && exam.inductionModuleId !== induction.moduleId) {
+      return { ok: false, status: 400, error: "Exam is not linked to this induction module" };
+    }
+    if (["passed", "failed"].includes(induction.status || "")) {
+      return {
+        ok: false,
+        status: 400,
+        error: `Induction assignment is not ready for assessment (status: ${induction.status})`,
       };
     }
   }
@@ -244,6 +301,13 @@ export async function startAssessmentServer(
   const selected = selectQuestionsForExam(pool, exam);
   if (!selected.length) {
     return { ok: false, status: 400, error: "No questions available in the question bank" };
+  }
+  if (selected.length < exam.questionCount) {
+    return {
+      ok: false,
+      status: 400,
+      error: `Question bank has only ${selected.length} question(s); exam requires ${exam.questionCount}`,
+    };
   }
 
   const expiresAt = new Date(now.getTime() + exam.durationMinutes * 60 * 1000);
@@ -395,7 +459,7 @@ export async function submitAssessmentServer(
   result.rank = peers.find((r) => r.attemptId === result.attemptId)?.rank;
   updated.rank = result.rank;
 
-  await attemptRef.set(stripUndefined(updated));
+  await attemptRef.set(stripUndefined(attemptForPersistence(updated)));
   await adminDb.collection(COLLECTIONS.examResults).doc(result.id).set(stripUndefined(result));
 
   // Best-effort rank refresh for peers
@@ -483,21 +547,39 @@ async function handleTrainingResultServer(
       { merge: true }
     );
 
-    const stage = certificateId ? "certified" : "passed";
-    const progress = certificateId ? 96 : 90;
-    await adminDb
-      .collection(COLLECTIONS.employees)
-      .doc(attempt.employeeId)
-      .set(
+    const allAssignSnap = await adminDb
+      .collection(COLLECTIONS.trainingAssignments)
+      .where("employeeId", "==", attempt.employeeId)
+      .get();
+    const outstanding = allAssignSnap.docs.filter((d) => {
+      if (d.id === assignmentId) return false;
+      const status = (d.data() as { status?: string }).status;
+      return status !== "passed" && status !== "failed" && status !== "expired";
+    });
+
+    const empRef = adminDb.collection(COLLECTIONS.employees).doc(attempt.employeeId);
+    const empSnap = await empRef.get();
+    const currentStage = (empSnap.data()?.lifecycleStage || "created") as LifecycleStage;
+    const currentIdx = getStageIndex(currentStage);
+
+    const targetStage: LifecycleStage = outstanding.length
+      ? "exam"
+      : certificateId
+        ? "certified"
+        : "passed";
+    const targetIdx = getStageIndex(targetStage);
+    if (targetIdx > currentIdx) {
+      await empRef.set(
         {
-          lifecycleStage: stage,
-          lifecycleProgress: progress,
+          lifecycleStage: targetStage,
+          lifecycleProgress: getProgressForStage(targetStage),
           status: "active",
           updatedAt: now,
           updatedBy: actorId,
         },
         { merge: true }
       );
+    }
     return;
   }
 

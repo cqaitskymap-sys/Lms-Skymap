@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { Building2, FileUp, Handshake, Loader2, Trash2 } from "lucide-react";
@@ -43,7 +43,7 @@ function isPdfFile(file: File) {
   return file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
 }
 
-export default function InductionPage() {
+function InductionPageInner() {
   const searchParams = useSearchParams();
   const assignFromUrl = searchParams.get("assign") || "";
   const { profile, can } = useAuth();
@@ -107,6 +107,15 @@ export default function InductionPage() {
       ),
     [employees]
   );
+
+  const selectableEmployees = useMemo(() => {
+    const list = [...inductionQueue];
+    if (selectedEmployeeId && !list.some((e) => e.id === selectedEmployeeId)) {
+      const extra = employees.find((e) => e.id === selectedEmployeeId);
+      if (extra) list.unshift(extra);
+    }
+    return list;
+  }, [inductionQueue, selectedEmployeeId, employees]);
 
   const selectedEmployee = useMemo(
     () => employees.find((e) => e.id === selectedEmployeeId) || null,
@@ -230,7 +239,7 @@ export default function InductionPage() {
                       />
                     </SelectTrigger>
                     <SelectContent>
-                      {inductionQueue.map((e) => (
+                      {selectableEmployees.map((e) => (
                         <SelectItem key={e.id} value={e.id}>
                           {e.firstName} {e.lastName} · {e.employeeCode} (
                           {e.lifecycleStage?.replace(/_/g, " ")})
@@ -446,5 +455,13 @@ export default function InductionPage() {
         )}
       </div>
     </RequirePermission>
+  );
+}
+
+export default function InductionPage() {
+  return (
+    <Suspense fallback={<div className="text-sm text-muted-foreground">Loading induction…</div>}>
+      <InductionPageInner />
+    </Suspense>
   );
 }

@@ -8,7 +8,6 @@ import {
   getDoc,
   getDocs,
   query,
-  setDoc,
   updateDoc,
   deleteDoc,
   where,
@@ -483,28 +482,13 @@ export async function uploadCertificatePdf(
     };
   }
 
-  if (!isStorageMarkedUnavailable()) {
-    try {
-      const storageRef = ref(storage, path);
-      await uploadBytes(storageRef, blob, { contentType: "application/pdf" });
-      const pdfDownloadUrl = await getDownloadURL(storageRef);
-      const stored = { pdfStoragePath: path, pdfDownloadUrl };
-      await updateDoc(doc(db, COLLECTIONS.certificates, certificateId), {
-        ...stored,
-        updatedAt: nowISO(),
-      });
-      return { ...stored, storedRemotely: true };
-    } catch (err) {
-      markStorageUnavailable();
-      throw err instanceof Error
-        ? err
-        : new Error("Firebase Storage upload failed");
-    }
-  }
-
-  throw new Error(
-    "Firebase Storage is unavailable in this session. Download the PDF locally instead."
-  );
+  const stored = await storeCertificatePdf(path, blob);
+  const storedRemotely = !stored.pdfStoragePath.startsWith("local/");
+  await updateDoc(doc(db, COLLECTIONS.certificates, certificateId), {
+    ...stored,
+    updatedAt: nowISO(),
+  });
+  return { ...stored, storedRemotely };
 }
 
 /** Super Admin only — permanently delete a certificate record. */

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { CheckCircle2, Loader2, Pencil, Printer, Sparkles } from "lucide-react";
@@ -65,7 +65,7 @@ function statusBadgeVariant(status: JobDescription["status"]) {
   return "outline" as const;
 }
 
-export default function JdPage() {
+function JdPageInner() {
   const searchParams = useSearchParams();
   const employeeFromUrl = searchParams.get("employee") || "";
   const { profile, can } = useAuth();
@@ -818,5 +818,13 @@ export default function JdPage() {
         </Card>
       </div>
     </RequirePermission>
+  );
+}
+
+export default function JdPage() {
+  return (
+    <Suspense fallback={<div className="text-sm text-muted-foreground">Loading job descriptions…</div>}>
+      <JdPageInner />
+    </Suspense>
   );
 }

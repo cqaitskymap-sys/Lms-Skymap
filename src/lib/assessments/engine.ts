@@ -107,13 +107,11 @@ export function sanitizeAttemptForClient(
   revealAnswers: boolean
 ): AttemptQuestion[] {
   if (revealAnswers) return questions;
-  return questions.map((q) => {
-    const { explanation: _e, ...rest } = q;
-    return {
-      ...rest,
-      correctOptionIds: [],
-    };
-  });
+  return questions.map((q) => ({
+    ...q,
+    correctOptionIds: [],
+    explanation: undefined,
+  }));
 }
 
 export function evaluateAttempt(

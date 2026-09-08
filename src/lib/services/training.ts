@@ -633,7 +633,8 @@ export async function updateJobDescription(
   actorId: string
 ): Promise<JobDescription> {
   const now = nowISO();
-  const { employeeId: _ignored, ...safeUpdates } = updates;
+  const { employeeId: ignoredEmployeeId, ...safeUpdates } = updates;
+  void ignoredEmployeeId;
   const localPayload = {
     ...safeUpdates,
     updatedAt: now,
@@ -841,7 +842,9 @@ export async function updateTNI(
   actorId: string
 ): Promise<TrainingNeedIdentification> {
   const now = nowISO();
-  const { employeeId: _employeeId, jdId: _jdId, ...safeUpdates } = updates;
+  const { employeeId: ignoredEmployeeId, jdId: ignoredJdId, ...safeUpdates } = updates;
+  void ignoredEmployeeId;
+  void ignoredJdId;
   const cleanedNeeds = safeUpdates.needs?.map((n) => {
     const item: TrainingNeedIdentification["needs"][number] = {
       id: n.id,

@@ -39,7 +39,6 @@ import {
 } from "@/lib/assessments/engine";
 import {
   pushAttemptLocal,
-  pushResultLocal,
   readAssessmentStore,
   writeAssessmentStore,
 } from "@/lib/assessments/demo-store";
@@ -56,17 +55,6 @@ async function authHeaders(): Promise<HeadersInit> {
   return {
     Authorization: `Bearer ${token}`,
     "Content-Type": "application/json",
-  };
-}
-
-/** Persist attempts without answer keys / explanations (defense in depth). */
-function attemptForPersistence(attempt: AssessmentAttempt): AssessmentAttempt {
-  return {
-    ...attempt,
-    questions: attempt.questions.map((q) => {
-      const { explanation: _e, ...rest } = q;
-      return { ...rest, correctOptionIds: [], explanation: undefined };
-    }),
   };
 }
 
@@ -291,6 +279,11 @@ export async function startAssessment(params: {
   const pool = await loadBankQuestions(exam);
   const selected = selectQuestionsForExam(pool, exam);
   if (!selected.length) throw new Error("No questions available in the question bank");
+  if (selected.length < exam.questionCount) {
+    throw new Error(
+      `Question bank has only ${selected.length} question(s); exam requires ${exam.questionCount}`
+    );
+  }
 
   const expiresAt = new Date(now.getTime() + exam.durationMinutes * 60 * 1000);
   const id = generateId("att");
@@ -583,7 +576,6 @@ async function handleTrainingAssessmentResult(
         markExamLifecycle,
         markPassedLifecycle,
         markCertifiedLifecycle,
-        markQualifiedLifecycle,
       } = await import("@/lib/services/lifecycle");
       const actor = {
         uid: actorId,
@@ -594,7 +586,6 @@ async function handleTrainingAssessmentResult(
       await markPassedLifecycle(attempt.employeeId, actor, attempt.percentage);
       if (certId) {
         await markCertifiedLifecycle(attempt.employeeId, certId, actor);
-        await markQualifiedLifecycle(attempt.employeeId, actor);
       }
     } catch {
       /* lifecycle may already be ahead */
@@ -843,11 +834,23 @@ export async function getExamAnalytics(examId: string): Promise<AssessmentAnalyt
 
   // Miss rates from attempts
   const missMap = new Map<string, { miss: number; total: number; text: string }>();
-  const attempts = (await preferLocalData())
-    ? readAssessmentStore().attempts.filter(
-        (a) => a.examId === examId && a.status !== "in_progress"
-      )
-    : [];
+  let attempts: AssessmentAttempt[] = [];
+  if (await preferLocalData()) {
+    attempts = readAssessmentStore().attempts.filter(
+      (a) => a.examId === examId && a.status !== "in_progress"
+    );
+  } else {
+    try {
+      const snap = await getDocs(
+        query(collection(db, COLLECTIONS.assessmentAttempts), where("examId", "==", examId))
+      );
+      attempts = snap.docs
+        .map((d) => ({ id: d.id, ...d.data() } as AssessmentAttempt))
+        .filter((a) => a.status !== "in_progress");
+    } catch {
+      attempts = [];
+    }
+  }
   for (const a of attempts) {
     for (const q of a.questions) {
       const cur = missMap.get(q.questionId) || { miss: 0, total: 0, text: q.text };
@@ -1107,7 +1110,7 @@ export async function createExam(
       q.isActive &&
       (q.bankId === data.bankId || data.bankIds?.includes(q.bankId))
   ).length;
-  if (available > 0 && available < data.questionCount) {
+  if (available < data.questionCount) {
     throw new Error(
       `Question bank has only ${available} active question(s); need ${data.questionCount}`
     );

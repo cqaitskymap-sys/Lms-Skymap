@@ -1,7 +1,7 @@
 import "server-only";
 
 import { COLLECTIONS } from "@/lib/firebase/client";
-import { adminDb } from "@/lib/firebase/admin";
+import { adminDb, isAdminConfigured } from "@/lib/firebase/admin";
 import {
   computeLockoutAfterFailure,
   isCurrentlyLocked,
@@ -16,15 +16,9 @@ import { generateId } from "@/lib/utils";
 /** In-memory fallback when Admin SDK / Firestore is unavailable (local demo). */
 const memoryLockouts = new Map<string, LoginLockout>();
 
-function adminReady(): boolean {
-  return Boolean(
-    process.env.FIREBASE_ADMIN_CLIENT_EMAIL && process.env.FIREBASE_ADMIN_PRIVATE_KEY
-  );
-}
-
 async function getLockout(email: string): Promise<LoginLockout | null> {
   const id = lockoutDocId(email);
-  if (!adminReady()) {
+  if (!isAdminConfigured()) {
     return memoryLockouts.get(id) ?? null;
   }
   try {
@@ -38,7 +32,7 @@ async function getLockout(email: string): Promise<LoginLockout | null> {
 
 async function saveLockout(lock: LoginLockout): Promise<void> {
   memoryLockouts.set(lock.id, lock);
-  if (!adminReady()) return;
+  if (!isAdminConfigured()) return;
   try {
     await adminDb.collection(COLLECTIONS.loginLockouts).doc(lock.id).set(lock, { merge: true });
   } catch {
@@ -128,7 +122,7 @@ export async function writeLoginAudit(params: {
   userAgent?: string;
   success: boolean;
 }) {
-  if (!adminReady()) return;
+  if (!isAdminConfigured()) return;
   try {
     const auditId = generateId("audit");
     await adminDb.collection(COLLECTIONS.auditLogs).doc(auditId).set({
@@ -159,7 +153,7 @@ export async function writeActivityLogServer(params: {
   userAgent?: string;
   metadata?: Record<string, string>;
 }) {
-  if (!adminReady()) return;
+  if (!isAdminConfigured()) return;
   try {
     const id = generateId("act");
     await adminDb.collection(COLLECTIONS.activityLogs).doc(id).set({
@@ -173,7 +167,7 @@ export async function writeActivityLogServer(params: {
 }
 
 export async function updateUserLastLogin(uid: string, ip?: string) {
-  if (!adminReady()) return;
+  if (!isAdminConfigured()) return;
   try {
     const now = new Date().toISOString();
     await adminDb.collection(COLLECTIONS.users).doc(uid).set(

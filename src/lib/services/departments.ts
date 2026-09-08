@@ -10,7 +10,6 @@ import {
 } from "@/lib/departments/defaults";
 import type { CreateDepartmentInput, UpdateDepartmentInput } from "@/lib/auth/department-schemas";
 import type { Department } from "@/types";
-import { generateId } from "@/lib/utils";
 import { collection, getDocs, orderBy, query } from "firebase/firestore/lite";
 
 export const DEPARTMENTS_UPDATED_EVENT = "pharma-departments-updated";

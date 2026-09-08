@@ -52,7 +52,7 @@ export interface SopActor {
 }
 
 /** Prefer local demo store only when demo mode is on. */
-async function preferLocalSopStore(_sopId?: string): Promise<boolean> {
+async function preferLocalSopStore(): Promise<boolean> {
   return isDemoMode();
 }
 
@@ -150,7 +150,7 @@ export async function listSopsDetailed(filters?: {
     if (filters?.search) {
       const q = filters.search.toLowerCase();
       next = next.filter((s) =>
-        `${s.sopNumber} ${s.title} ${s.category} ${s.tags.join(" ")}`
+        `${s.sopNumber} ${s.title} ${s.category} ${(s.tags || []).join(" ")}`
           .toLowerCase()
           .includes(q)
       );
@@ -172,8 +172,25 @@ export async function listSopsDetailed(filters?: {
     const snap = await getDocs(
       query(collection(db, COLLECTIONS.sops), orderBy("sopNumber", "asc"))
     );
-    const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }) as SopDocument);
-    return applyFilters(list);
+    const list = snap.docs.map((d) => ({ id: d.id, ...d.data(), tags: ((d.data() as SopDocument).tags || []) }) as SopDocument);
+    const versionIds = [
+      ...new Set(list.map((s) => s.currentVersionId).filter((id): id is string => Boolean(id))),
+    ];
+    const versions = await Promise.all(
+      versionIds.map(async (id) => {
+        const vSnap = await getDoc(doc(db, COLLECTIONS.sopVersions, id));
+        return vSnap.exists() ? ({ id: vSnap.id, ...vSnap.data() } as SopVersion) : null;
+      })
+    );
+    const byVersion = new Map(
+      versions.filter((v): v is SopVersion => Boolean(v)).map((v) => [v.id, v])
+    );
+    return applyFilters(
+      list.map((s) => ({
+        ...s,
+        version: s.currentVersionId ? byVersion.get(s.currentVersionId) : undefined,
+      }))
+    );
   } catch (err) {
     throw new Error(err instanceof Error ? err.message : "Failed to load SOPs");
   }
@@ -561,7 +578,7 @@ export async function reviseSopWithFiles(
     createdBy: actor.uid,
   };
 
-  if (await preferLocalSopStore(sopId)) {
+  if (await preferLocalSopStore()) {
     const store = readSopStore();
     store.versions.unshift(version);
     store.sops = store.sops.map((s) =>
@@ -604,7 +621,7 @@ export async function submitSopForReview(
   actor: SopActor
 ): Promise<void> {
   const now = nowISO();
-  if (await preferLocalSopStore(sopId)) {
+  if (await preferLocalSopStore()) {
     const store = readSopStore();
     store.versions = store.versions.map((v) =>
       v.id === versionId
@@ -656,7 +673,7 @@ export async function approveSopVersionFull(
 
   let retrainCount = 0;
 
-  if (await preferLocalSopStore(sopId)) {
+  if (await preferLocalSopStore()) {
     const store = readSopStore();
     const version = store.versions.find((v) => v.id === versionId);
     if (!version) throw new Error("SOP version not found");
@@ -904,7 +921,7 @@ export async function archiveSopVersion(
   const now = nowISO();
   const store = readSopStore();
   const found = store.versions.find((v) => v.id === versionId);
-  const local = found ? await preferLocalSopStore(found.sopId) : isDemoMode();
+  const local = found ? await preferLocalSopStore() : isDemoMode();
 
   if (local) {
     store.versions = store.versions.map((v) =>
@@ -958,7 +975,7 @@ export async function recordSopView(params: {
     source: params.source,
   };
 
-  if (isDemoMode() || (await preferLocalSopStore(params.sopId))) {
+  if (isDemoMode() || (await preferLocalSopStore())) {
     const store = readSopStore();
     store.views.unshift(record);
     store.versions = store.versions.map((v) =>
@@ -1013,7 +1030,7 @@ export async function acknowledgeSop(params: {
     signatureDataUrl: params.signatureDataUrl,
   };
 
-  if (isDemoMode() || (await preferLocalSopStore(params.sopId))) {
+  if (isDemoMode() || (await preferLocalSopStore())) {
     const store = readSopStore();
     const exists = store.acknowledgements.some(
       (a) => a.versionId === params.versionId && a.userId === params.actor.uid
@@ -1154,7 +1171,7 @@ export async function getSop(id: string) {
 
 /** Super Admin only — deletes SOP and related versions / views / acks. */
 export async function deleteSop(sopId: string): Promise<void> {
-  if (await preferLocalSopStore(sopId)) {
+  if (await preferLocalSopStore()) {
     const store = readSopStore();
     store.sops = store.sops.filter((s) => s.id !== sopId);
     store.versions = store.versions.filter((v) => v.sopId !== sopId);

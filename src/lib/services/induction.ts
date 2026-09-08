@@ -15,7 +15,6 @@ import {
   deleteField,
   query,
   where,
-  orderBy,
 } from "firebase/firestore/lite";
 import { ref, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
 import { db, storage, COLLECTIONS } from "@/lib/firebase/client";
@@ -41,7 +40,7 @@ function notifyInductionUpdated() {
   }
 }
 
-async function preferLocal(_moduleId?: string): Promise<boolean> {
+async function preferLocal(): Promise<boolean> {
   return isDemoMode();
 }
 
@@ -105,7 +104,7 @@ export async function listInductionModules(): Promise<InductionModule[]> {
 }
 
 export async function getInductionModule(id: string): Promise<InductionModule | null> {
-  if (await preferLocal(id)) {
+  if (await preferLocal()) {
     return readInductionStore().modules.find((m) => m.id === id) || null;
   }
   const snap = await getDoc(doc(db, COLLECTIONS.inductionModules, id));
@@ -132,7 +131,7 @@ export async function uploadInductionDocument(
   let downloadUrl: string;
   let storagePath: string;
 
-  if (isDemoMode() || (await preferLocal(moduleId))) {
+  if (isDemoMode() || (await preferLocal())) {
     storagePath = `demo/induction/${moduleId}/${docId}_${file.name}`;
     downloadUrl =
       typeof URL !== "undefined"
@@ -157,7 +156,7 @@ export async function uploadInductionDocument(
     uploadedBy: actorId,
   };
 
-  if (isDemoMode() || (await preferLocal(moduleId))) {
+  if (isDemoMode() || (await preferLocal())) {
     const store = readInductionStore();
     store.modules = store.modules.map((m) =>
       m.id === moduleId
@@ -169,6 +168,7 @@ export async function uploadInductionDocument(
   }
 
   const moduleSnap = await getDoc(doc(db, COLLECTIONS.inductionModules, moduleId));
+  if (!moduleSnap.exists()) throw new Error("Induction module not found");
   const inductionModule = moduleSnap.data() as InductionModule;
   const documents = [...(inductionModule.documents || []), document];
   await updateDoc(doc(db, COLLECTIONS.inductionModules, moduleId), {
@@ -337,7 +337,8 @@ export async function deleteSignedInductionPaper(params: {
     }
   }
 
-  const { inductionSignedPaper: _removed, ...withoutPaper } = employee;
+  const withoutPaper = { ...employee };
+  delete (withoutPaper as { inductionSignedPaper?: unknown }).inductionSignedPaper;
 
   if (isDemoMode()) {
     upsertDemoEmployee({
@@ -359,7 +360,8 @@ export async function deleteSignedInductionPaper(params: {
     const store = readLifecycleStore();
     const emp = store.employees.find((e) => e.id === employeeId);
     if (emp) {
-      const { inductionSignedPaper: _paper, ...cached } = emp;
+      const cached = { ...emp };
+      delete (cached as { inductionSignedPaper?: unknown }).inductionSignedPaper;
       upsertDemoEmployee({
         ...cached,
         updatedAt: nowISO(),
@@ -380,7 +382,7 @@ export async function assignInductionModules(
 ): Promise<InductionAssignment[]> {
   const now = nowISO();
   const assignments: InductionAssignment[] = [];
-  const local = await preferLocal(moduleIds[0]);
+  const local = await preferLocal();
 
   for (const moduleId of moduleIds) {
     if (local) {
@@ -499,20 +501,13 @@ export async function markDocumentViewed(
   const viewed = Array.from(new Set([...assignment.documentsViewed, documentId]));
   const total = Math.max(inductionModule.documents?.length || 1, 1);
   const progress = Math.min(100, Math.round((viewed.length / total) * 100));
-  const hasAssessment = Boolean(inductionModule.assessmentId);
   const now = nowISO();
+  const nextStatus = progress >= 100 ? "assessment_pending" : "in_progress";
   const updated: InductionAssignment = {
     ...assignment,
     documentsViewed: viewed,
     progressPercent: progress,
-    status:
-      progress >= 100
-        ? hasAssessment
-          ? "assessment_pending"
-          : "passed"
-        : "in_progress",
-    passed: progress >= 100 && !hasAssessment ? true : assignment.passed,
-    completedAt: progress >= 100 && !hasAssessment ? now : assignment.completedAt,
+    status: nextStatus,
     startedAt: assignment.startedAt || now,
     updatedAt: now,
     updatedBy: actorId,
@@ -529,8 +524,6 @@ export async function markDocumentViewed(
         documentsViewed: viewed,
         progressPercent: progress,
         status: updated.status,
-        passed: updated.passed,
-        completedAt: updated.completedAt,
         startedAt: updated.startedAt,
         updatedAt: now,
         updatedBy: actorId,
@@ -569,16 +562,12 @@ export async function markModuleStudied(
   if (!assignment || !inductionModule) return null;
 
   const allDocIds = (inductionModule.documents || []).map((d) => d.id);
-  const hasAssessment = Boolean(inductionModule.assessmentId);
   const now = nowISO();
   const updated: InductionAssignment = {
     ...assignment,
     documentsViewed: allDocIds.length ? allDocIds : assignment.documentsViewed,
     progressPercent: 100,
-    status: hasAssessment ? "assessment_pending" : "passed",
-    passed: hasAssessment ? assignment.passed : true,
-    score: hasAssessment ? assignment.score : 100,
-    completedAt: hasAssessment ? assignment.completedAt : now,
+    status: "assessment_pending",
     startedAt: assignment.startedAt || now,
     updatedAt: now,
     updatedBy: actorId,
@@ -595,9 +584,6 @@ export async function markModuleStudied(
         documentsViewed: updated.documentsViewed,
         progressPercent: 100,
         status: updated.status,
-        passed: updated.passed,
-        score: updated.score,
-        completedAt: updated.completedAt,
         startedAt: updated.startedAt,
         updatedAt: now,
         updatedBy: actorId,
@@ -723,7 +709,7 @@ export async function completeInductionAssessment(params: {
 
 /** Super Admin only — permanently remove an induction module. */
 export async function deleteInductionModule(moduleId: string): Promise<void> {
-  if (await preferLocal(moduleId)) {
+  if (await preferLocal()) {
     const store = readInductionStore();
     store.modules = store.modules.filter((m) => m.id !== moduleId);
     store.assignments = store.assignments.filter((a) => a.moduleId !== moduleId);

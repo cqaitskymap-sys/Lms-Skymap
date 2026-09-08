@@ -73,6 +73,10 @@ export default function SopDetailPage({ params }: { params: Promise<{ id: string
   const activeVersion = selected || currentVersion;
 
   useEffect(() => {
+    viewedOnce.current = false;
+  }, [id]);
+
+  useEffect(() => {
     if (!actor || !sop || !activeVersion || viewedOnce.current) return;
     viewedOnce.current = true;
     void recordSopView({

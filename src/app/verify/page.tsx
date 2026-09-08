@@ -59,7 +59,6 @@ function VerifyInner() {
 
   useEffect(() => {
     if (initial) void runVerify(initial);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initial]);
 
   return (

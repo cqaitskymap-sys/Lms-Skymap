@@ -1,12 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { AUTH_COOKIE_NAME } from "@/constants/auth";
-import { adminAuth } from "@/lib/firebase/admin";
-
-function adminReady() {
-  return Boolean(
-    process.env.FIREBASE_ADMIN_CLIENT_EMAIL && process.env.FIREBASE_ADMIN_PRIVATE_KEY
-  );
-}
+import { adminAuth, isAdminConfigured } from "@/lib/firebase/admin";
 
 /**
  * Lightweight session probe for middleware / client health checks.
@@ -17,7 +11,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ authenticated: false });
   }
 
-  if (!adminReady()) {
+  if (!isAdminConfigured()) {
     // Cookie present but cannot verify — treat as opaque presence signal
     return NextResponse.json({ authenticated: true, verified: false });
   }

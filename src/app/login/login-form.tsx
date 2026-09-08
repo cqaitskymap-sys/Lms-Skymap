@@ -10,6 +10,7 @@ import { Eye, EyeOff, Loader2 } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
 import { loginSchema, type LoginInput } from "@/lib/auth/schemas";
 import { ROLE_DASHBOARD_ROUTES } from "@/lib/rbac/permissions";
+import { safeInternalPath } from "@/lib/auth/safe-redirect";
 import { resolveLoginIdentifier, needsFirstLoginOnboarding } from "@/lib/services/onboarding";
 import {
   clearRememberedLogin,
@@ -32,7 +33,7 @@ function LoginForm() {
 
   useEffect(() => {
     if (!loading && user) {
-      const redirect = searchParams.get("redirect") || "/dashboard";
+      const redirect = safeInternalPath(searchParams.get("redirect"), "/dashboard");
       router.replace(redirect);
     }
   }, [loading, user, router, searchParams]);
@@ -74,7 +75,7 @@ function LoginForm() {
         router.push("/dashboard/onboarding");
         return;
       }
-      const redirect = searchParams.get("redirect");
+      const redirect = safeInternalPath(searchParams.get("redirect"), "");
       if (redirect) {
         router.push(redirect);
         return;

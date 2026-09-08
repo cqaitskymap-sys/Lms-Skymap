@@ -75,7 +75,8 @@ export async function POST(
   }
 
   await ref.update({
-    mustChangePassword: false,
+    mustChangePassword: true,
+    passwordChangedAt: null,
     updatedAt: now,
   });
 

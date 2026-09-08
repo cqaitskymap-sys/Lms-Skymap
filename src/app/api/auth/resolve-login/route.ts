@@ -72,7 +72,26 @@ export async function POST(request: NextRequest) {
       .get();
 
     if (!byCode.empty) {
-      const e = byCode.docs[0]!.data();
+      const e = byCode.docs[0]!.data() as {
+        email?: string;
+        userId?: string;
+        isActive?: boolean;
+      };
+      if (e.isActive === false) {
+        return NextResponse.json(
+          { success: false, error: "Account is deactivated. Contact HR." },
+          { status: 403 }
+        );
+      }
+      if (e.userId) {
+        const userSnap = await adminDb.collection(COLLECTIONS.users).doc(e.userId).get();
+        if (userSnap.exists && userSnap.data()?.isActive === false) {
+          return NextResponse.json(
+            { success: false, error: "Account is deactivated. Contact HR." },
+            { status: 403 }
+          );
+        }
+      }
       return NextResponse.json({
         success: true,
         data: { email: String(e.email).toLowerCase(), resolved: true },

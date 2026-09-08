@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { Plus, FileText, Eye, PenLine, Loader2 } from "lucide-react";
+import { Plus, FileText, Eye, PenLine } from "lucide-react";
 import { RequirePermission } from "@/components/auth/require-permission";
 import { AdminDeleteButton } from "@/components/auth/admin-delete-button";
 import { StatusBadge } from "@/components/shared/status-badge";
@@ -37,7 +37,7 @@ export default function SopsPage() {
     return sops.filter((s) => {
       const matchSearch =
         !search ||
-        `${s.sopNumber} ${s.title} ${s.category} ${s.tags.join(" ")}`
+        `${s.sopNumber} ${s.title} ${s.category} ${(s.tags || []).join(" ")}`
           .toLowerCase()
           .includes(search.toLowerCase());
       const matchStatus = !status || s.status === status;
