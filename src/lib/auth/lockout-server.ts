@@ -16,6 +16,36 @@ import { generateId } from "@/lib/utils";
 /** In-memory fallback when Admin SDK / Firestore is unavailable (local demo). */
 const memoryLockouts = new Map<string, LoginLockout>();
 
+/** Per-instance rate limit (best-effort on serverless). */
+const rateBuckets = new Map<string, number[]>();
+
+export function consumeRateLimit(key: string, max: number, windowMs: number): boolean {
+  const now = Date.now();
+  const hits = (rateBuckets.get(key) || []).filter((t) => now - t < windowMs);
+  if (hits.length >= max) {
+    rateBuckets.set(key, hits);
+    return false;
+  }
+  hits.push(now);
+  rateBuckets.set(key, hits);
+  return true;
+}
+
+export async function userExistsForEmail(email: string): Promise<boolean> {
+  if (!isAdminConfigured()) return true;
+  try {
+    const normalized = normalizeEmail(email);
+    const snap = await adminDb
+      .collection(COLLECTIONS.users)
+      .where("email", "==", normalized)
+      .limit(1)
+      .get();
+    return !snap.empty;
+  } catch {
+    return true;
+  }
+}
+
 async function getLockout(email: string): Promise<LoginLockout | null> {
   const id = lockoutDocId(email);
   if (!isAdminConfigured()) {

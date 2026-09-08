@@ -121,7 +121,8 @@ export async function POST(request: NextRequest) {
     const response = NextResponse.json({ success: true, session: true });
     response.cookies.set({ ...cookieOptions(rememberMe), value: sessionCookie });
     return response;
-  } catch {
+  } catch (err) {
+    console.error("[auth/session] POST failed:", err);
     return NextResponse.json({ success: false, error: "Invalid or expired token" }, { status: 401 });
   }
 }
@@ -135,10 +136,19 @@ export async function DELETE(request: NextRequest) {
   if (session && isAdminConfigured()) {
     try {
       const decoded = await adminAuth.verifySessionCookie(session, true);
+      let role = "employee";
+      try {
+        const snap = await adminDb.collection(COLLECTIONS.users).doc(decoded.uid).get();
+        if (snap.exists) {
+          role = (snap.data()?.role as string) || role;
+        }
+      } catch {
+        /* profile optional for logout audit */
+      }
       await writeLoginAudit({
         actorId: decoded.uid,
         actorEmail: decoded.email || decoded.uid,
-        actorRole: "employee",
+        actorRole: role,
         action: "logout",
         description: "User signed out",
         ipAddress: ip,

@@ -374,6 +374,8 @@ export interface InductionAssignment extends Timestamps {
 
 export interface JobDescription extends Timestamps {
   id: string;
+  /** Document number shown on the JD, e.g. JD-QA-001 */
+  jdNo?: string;
   employeeId: string;
   departmentId: string;
   title: string;

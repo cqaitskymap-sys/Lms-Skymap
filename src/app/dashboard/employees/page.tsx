@@ -36,7 +36,12 @@ export default function EmployeesPage() {
   const pageSize = 10;
 
   useEffect(() => {
-    void listDepartments().then(setDepartments);
+    void listDepartments()
+      .then(setDepartments)
+      .catch((err) => {
+        console.warn("[employees] departments failed:", err);
+        setDepartments([]);
+      });
   }, []);
 
   const filtered = useMemo(() => {

@@ -3,7 +3,6 @@ const SESSION_PREF_KEY = "skymap_remember_session";
 
 export type RememberedLogin = {
   identifier: string;
-  password: string;
 };
 
 function canUseStorage(): boolean {
@@ -15,23 +14,21 @@ export function loadRememberedLogin(): RememberedLogin | null {
   try {
     const raw = localStorage.getItem(CREDENTIALS_KEY);
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as Partial<RememberedLogin>;
+    const parsed = JSON.parse(raw) as { identifier?: unknown; password?: unknown };
     if (!parsed.identifier || typeof parsed.identifier !== "string") return null;
-    return {
-      identifier: parsed.identifier,
-      password: typeof parsed.password === "string" ? parsed.password : "",
-    };
+    // Older builds stored plaintext passwords — drop them immediately.
+    if (typeof parsed.password === "string" && parsed.password.length > 0) {
+      localStorage.setItem(CREDENTIALS_KEY, JSON.stringify({ identifier: parsed.identifier }));
+    }
+    return { identifier: parsed.identifier };
   } catch {
     return null;
   }
 }
 
-export function saveRememberedLogin(identifier: string, password: string): void {
+export function saveRememberedLogin(identifier: string): void {
   if (!canUseStorage()) return;
-  localStorage.setItem(
-    CREDENTIALS_KEY,
-    JSON.stringify({ identifier, password } satisfies RememberedLogin)
-  );
+  localStorage.setItem(CREDENTIALS_KEY, JSON.stringify({ identifier } satisfies RememberedLogin));
 }
 
 export function clearRememberedLogin(): void {

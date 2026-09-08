@@ -147,7 +147,6 @@ export default function SopDetailPage({ params }: { params: Promise<{ id: string
             <h1 className="text-2xl font-bold tracking-tight">
               {sop.sopNumber} — {sop.title}
             </h1>
-            <p className="max-w-2xl text-muted-foreground">{sop.description}</p>
             <div className="flex flex-wrap items-center gap-2 pt-1">
               <StatusBadge status={sop.status} />
               <span className="font-mono text-xs text-muted-foreground">
@@ -367,7 +366,6 @@ export default function SopDetailPage({ params }: { params: Promise<{ id: string
               <CardContent className="space-y-3 text-sm">
                 <Meta label="Category" value={sop.category} />
                 <Meta label="Departments" value={deptNames || "—"} />
-                <Meta label="Tags" value={sop.tags.join(", ") || "—"} />
                 <Meta label="Effective date" value={formatDate(sop.effectiveDate || activeVersion.effectiveDate)} />
                 <Meta label="Review date" value={formatDate(sop.reviewDate || activeVersion.reviewDate)} />
                 <Meta

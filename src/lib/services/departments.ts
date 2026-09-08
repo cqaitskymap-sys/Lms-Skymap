@@ -44,11 +44,20 @@ function writeDemoDepartments(departments: Department[]) {
 async function authHeaders(): Promise<HeadersInit> {
   const user = auth.currentUser;
   if (!user) throw new Error("You must be signed in");
-  const token = await user.getIdToken(true);
+  const token = await user.getIdToken();
   return {
     Authorization: `Bearer ${token}`,
     "Content-Type": "application/json",
   };
+}
+
+let listInflight: Promise<Department[]> | null = null;
+let listCache: { at: number; data: Department[] } | null = null;
+const LIST_CACHE_MS = 15_000;
+
+function invalidateDepartmentListCache() {
+  listCache = null;
+  listInflight = null;
 }
 
 /** Sync fallback — empty outside demo; demo reads localStorage seed. */
@@ -64,19 +73,36 @@ export async function listDepartments(): Promise<Department[]> {
     return readDemoDepartments().sort((a, b) => a.name.localeCompare(b.name));
   }
 
-  try {
-    const res = await fetch("/api/departments", { headers: await authHeaders() });
-    const json = await res.json().catch(() => ({}));
-    if (res.ok && Array.isArray(json.departments)) {
-      return json.departments as Department[];
-    }
-  } catch {
-    /* fall through to client Firestore */
+  if (listCache && Date.now() - listCache.at < LIST_CACHE_MS) {
+    return listCache.data;
   }
+  if (listInflight) return listInflight;
 
-  const q = query(collection(db, COLLECTIONS.departments), orderBy("name"));
-  const snap = await getDocs(q);
-  return snap.docs.map((doc) => ({ id: doc.id, ...doc.data() } as Department));
+  listInflight = (async () => {
+    try {
+      const res = await fetch("/api/departments", { headers: await authHeaders() });
+      const json = await res.json().catch(() => ({}));
+      if (res.ok && Array.isArray(json.departments)) {
+        const data = json.departments as Department[];
+        listCache = { at: Date.now(), data };
+        return data;
+      }
+    } catch {
+      /* fall through to client Firestore */
+    }
+
+    const q = query(collection(db, COLLECTIONS.departments), orderBy("name"));
+    const snap = await getDocs(q);
+    const data = snap.docs.map((doc) => ({ id: doc.id, ...doc.data() } as Department));
+    listCache = { at: Date.now(), data };
+    return data;
+  })();
+
+  try {
+    return await listInflight;
+  } finally {
+    listInflight = null;
+  }
 }
 
 export async function seedPharmaDepartments(): Promise<{ added: number; total: number }> {
@@ -100,6 +126,7 @@ export async function seedPharmaDepartments(): Promise<{ added: number; total: n
   const json = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(json.error || "Failed to seed departments");
   notifyDepartmentsUpdated();
+  invalidateDepartmentListCache();
   return { added: json.added, total: json.total };
 }
 
@@ -140,6 +167,7 @@ export async function createDepartment(input: CreateDepartmentInput): Promise<De
       : "";
     throw new Error(details || json.error || "Failed to create department");
   }
+  invalidateDepartmentListCache();
   notifyDepartmentsUpdated();
   return json.department as Department;
 }
@@ -184,6 +212,7 @@ export async function updateDepartment(
   });
   const json = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(json.error || "Failed to update department");
+  invalidateDepartmentListCache();
   notifyDepartmentsUpdated();
   return json.department as Department;
 }
@@ -205,6 +234,7 @@ export async function deleteDepartment(id: string): Promise<void> {
   });
   const json = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(json.error || "Failed to delete department");
+  invalidateDepartmentListCache();
   notifyDepartmentsUpdated();
 }
 

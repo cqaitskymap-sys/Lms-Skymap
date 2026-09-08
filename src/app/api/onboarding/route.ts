@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
-import { verifyAuth, unauthorized, writeAuditLog } from "@/lib/rbac/middleware";
+import { verifyAuthDetailed, unauthorized, writeAuditLog } from "@/lib/rbac/middleware";
 import { adminDb } from "@/lib/firebase/admin";
 import { COLLECTIONS } from "@/lib/firebase/client";
 import { generateId } from "@/lib/utils";
@@ -15,8 +15,11 @@ import {
 
 /** List active company policies for first-login wizard */
 export async function GET(request: NextRequest) {
-  const auth = await verifyAuth(request);
-  if (!auth) return unauthorized();
+  const verified = await verifyAuthDetailed(request);
+  if (!verified.ok) {
+    const status = verified.reason === "admin_not_configured" ? 503 : 401;
+    return unauthorized(verified.message, status);
+  }
 
   const snap = await adminDb
     .collection(COLLECTIONS.companyPolicies)
@@ -46,8 +49,12 @@ export async function GET(request: NextRequest) {
 
 /** Complete a first-login onboarding step: profile | policies | finish */
 export async function POST(request: NextRequest) {
-  const auth = await verifyAuth(request);
-  if (!auth) return unauthorized();
+  const verified = await verifyAuthDetailed(request);
+  if (!verified.ok) {
+    const status = verified.reason === "admin_not_configured" ? 503 : 401;
+    return unauthorized(verified.message, status);
+  }
+  const auth = verified.auth;
 
   let raw: unknown;
   try {

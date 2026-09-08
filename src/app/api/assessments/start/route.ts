@@ -45,12 +45,8 @@ export async function POST(request: NextRequest) {
   }
 
   const profileEmployeeId = auth.profile.employeeId || auth.uid;
-  let employeeId = parsed.data.employeeId || profileEmployeeId;
-
-  // Employees may only start for themselves
-  if (auth.role === "employee") {
-    employeeId = profileEmployeeId;
-  }
+  // Always start as the signed-in user — staff preview uses their own profile.
+  const employeeId = profileEmployeeId;
 
   // Formal assigned takes always enforce maxAttempts. The Exams "Start" button for
   // admin/HR/QA is a preview/test path — those roles already burned attempts while

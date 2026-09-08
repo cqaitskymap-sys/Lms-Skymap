@@ -533,10 +533,34 @@ export async function getEmployeeAssignments(
   }
 }
 
+function normalizeJdNo(value: string): string {
+  return value.trim().toUpperCase();
+}
+
+async function assertUniqueJdNo(jdNo: string, excludeId?: string): Promise<void> {
+  const normalized = normalizeJdNo(jdNo);
+  if (!normalized) throw new Error("JD number required");
+
+  if (preferTrainingLocal()) {
+    const dup = readTrainingStore().jobDescriptions.some(
+      (j) => j.id !== excludeId && normalizeJdNo(j.jdNo || "") === normalized
+    );
+    if (dup) throw new Error(`JD number "${normalized}" already exists`);
+    return;
+  }
+
+  const dupSnap = await getDocs(
+    query(collection(db, COLLECTIONS.jobDescriptions), where("jdNo", "==", normalized), limit(1))
+  );
+  if (dupSnap.docs.some((d) => d.id !== excludeId)) {
+    throw new Error(`JD number "${normalized}" already exists`);
+  }
+}
+
 export async function createJobDescription(
   data: Omit<
     JobDescription,
-    "id" | "createdAt" | "updatedAt" | "createdBy" | "version" | "status"
+    "id" | "createdAt" | "updatedAt" | "createdBy" | "status"
   >,
   actorId: string
 ): Promise<JobDescription> {
@@ -547,12 +571,19 @@ export async function createJobDescription(
     throw new Error("This employee already has a Job Description — edit the existing record");
   }
 
+  const jdNo = normalizeJdNo(data.jdNo || "");
+  await assertUniqueJdNo(jdNo);
+
+  const version =
+    Number.isInteger(data.version) && data.version >= 0 ? data.version : 1;
+
   const id = generateId("jd");
   const now = nowISO();
   const jd: JobDescription = {
     ...data,
     id,
-    version: 1,
+    jdNo,
+    version,
     status: "draft",
     createdAt: now,
     updatedAt: now,
@@ -627,14 +658,22 @@ export async function listJobDescriptions(filters?: {
 
 export async function updateJobDescription(
   id: string,
-  updates: Partial<
-    Omit<JobDescription, "id" | "createdAt" | "createdBy" | "version">
-  >,
+  updates: Partial<Omit<JobDescription, "id" | "createdAt" | "createdBy">>,
   actorId: string
 ): Promise<JobDescription> {
   const now = nowISO();
   const { employeeId: ignoredEmployeeId, ...safeUpdates } = updates;
   void ignoredEmployeeId;
+  if (safeUpdates.jdNo !== undefined) {
+    const jdNo = normalizeJdNo(safeUpdates.jdNo);
+    await assertUniqueJdNo(jdNo, id);
+    safeUpdates.jdNo = jdNo;
+  }
+  if (safeUpdates.version !== undefined) {
+    if (!Number.isInteger(safeUpdates.version) || safeUpdates.version < 0) {
+      throw new Error("Revision no. must be a whole number");
+    }
+  }
   const localPayload = {
     ...safeUpdates,
     updatedAt: now,

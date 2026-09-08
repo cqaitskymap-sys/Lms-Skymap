@@ -90,7 +90,11 @@ export function useExamLeaderboard(examId: string | undefined) {
   const [loading, setLoading] = useState(false);
 
   const refresh = useCallback(async () => {
-    if (!examId) return;
+    if (!examId) {
+      setEntries([]);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
       setEntries(await getLeaderboard(examId));
@@ -117,7 +121,11 @@ export function useExamAnalytics(examId: string | undefined) {
   const [loading, setLoading] = useState(false);
 
   const refresh = useCallback(async () => {
-    if (!examId) return;
+    if (!examId) {
+      setAnalytics(null);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
       setAnalytics(await getExamAnalytics(examId));

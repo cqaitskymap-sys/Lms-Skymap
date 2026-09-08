@@ -52,6 +52,12 @@ function VerifyInner() {
           setQr(url);
         }
       }
+    } catch (err) {
+      setResult({
+        valid: false,
+        message:
+          err instanceof Error ? err.message : "Could not verify this certificate. Try again.",
+      });
     } finally {
       setLoading(false);
     }

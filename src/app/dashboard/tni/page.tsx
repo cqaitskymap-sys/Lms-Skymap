@@ -476,7 +476,7 @@ function TniPageInner() {
       return;
     }
     if (!needs.length || needs.some((n) => !n.topic.trim())) {
-      toast.error("Add at least one training need with a topic");
+      toast.error("Add at least one training need with a title");
       return;
     }
     const emp = employees.find((e) => e.id === employeeId);
@@ -723,7 +723,7 @@ function TniPageInner() {
                   </div>
                   <div className="grid gap-3 sm:grid-cols-2">
                     <div className="space-y-2">
-                      <Label>Topic</Label>
+                      <Label>Title</Label>
                       <Input
                         value={need.topic}
                         onChange={(e) =>
@@ -736,7 +736,7 @@ function TniPageInner() {
                       />
                     </div>
                     <div className="space-y-2">
-                      <Label>Related SOP</Label>
+                      <Label>SOP NO.</Label>
                       <Select
                         value={need.sopId || "__none"}
                         onValueChange={(v) =>
@@ -750,56 +750,17 @@ function TniPageInner() {
                         }
                       >
                         <SelectTrigger>
-                          <SelectValue placeholder="Select SOP" />
+                          <SelectValue placeholder="Select SOP no." />
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="__none">No SOP linked</SelectItem>
                           {sops.map((s) => (
                             <SelectItem key={s.id} value={s.id}>
-                              {s.sopNumber} — {s.title}
+                              {s.sopNumber}
                             </SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Priority</Label>
-                      <Select
-                        value={need.priority}
-                        onValueChange={(v) =>
-                          setNeeds((n) =>
-                            n.map((x) =>
-                              x.id === need.id
-                                ? { ...x, priority: v as NeedRow["priority"] }
-                                : x
-                            )
-                          )
-                        }
-                      >
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="low">Low</SelectItem>
-                          <SelectItem value="medium">Medium</SelectItem>
-                          <SelectItem value="high">High</SelectItem>
-                          <SelectItem value="critical">Critical</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2 sm:col-span-2">
-                      <Label>Rationale</Label>
-                      <Textarea
-                        rows={2}
-                        value={need.rationale}
-                        onChange={(e) =>
-                          setNeeds((n) =>
-                            n.map((x) =>
-                              x.id === need.id ? { ...x, rationale: e.target.value } : x
-                            )
-                          )
-                        }
-                      />
                     </div>
                   </div>
                 </div>

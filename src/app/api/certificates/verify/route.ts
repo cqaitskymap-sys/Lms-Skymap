@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
-import { adminDb } from "@/lib/firebase/admin";
+import { adminDb, isAdminConfigured } from "@/lib/firebase/admin";
 import { COLLECTIONS } from "@/lib/firebase/client";
 import type { Certificate, CertificateVerification } from "@/types";
 
@@ -17,11 +17,19 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const snap = await adminDb
-    .collection(COLLECTIONS.certificates)
-    .where("certificateNumber", "==", number)
-    .limit(1)
-    .get();
+  if (!isAdminConfigured()) {
+    return NextResponse.json(
+      { success: false, error: "Verification service is not configured." },
+      { status: 503 }
+    );
+  }
+
+  try {
+    const snap = await adminDb
+      .collection(COLLECTIONS.certificates)
+      .where("certificateNumber", "==", number)
+      .limit(1)
+      .get();
 
   if (snap.empty) {
     const verification: CertificateVerification = {
@@ -89,4 +97,11 @@ export async function GET(request: NextRequest) {
     verification,
     certificate: publicCert,
   });
+  } catch (err) {
+    console.error("[certificates/verify]", err);
+    return NextResponse.json(
+      { success: false, error: "Could not verify certificate. Try again later." },
+      { status: 500 }
+    );
+  }
 }

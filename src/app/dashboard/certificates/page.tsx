@@ -58,7 +58,7 @@ export default function CertificatesPage() {
           const { auth } = await import("@/lib/firebase/client");
           const user = auth.currentUser;
           if (user) {
-            const token = await user.getIdToken(true);
+            const token = await user.getIdToken();
             const res = await fetch("/api/certificates/sync", {
               method: "POST",
               headers: { Authorization: `Bearer ${token}` },

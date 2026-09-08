@@ -199,16 +199,37 @@ export async function precheckLogin(email: string): Promise<{
   remainingAttempts?: number;
   remainingMs?: number;
 }> {
-  const res = await fetch("/api/auth/precheck", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email }),
-  });
-  const data = await res.json();
-  if (!res.ok) {
-    return { allowed: true }; // fail open only if API down — Firebase still authenticates
+  try {
+    const res = await fetch("/api/auth/precheck", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email }),
+    });
+    const data = (await res.json().catch(() => ({}))) as {
+      allowed?: boolean;
+      message?: string;
+      error?: string;
+      remainingAttempts?: number;
+      remainingMs?: number;
+    };
+    if (typeof data.allowed === "boolean") {
+      return {
+        allowed: data.allowed,
+        message: data.message,
+        remainingAttempts: data.remainingAttempts,
+        remainingMs: data.remainingMs,
+      };
+    }
+    return {
+      allowed: false,
+      message: data.error || "Unable to verify account status. Try again in a moment.",
+    };
+  } catch {
+    return {
+      allowed: false,
+      message: "Unable to reach the login service. Check your connection and try again.",
+    };
   }
-  return data;
 }
 
 export async function reportLoginFailure(email: string): Promise<{
@@ -216,10 +237,23 @@ export async function reportLoginFailure(email: string): Promise<{
   lockedUntil?: string | null;
   remainingAttempts?: number;
 }> {
-  const res = await fetch("/api/auth/failure", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email }),
-  });
-  return res.json();
+  try {
+    const res = await fetch("/api/auth/failure", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email }),
+    });
+    const data = (await res.json().catch(() => ({}))) as {
+      message?: string;
+      error?: string;
+      lockedUntil?: string | null;
+      remainingAttempts?: number;
+    };
+    if (!res.ok) {
+      return { message: data.error || data.message };
+    }
+    return data;
+  } catch {
+    return { message: "Sign in failed." };
+  }
 }

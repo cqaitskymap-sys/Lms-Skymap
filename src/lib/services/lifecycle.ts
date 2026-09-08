@@ -224,7 +224,7 @@ export async function deleteEmployeeLifecycle(employeeId: string): Promise<void>
   if (!auth.currentUser) {
     throw new Error("You must be signed in to delete employees");
   }
-  const token = await auth.currentUser.getIdToken(true);
+  const token = await auth.currentUser.getIdToken();
   const res = await fetch(`/api/employees/${employeeId}`, {
     method: "DELETE",
     headers: { Authorization: `Bearer ${token}` },

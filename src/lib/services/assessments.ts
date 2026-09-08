@@ -51,7 +51,7 @@ async function preferLocalData(): Promise<boolean> {
 async function authHeaders(): Promise<HeadersInit> {
   const user = auth.currentUser;
   if (!user) throw new Error("Sign in required");
-  const token = await user.getIdToken(true);
+  const token = await user.getIdToken();
   return {
     Authorization: `Bearer ${token}`,
     "Content-Type": "application/json",

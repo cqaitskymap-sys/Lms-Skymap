@@ -72,11 +72,12 @@ function JdPageInner() {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [employeeId, setEmployeeId] = useState("");
+  const [jdNo, setJdNo] = useState("");
+  const [revisionNo, setRevisionNo] = useState("1");
   const [jobTitle, setJobTitle] = useState("");
   const [departmentId, setDepartmentId] = useState("");
   const [responsibilities, setResponsibilities] = useState("");
   const [qualifications, setQualifications] = useState("");
-  const [skills, setSkills] = useState("");
   const [experience, setExperience] = useState("");
   const [supersedesNo, setSupersedesNo] = useState("");
   const [records, setRecords] = useState<JobDescription[]>([]);
@@ -209,11 +210,12 @@ function JdPageInner() {
 
   function resetForm() {
     setEditingId(null);
+    setJdNo("");
+    setRevisionNo("1");
     setJobTitle("");
     setDepartmentId("");
     setResponsibilities("");
     setQualifications("");
-    setSkills("");
     setExperience("");
     setSupersedesNo("");
     setEffectiveFrom(new Date().toISOString().slice(0, 10));
@@ -235,7 +237,6 @@ function JdPageInner() {
         draft.responsibilities.map((r, i) => `${i + 1}. ${r}`).join("\n")
       );
       setQualifications(draft.qualifications.join("\n"));
-      setSkills(draft.skills.join(", "));
       toast.success(`JD draft filled (${model}) — review before saving`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "AI draft failed");
@@ -253,6 +254,15 @@ function JdPageInner() {
     }
     if (!jobTitle.trim()) {
       toast.error("Job title required");
+      return;
+    }
+    if (!jdNo.trim()) {
+      toast.error("JD no. required");
+      return;
+    }
+    const revision = Number(revisionNo);
+    if (!Number.isInteger(revision) || revision < 0) {
+      toast.error("Revision no. must be a whole number");
       return;
     }
     const parsedResp = responsibilities
@@ -282,23 +292,24 @@ function JdPageInner() {
       const payload = {
         employeeId,
         departmentId: dept,
+        jdNo: jdNo.trim(),
         title: jobTitle.trim(),
+        version: revision,
         responsibilities: parsedResp,
         qualifications: qualifications
           .split("\n")
           .map((l) => l.trim())
           .filter(Boolean),
-        skills: skills
-          .split(",")
-          .map((s) => s.trim())
-          .filter(Boolean),
+        skills: [] as string[],
         experience: experience.trim(),
         supersedesNo: supersedesNo.trim(),
         effectiveFrom: effectiveParsed.toISOString(),
       };
 
       if (editingId) {
-        await updateJobDescription(editingId, payload, profile.uid);
+        const { skills: _ignoredSkills, ...updatePayload } = payload;
+        void _ignoredSkills;
+        await updateJobDescription(editingId, updatePayload, profile.uid);
         toast.success("Job Description updated");
       } else {
         const jd = await createJobDescription(payload, profile.uid);
@@ -319,10 +330,11 @@ function JdPageInner() {
     setEditingId(record.id);
     setEmployeeId(record.employeeId);
     setDepartmentId(record.departmentId);
+    setJdNo(record.jdNo || "");
+    setRevisionNo(String(record.version ?? 1));
     setJobTitle(record.title);
     setResponsibilities(record.responsibilities.map((r, i) => `${i + 1}. ${r}`).join("\n"));
     setQualifications(record.qualifications.join("\n"));
-    setSkills(record.skills.join(", "));
     setExperience(record.experience || "");
     setSupersedesNo(record.supersedesNo || "");
     setEffectiveFrom(record.effectiveFrom.slice(0, 10));
@@ -368,14 +380,13 @@ function JdPageInner() {
     const qualification =
       record.qualifications.filter(Boolean).join(", ") || "—";
     const experienceText = record.experience?.trim() || "—";
-    const skillsText = record.skills.filter(Boolean).join(", ") || "—";
     const reportingTo =
       record.reportingTo || emp?.reportingManagerName || "—";
-    const revisionNo = String(record.version || 1);
+    const revisionNo = String(record.version ?? 1);
     const supersedes =
       record.supersedesNo?.trim() ||
       (record.version && record.version > 1 ? String(record.version - 1) : "—");
-    const jdNo = record.id.toUpperCase();
+    const jdNo = (record.jdNo || record.id).toUpperCase();
     const logoUrl = `${window.location.origin}/brand/skymap-logo.png`;
 
     const responsibilityRows = (record.responsibilities.length
@@ -484,10 +495,6 @@ function JdPageInner() {
                 <td class="value">${escapeHtml(qualification)}</td>
                 <td class="label">Experience</td>
                 <td class="value">${escapeHtml(experienceText)}</td>
-              </tr>
-              <tr>
-                <td class="label">Skills</td>
-                <td class="value" colspan="3">${escapeHtml(skillsText)}</td>
               </tr>
               <tr>
                 <td class="label">Revision Number</td>
@@ -624,6 +631,30 @@ function JdPageInner() {
                     </p>
                   )}
                 </div>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label htmlFor="jd-no">JD no.</Label>
+                    <Input
+                      id="jd-no"
+                      value={jdNo}
+                      onChange={(e) => setJdNo(e.target.value)}
+                      placeholder="JD-QA-001"
+                      required
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="revision-no">Revision no.</Label>
+                    <Input
+                      id="revision-no"
+                      type="number"
+                      min={0}
+                      step={1}
+                      value={revisionNo}
+                      onChange={(e) => setRevisionNo(e.target.value)}
+                      required
+                    />
+                  </div>
+                </div>
                 <div className="space-y-2">
                   <Label>Job title</Label>
                   <Input
@@ -670,14 +701,6 @@ function JdPageInner() {
                     value={experience}
                     onChange={(e) => setExperience(e.target.value)}
                     placeholder="e.g. 2 years in QA / Fresher"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Skills (comma separated)</Label>
-                  <Textarea
-                    rows={2}
-                    value={skills}
-                    onChange={(e) => setSkills(e.target.value)}
                   />
                 </div>
                 <div className="space-y-2">
@@ -752,7 +775,10 @@ function JdPageInner() {
                         <Badge variant={statusBadgeVariant(record.status)}>
                           {record.status}
                         </Badge>
-                        <span className="text-xs text-muted-foreground">v{record.version}</span>
+                        <span className="font-mono text-xs text-muted-foreground">
+                          {record.jdNo || record.id}
+                        </span>
+                        <span className="text-xs text-muted-foreground">Rev. {record.version}</span>
                       </div>
                       <p className="text-xs text-muted-foreground">
                         {emp

@@ -23,9 +23,7 @@ import type { UserRole } from "@/types";
 const schema = z.object({
   sopNumber: z.string().min(3, "SOP number required"),
   title: z.string().min(3, "Title required"),
-  description: z.string().min(10, "Description required"),
   category: z.string().min(2, "Category required"),
-  tags: z.string().optional(),
   changeSummary: z.string().optional(),
   effectiveDate: z.string().optional(),
   reviewDate: z.string().optional(),
@@ -80,13 +78,10 @@ export default function NewSopPage() {
         {
           sopNumber: data.sopNumber,
           title: data.title,
-          description: data.description,
+          description: "",
           category: data.category,
           departmentIds: depts,
-          tags: (data.tags || "")
-            .split(",")
-            .map((t) => t.trim())
-            .filter(Boolean),
+          tags: [],
           changeSummary: data.changeSummary || "Initial release",
           effectiveDate: data.effectiveDate
             ? new Date(data.effectiveDate).toISOString()
@@ -149,19 +144,6 @@ export default function NewSopPage() {
                 {errors.title && (
                   <p className="text-xs text-destructive">{errors.title.message}</p>
                 )}
-              </div>
-
-              <div className="space-y-2">
-                <Label>Description</Label>
-                <Textarea rows={3} {...register("description")} />
-                {errors.description && (
-                  <p className="text-xs text-destructive">{errors.description.message}</p>
-                )}
-              </div>
-
-              <div className="space-y-2">
-                <Label>Tags (comma-separated)</Label>
-                <Input placeholder="gmp, deviation, capa" {...register("tags")} />
               </div>
 
               <div className="space-y-2">

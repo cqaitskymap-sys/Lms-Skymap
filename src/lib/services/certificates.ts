@@ -172,7 +172,7 @@ export async function issueCertificateForAttempt(attemptId: string): Promise<Cer
   }
 
   try {
-    const token = await user.getIdToken(true);
+    const token = await user.getIdToken();
     const res = await fetch("/api/certificates/issue", {
       method: "POST",
       headers: {
@@ -436,7 +436,7 @@ export async function revokeCertificate(
   const { auth } = await import("@/lib/firebase/client");
   const user = auth.currentUser;
   if (!user) throw new Error("Sign in required");
-  const token = await user.getIdToken(true);
+  const token = await user.getIdToken();
   const res = await fetch("/api/certificates/revoke", {
     method: "POST",
     headers: {

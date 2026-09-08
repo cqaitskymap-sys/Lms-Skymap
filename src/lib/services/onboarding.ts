@@ -28,7 +28,7 @@ export interface OnboardResult {
 async function authHeaders(): Promise<HeadersInit> {
   const user = auth.currentUser;
   if (!user) throw new Error("You must be signed in");
-  const token = await user.getIdToken(/* forceRefresh */ true);
+  const token = await user.getIdToken();
   return {
     Authorization: `Bearer ${token}`,
     "Content-Type": "application/json",
@@ -207,69 +207,36 @@ export async function resolveLoginIdentifier(identifier: string): Promise<string
     throw new Error("In demo mode, sign in with a demo email (e.g. hr@pharma.local).");
   }
 
-  const code = trimmed.toUpperCase();
+  const res = await fetch("/api/auth/resolve-login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ identifier: trimmed }),
+  });
+  const json = (await res.json().catch(() => ({}))) as {
+    error?: string;
+    data?: { resolved?: boolean; email?: string };
+  };
 
-  // Prefer Admin API when available
-  try {
-    const res = await fetch("/api/auth/resolve-login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ identifier: trimmed }),
-    });
-    const json = await res.json();
-
-    if (res.status === 403) {
-      throw new Error(json.error || "Account is deactivated");
-    }
-
-    if (json?.data?.resolved && typeof json.data.email === "string" && json.data.email.includes("@")) {
-      return json.data.email.toLowerCase();
-    }
-
-    if (res.status === 404) {
-      throw new Error(json.error || "No account found for that username");
-    }
-    // resolved:false → fall through to client Firestore
-  } catch (err) {
-    if (err instanceof Error && !err.message.includes("fetch")) {
-      // Re-throw intentional errors; network errors fall through
-      if (
-        err.message.includes("deactivated") ||
-        err.message.includes("No account") ||
-        err.message.includes("demo mode")
-      ) {
-        throw err;
-      }
-    }
+  if (json?.data?.resolved && typeof json.data.email === "string" && json.data.email.includes("@")) {
+    return json.data.email.toLowerCase();
   }
 
-  // Client Firestore lookup (works without Admin SDK)
-  const { collection, query, where, getDocs, limit } = await import("firebase/firestore/lite");
-  const { db, COLLECTIONS } = await import("@/lib/firebase/client");
-
-  const userSnap = await getDocs(
-    query(collection(db, COLLECTIONS.users), where("username", "==", code), limit(1))
-  );
-  if (!userSnap.empty) {
-    const u = userSnap.docs[0]!.data();
-    if (u.isActive === false) throw new Error("Account is deactivated. Contact HR.");
-    if (typeof u.email === "string" && u.email.includes("@")) {
-      return u.email.toLowerCase();
-    }
+  if (res.status === 403) {
+    throw new Error(json.error || "Account is deactivated. Contact HR.");
   }
-
-  const empSnap = await getDocs(
-    query(collection(db, COLLECTIONS.employees), where("employeeCode", "==", code), limit(1))
-  );
-  if (!empSnap.empty) {
-    const e = empSnap.docs[0]!.data();
-    if (typeof e.email === "string" && e.email.includes("@")) {
-      return e.email.toLowerCase();
-    }
+  if (res.status === 404) {
+    throw new Error(json.error || "No account found for that username");
+  }
+  if (res.status === 503) {
+    throw new Error(
+      json.error ||
+        "Username login is temporarily unavailable. Sign in with your work email."
+    );
   }
 
   throw new Error(
-    "No account found for that username. Sign in with your work email, or ask HR to provision your Auth account."
+    json.error ||
+      "Could not resolve username. Sign in with your work email, or ask HR to provision your Auth account."
   );
 }
 

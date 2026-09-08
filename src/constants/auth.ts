@@ -4,7 +4,7 @@
 
 export const AUTH_COOKIE_NAME = "__session";
 
-/** Session cookie lifetime when "Remember password" is checked (5 days). */
+/** Session cookie lifetime when "Remember username" is checked (5 days). */
 export const SESSION_MAX_AGE_MS = 5 * 24 * 60 * 60 * 1000;
 
 /** Session cookie lifetime when "Remember password" is off (same browser session, max 12h). */

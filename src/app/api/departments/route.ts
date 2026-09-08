@@ -22,12 +22,20 @@ export async function GET(request: NextRequest) {
   const denied = requirePermission(verified.auth, "departments:read");
   if (denied) return denied;
 
-  const snap = await adminDb.collection(COLLECTIONS.departments).get();
-  const departments = snap.docs
-    .map((doc) => ({ id: doc.id, ...doc.data() } as Department))
-    .sort((a, b) => a.name.localeCompare(b.name));
+  try {
+    const snap = await adminDb.collection(COLLECTIONS.departments).get();
+    const departments = snap.docs
+      .map((doc) => ({ id: doc.id, ...doc.data() } as Department))
+      .sort((a, b) => a.name.localeCompare(b.name));
 
-  return NextResponse.json({ success: true, departments });
+    return NextResponse.json({ success: true, departments });
+  } catch (err) {
+    console.error("[departments] list failed:", err);
+    return NextResponse.json(
+      { success: false, error: "Could not load departments" },
+      { status: 500 }
+    );
+  }
 }
 
 export async function POST(request: NextRequest) {

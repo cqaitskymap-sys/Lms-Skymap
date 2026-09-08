@@ -10,7 +10,7 @@ function looksLikeEmail(value: string) {
 
 /**
  * Resolve login identifier (employee code / username / email) → Auth email.
- * When Admin SDK is unavailable, returns resolved:false so the client can look up via Firestore.
+ * Requires Admin SDK — unauthenticated Firestore lookups are blocked by security rules.
  */
 export async function POST(request: NextRequest) {
   let raw: unknown;
@@ -36,10 +36,14 @@ export async function POST(request: NextRequest) {
   }
 
   if (!isAdminConfigured()) {
-    return NextResponse.json({
-      success: true,
-      data: { email: null, resolved: false, code: identifier.toUpperCase() },
-    });
+    return NextResponse.json(
+      {
+        success: false,
+        error:
+          "Username login is unavailable until Firebase Admin is configured. Sign in with your work email.",
+      },
+      { status: 503 }
+    );
   }
 
   const code = identifier.toUpperCase();
@@ -99,10 +103,13 @@ export async function POST(request: NextRequest) {
     }
   } catch (err) {
     console.error("[resolve-login]", err);
-    return NextResponse.json({
-      success: true,
-      data: { email: null, resolved: false, code },
-    });
+    return NextResponse.json(
+      {
+        success: false,
+        error: "Could not resolve username. Try your work email or try again shortly.",
+      },
+      { status: 503 }
+    );
   }
 
   // Not found — do not invent a fake email (that breaks precheck / Auth)

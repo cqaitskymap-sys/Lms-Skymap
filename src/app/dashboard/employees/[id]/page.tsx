@@ -59,7 +59,9 @@ export default function EmployeeDetailPage({
   } | null>(null);
 
   useEffect(() => {
-    void listDepartments().then((list) => setDepartments(list.filter((d) => d.isActive)));
+    void listDepartments()
+      .then((list) => setDepartments(list.filter((d) => d.isActive)))
+      .catch(() => setDepartments([]));
   }, []);
 
   useEffect(() => {

@@ -148,7 +148,7 @@ export async function recordAuditEvent(params: {
   try {
     const user = auth.currentUser;
     if (!user) return null;
-    const token = await user.getIdToken(true);
+    const token = await user.getIdToken();
     const res = await fetch("/api/audit", {
       method: "POST",
       headers: {

@@ -147,7 +147,10 @@ service cloud.firestore {
     match /employees/{id} {
       allow read: if isActive() && (
         hasRole(['super_admin', 'hr', 'qa', 'department_head', 'trainer']) ||
-        (isSelfEmployee() && resource.data.id == userDoc().employeeId)
+        (isSelfEmployee() && (
+          id == userDoc().employeeId ||
+          ('id' in resource.data && resource.data.id == userDoc().employeeId)
+        ))
       );
       allow create, update: if hasRole(['super_admin', 'hr']);
       allow delete: if isSuperAdmin();
@@ -316,27 +319,20 @@ service cloud.firestore {
         resource.data.createdBy == request.auth.uid
       );
 
-      allow create: if isActive() && (
-        hasRole(['super_admin', 'hr', 'qa', 'department_head', 'trainer']) ||
-        request.resource.data.createdBy == request.auth.uid ||
-        request.resource.data.employeeId == request.auth.uid ||
-        (userDoc().keys().hasAny(['employeeId']) &&
-          request.resource.data.employeeId == userDoc().employeeId)
-      );
+      // Start/submit/score via Admin SDK APIs only — clients may autosave drafts.
+      allow create: if false;
 
-      allow update: if isActive() && (
-        hasRole(['super_admin', 'hr', 'qa', 'department_head', 'trainer']) ||
-        (
-          (
-            resource.data.createdBy == request.auth.uid ||
-            resource.data.employeeId == request.auth.uid ||
-            (userDoc().keys().hasAny(['employeeId']) &&
-              resource.data.employeeId == userDoc().employeeId)
-          )
-          && request.resource.data.diff(resource.data).affectedKeys()
-              .hasOnly(['answersDraft', 'lastSavedAt', 'updatedAt', 'updatedBy'])
+      allow update: if isActive()
+        && (
+          resource.data.createdBy == request.auth.uid ||
+          resource.data.employeeId == request.auth.uid ||
+          (userDoc().keys().hasAny(['employeeId']) &&
+            resource.data.employeeId == userDoc().employeeId)
         )
-      );
+        && resource.data.status == 'in_progress'
+        && request.resource.data.status == 'in_progress'
+        && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['answersDraft', 'lastSavedAt', 'updatedAt', 'updatedBy']);
 
       allow delete: if isSuperAdmin();
     }
@@ -362,7 +358,7 @@ service cloud.firestore {
         hasRole(['super_admin', 'hr', 'qa', 'department_head', 'trainer']) ||
         resource.data.employeeId == userDoc().employeeId
       );
-      allow create: if hasRole(['super_admin', 'qa', 'hr']);
+      allow create: if false; // Admin SDK issue API only
       allow update: if hasRole(['super_admin', 'qa']);
       allow delete: if isSuperAdmin();
     }

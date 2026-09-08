@@ -56,7 +56,6 @@ function LoginForm() {
     if (!saved) return;
     setRememberPassword(true);
     setValue("email", saved.identifier);
-    if (saved.password) setValue("password", saved.password);
   }, [setValue]);
 
   const deactivated = searchParams.get("error") === "deactivated";
@@ -66,7 +65,7 @@ function LoginForm() {
       const email = await resolveLoginIdentifier(data.email);
       const profile = await signIn(email, data.password, rememberPassword);
       if (rememberPassword) {
-        saveRememberedLogin(data.email.trim(), data.password);
+        saveRememberedLogin(data.email.trim());
       } else {
         clearRememberedLogin();
       }
@@ -219,7 +218,7 @@ function LoginForm() {
                     htmlFor="remember-password"
                     className="cursor-pointer text-sm font-normal leading-none"
                   >
-                    Remember password
+                    Remember username
                   </Label>
                 </div>
                 <Button type="submit" className="h-11 w-full" disabled={isSubmitting}>
