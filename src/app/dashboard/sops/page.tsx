@@ -75,7 +75,7 @@ export default function SopsPage() {
             </h1>
             <p className="text-muted-foreground">
               {isEmployee
-                ? "Only SOPs assigned to you via Training or listed in your TNI"
+                ? "SOPs from your TNI — acknowledge a SOP, then take its exam"
                 : "Controlled documents · versioning · acknowledgement · auto-retraining"}
             </p>
           </div>
@@ -183,7 +183,7 @@ export default function SopsPage() {
                         <div className="space-y-2">
                           <p>
                             {isEmployee
-                              ? "No SOPs assigned to you yet. They appear after Training assignment or TNI with linked SOPs."
+                              ? "No SOPs from your TNI yet. They appear after the department adds SOPs to your TNI."
                               : "No SOPs in the library yet."}
                           </p>
                           {!isEmployee && (

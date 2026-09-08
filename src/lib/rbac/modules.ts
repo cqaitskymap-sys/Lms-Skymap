@@ -112,13 +112,13 @@ export const APP_MODULE_DEFS: AppModuleDef[] = [
     id: "questions",
     title: "Question Bank",
     href: "/dashboard/questions",
-    roles: ["super_admin", "qa", "hr"],
+    roles: ["super_admin", "qa", "hr", "department_head"],
   },
   {
     id: "exams",
     title: "Assessments",
     href: "/dashboard/exams",
-    roles: ["super_admin", "qa", "hr", "employee"],
+    roles: ["super_admin", "qa", "hr", "department_head", "employee"],
   },
   {
     id: "certificates",

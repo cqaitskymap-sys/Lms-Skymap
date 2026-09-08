@@ -508,6 +508,12 @@ export default function TniPage() {
 
       if (editingId) {
         const tni = await updateTNI(editingId, payload, profile.uid);
+        try {
+          const { assignTniSopsToEmployee } = await import("@/lib/services/tni-learning");
+          await assignTniSopsToEmployee({ employeeId, actorId: profile.uid });
+        } catch (syncErr) {
+          console.error("[TNI] SOP assign after update failed:", syncErr);
+        }
         toast.success(`TNI updated (${tni.id})`);
       } else {
         const tni = await createTNI(payload, profile.uid);

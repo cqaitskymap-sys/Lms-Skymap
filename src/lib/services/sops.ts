@@ -10,6 +10,7 @@ import {
   getDocs,
   setDoc,
   updateDoc,
+  increment,
   deleteDoc,
   query,
   where,
@@ -224,6 +225,23 @@ export async function employeeCanAccessSop(
 ): Promise<boolean> {
   const intended = await getIntendedSopIdsForEmployee(employeeId);
   return intended.has(sopId);
+}
+
+export async function listAcknowledgementsForUser(
+  userId: string
+): Promise<SopAcknowledgement[]> {
+  if (!userId) return [];
+  if (isDemoMode()) {
+    return readSopStore().acknowledgements.filter((a) => a.userId === userId);
+  }
+  try {
+    const snap = await getDocs(
+      query(collection(db, COLLECTIONS.sopAcknowledgements), where("userId", "==", userId))
+    );
+    return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as SopAcknowledgement);
+  } catch {
+    return [];
+  }
 }
 
 /** Roles allowed to list all views / acks for a SOP (matches firestore.rules). */
@@ -956,15 +974,20 @@ export async function recordSopView(params: {
   try {
     // Admin/HR/QA users often have no employeeId — Firestore rejects undefined fields.
     await setDoc(doc(db, COLLECTIONS.sopViews, record.id), stripUndefined(record));
-    const vSnap = await getDoc(doc(db, COLLECTIONS.sopVersions, params.versionId));
-    const count = ((vSnap.data()?.viewCount as number) || 0) + 1;
-    await updateDoc(doc(db, COLLECTIONS.sopVersions, params.versionId), { viewCount: count });
-    const sSnap = await getDoc(doc(db, COLLECTIONS.sops, params.sopId));
+  } catch (err) {
+    console.error("[recordSopView] view write failed:", err);
+    return;
+  }
+
+  try {
+    await updateDoc(doc(db, COLLECTIONS.sopVersions, params.versionId), {
+      viewCount: increment(1),
+    });
     await updateDoc(doc(db, COLLECTIONS.sops, params.sopId), {
-      viewCount: ((sSnap.data()?.viewCount as number) || 0) + 1,
+      viewCount: increment(1),
     });
   } catch (err) {
-    console.error("[recordSopView]", err);
+    console.warn("[recordSopView] view recorded; counter update skipped:", err);
   }
 }
 
@@ -1022,14 +1045,16 @@ export async function acknowledgeSop(params: {
     }
 
     await setDoc(doc(db, COLLECTIONS.sopAcknowledgements, ack.id), stripUndefined(ack));
-    const vSnap = await getDoc(doc(db, COLLECTIONS.sopVersions, params.versionId));
-    await updateDoc(doc(db, COLLECTIONS.sopVersions, params.versionId), {
-      acknowledgementCount: ((vSnap.data()?.acknowledgementCount as number) || 0) + 1,
-    });
-    const sSnap = await getDoc(doc(db, COLLECTIONS.sops, params.sopId));
-    await updateDoc(doc(db, COLLECTIONS.sops, params.sopId), {
-      acknowledgementCount: ((sSnap.data()?.acknowledgementCount as number) || 0) + 1,
-    });
+    try {
+      await updateDoc(doc(db, COLLECTIONS.sopVersions, params.versionId), {
+        acknowledgementCount: increment(1),
+      });
+      await updateDoc(doc(db, COLLECTIONS.sops, params.sopId), {
+        acknowledgementCount: increment(1),
+      });
+    } catch (err) {
+      console.warn("[acknowledgeSop] ack saved; counter update skipped:", err);
+    }
   }
 
   await recordSopView({
@@ -1046,6 +1071,18 @@ export async function acknowledgeSop(params: {
     resourceId: params.sopId,
     description: `Digitally acknowledged SOP version ${params.versionNumber}`,
   });
+
+  try {
+    const { syncTniLearningAfterAck } = await import("@/lib/services/tni-learning");
+    await syncTniLearningAfterAck(params.actor);
+  } catch (err) {
+    console.error("[acknowledgeSop] TNI learning sync failed:", err);
+  }
+
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event("pharma-sops-updated"));
+    window.dispatchEvent(new Event("pharma-training-updated"));
+  }
 
   return ack;
 }

@@ -26,6 +26,78 @@ function stripUndefined<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
 
+async function assertTniSopsReadServer(params: {
+  employeeId: string;
+  userId: string;
+  examSopId?: string;
+}): Promise<StartAssessmentServerResult | null> {
+  try {
+    const [tniSnap, assignSnap, ackSnap] = await Promise.all([
+      adminDb
+        .collection(COLLECTIONS.tni)
+        .where("employeeId", "==", params.employeeId)
+        .get(),
+      adminDb
+        .collection(COLLECTIONS.trainingAssignments)
+        .where("employeeId", "==", params.employeeId)
+        .get(),
+      adminDb
+        .collection(COLLECTIONS.sopAcknowledgements)
+        .where("userId", "==", params.userId)
+        .get(),
+    ]);
+    const tniSopIds = new Set<string>();
+    for (const row of tniSnap.docs) {
+      const needs = (row.data().needs || []) as { sopId?: string }[];
+      for (const need of needs) {
+        if (need.sopId) tniSopIds.add(need.sopId);
+      }
+    }
+    const assignedSopIds = new Set(
+      assignSnap.docs
+        .map((d) => (d.data() as { sopId?: string }).sopId)
+        .filter((id): id is string => Boolean(id))
+    );
+    const acknowledged = new Set(
+      ackSnap.docs
+        .map((d) => (d.data() as { sopId?: string }).sopId)
+        .filter((id): id is string => Boolean(id))
+    );
+
+    if (params.examSopId) {
+      if (!tniSopIds.has(params.examSopId) && !assignedSopIds.has(params.examSopId)) {
+        return {
+          ok: false,
+          status: 400,
+          error: "This exam is not linked to your assigned SOPs",
+        };
+      }
+      if (!acknowledged.has(params.examSopId)) {
+        return {
+          ok: false,
+          status: 400,
+          error: "Read and acknowledge this SOP before taking the exam",
+        };
+      }
+      return null;
+    }
+
+    if (tniSopIds.size === 0) return null;
+    for (const sopId of tniSopIds) {
+      if (!acknowledged.has(sopId)) {
+        return {
+          ok: false,
+          status: 400,
+          error: "Read and acknowledge all TNI SOPs before taking the exam",
+        };
+      }
+    }
+  } catch (err) {
+    console.error("[assertTniSopsReadServer]", err);
+  }
+  return null;
+}
+
 async function loadExam(examId: string): Promise<Exam | null> {
   const snap = await adminDb.collection(COLLECTIONS.exams).doc(examId).get();
   if (!snap.exists) return null;
@@ -91,6 +163,13 @@ export async function startAssessmentServer(
     return { ok: false, status: 404, error: "Exam not found or inactive" };
   }
 
+  const tniBlock = await assertTniSopsReadServer({
+    employeeId: input.employeeId,
+    userId: input.actorId,
+    examSopId: exam.sopId,
+  });
+  if (tniBlock) return tniBlock;
+
   if (input.assignmentId) {
     const assignSnap = await adminDb
       .collection(COLLECTIONS.trainingAssignments)
@@ -103,15 +182,16 @@ export async function startAssessmentServer(
     if (assignment.employeeId !== input.employeeId) {
       return { ok: false, status: 403, error: "Assignment does not belong to this employee" };
     }
-    if (assignment.status !== "assessment_pending" && assignment.status !== "retraining") {
+    if (exam.sopId && assignment.sopId && exam.sopId !== assignment.sopId) {
+      return { ok: false, status: 400, error: "Exam is not linked to this SOP assignment" };
+    }
+    const blocked = ["passed", "failed", "expired"].includes(assignment.status);
+    if (blocked) {
       return {
         ok: false,
         status: 400,
         error: `Training assignment is not ready for assessment (status: ${assignment.status})`,
       };
-    }
-    if (exam.sopId && assignment.sopId && exam.sopId !== assignment.sopId) {
-      return { ok: false, status: 400, error: "Exam is not linked to this SOP assignment" };
     }
   }
 

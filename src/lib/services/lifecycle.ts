@@ -33,6 +33,7 @@ import {
   getProgressForStage,
   getStageDefinition,
   getStageIndex,
+  isPostTni,
   nextStage,
 } from "@/lib/lifecycle/stages";
 import { generateId, nowISO } from "@/lib/services/helpers";
@@ -629,24 +630,18 @@ export async function assignInductionLifecycle(
 ): Promise<Employee> {
   const { employee } = await getEmployeeLifecycle(employeeId);
   if (!employee) throw new Error("Employee not found");
-  if (!employee.verifiedAt) {
-    throw new Error("Complete HR verification before assigning induction modules");
+  if (!isPostTni(employee.lifecycleStage)) {
+    throw new Error(
+      "Complete Job Description and TNI before assigning induction modules"
+    );
   }
 
   const { assignInductionModules } = await import("@/lib/services/induction");
   await assignInductionModules(employeeId, moduleIds, actor.uid);
 
-  return advanceLifecycle({
-    employeeId,
-    toStage: "induction_assigned",
-    actor,
-    description: `Assigned ${moduleIds.length} induction module(s)`,
-    metadata: { moduleIds: moduleIds.join(",") },
-    employeePatch: {
-      status: "induction",
-      inductionStatus: "in_progress",
-    },
-  });
+  const { employee: updated } = await getEmployeeLifecycle(employeeId);
+  if (!updated) throw new Error("Employee not found");
+  return updated;
 }
 
 export async function completeInductionLifecycle(
@@ -657,22 +652,49 @@ export async function completeInductionLifecycle(
   const { employee } = await getEmployeeLifecycle(employeeId);
   if (!employee) throw new Error("Employee not found");
 
+  if (!employee.verifiedAt) {
+    throw new Error("Complete HR verification before induction");
+  }
+
   if (opts?.requireSignedPaper !== false && !employee.inductionSignedPaper?.downloadUrl) {
     throw new Error(
-      "Upload the signed induction paper (department heads signatures) before marking induction complete"
+      "Upload the signed induction PDF before marking induction complete"
     );
   }
 
-  const { assertEmployeeInductionComplete } = await import("@/lib/services/induction");
-  await assertEmployeeInductionComplete(employeeId);
+  if (getStageIndex(employee.lifecycleStage) >= getStageIndex("induction_completed")) {
+    return employee;
+  }
+
+  if (
+    employee.lifecycleStage === "hr_verification" ||
+    employee.lifecycleStage === "created"
+  ) {
+    await advanceLifecycle({
+      employeeId,
+      toStage: "induction_assigned",
+      actor,
+      description: "Signed induction PDF received",
+      metadata: employee.inductionSignedPaper
+        ? {
+            signedPaper: employee.inductionSignedPaper.fileName,
+            signedPaperUrl: employee.inductionSignedPaper.downloadUrl,
+          }
+        : undefined,
+      employeePatch: {
+        status: "induction",
+        inductionStatus: "in_progress",
+      },
+    });
+  }
 
   return advanceLifecycle({
     employeeId,
     toStage: "induction_completed",
     actor,
     description: employee.inductionSignedPaper
-      ? "Induction completed — signed paper uploaded by HR"
-      : "Induction completed and assessment passed",
+      ? "Induction completed — signed PDF uploaded by HR"
+      : "Induction completed",
     metadata: employee.inductionSignedPaper
       ? {
           signedPaper: employee.inductionSignedPaper.fileName,
@@ -692,6 +714,14 @@ export async function handoverLifecycle(
   departmentId: string,
   actor: LifecycleActor
 ): Promise<Employee> {
+  const { employee } = await getEmployeeLifecycle(employeeId);
+  if (!employee) throw new Error("Employee not found");
+  if (getStageIndex(employee.lifecycleStage) < getStageIndex("induction_completed")) {
+    throw new Error(
+      "Upload the signed induction PDF and complete induction before department handover"
+    );
+  }
+
   const { listDepartments } = await import("@/lib/services/departments");
   const departments = await listDepartments().catch(() => []);
   const department = departments.find((d) => d.id === departmentId);
@@ -722,6 +752,25 @@ export async function handoverLifecycle(
       status: "handed_over",
     },
   });
+}
+
+/** Signed PDF already on file — complete induction then hand over to a department. */
+export async function handoverAfterSignedInduction(
+  employeeId: string,
+  departmentId: string,
+  actor: LifecycleActor
+): Promise<Employee> {
+  const { employee } = await getEmployeeLifecycle(employeeId);
+  if (!employee) throw new Error("Employee not found");
+  if (!employee.inductionSignedPaper?.downloadUrl) {
+    throw new Error("Upload the signed induction PDF before department handover");
+  }
+
+  if (getStageIndex(employee.lifecycleStage) < getStageIndex("induction_completed")) {
+    await completeInductionLifecycle(employeeId, actor);
+  }
+
+  return handoverLifecycle(employeeId, departmentId, actor);
 }
 
 export async function createJdLifecycle(
@@ -797,7 +846,7 @@ export async function createTniLifecycle(
   }
 
   if (employee.lifecycleStage === "jd_created") {
-    return advanceLifecycle({
+    await advanceLifecycle({
       employeeId,
       toStage: "tni_created",
       actor,
@@ -805,9 +854,36 @@ export async function createTniLifecycle(
       metadata: { tniId },
       employeePatch: { tniId },
     });
+  } else {
+    await patchEmployee(employeeId, { tniId, updatedAt: nowISO(), updatedBy: actor.uid });
   }
 
-  await patchEmployee(employeeId, { tniId, updatedAt: nowISO(), updatedBy: actor.uid });
+  try {
+    const { assignTniSopsToEmployee } = await import("@/lib/services/tni-learning");
+    const assigned = await assignTniSopsToEmployee({
+      employeeId,
+      actorId: actor.uid,
+    });
+    if (assigned.length) {
+      const { employee: latest } = await getEmployeeLifecycle(employeeId);
+      if (
+        latest &&
+        getStageIndex(latest.lifecycleStage) < getStageIndex("sop_assigned") &&
+        getStageIndex(latest.lifecycleStage) >= getStageIndex("tni_created")
+      ) {
+        return advanceLifecycle({
+          employeeId,
+          toStage: "sop_assigned",
+          actor,
+          description: "TNI SOPs assigned — employee must read them before the exam",
+          metadata: { sopCount: String(assigned.length) },
+        });
+      }
+    }
+  } catch (err) {
+    console.error("[createTniLifecycle] TNI SOP assign failed:", err);
+  }
+
   const { employee: updated } = await getEmployeeLifecycle(employeeId);
   if (!updated) throw new Error("Employee not found");
   return updated;
@@ -864,7 +940,8 @@ export async function assignSopLifecycle(
   const { employee } = await getEmployeeLifecycle(employeeId);
   if (!employee) throw new Error("Employee not found");
 
-  const postTrainer = [
+  const postTni = [
+    "tni_created",
     "trainer_assigned",
     "sop_assigned",
     "training",
@@ -873,11 +950,14 @@ export async function assignSopLifecycle(
     "certified",
     "qualified",
   ];
-  if (!postTrainer.includes(employee.lifecycleStage)) {
-    throw new Error("Assign a trainer before assigning SOP training");
+  if (!postTni.includes(employee.lifecycleStage)) {
+    throw new Error("Complete TNI before assigning SOP training");
   }
 
-  if (employee.lifecycleStage === "trainer_assigned") {
+  if (
+    employee.lifecycleStage === "tni_created" ||
+    employee.lifecycleStage === "trainer_assigned"
+  ) {
     return advanceLifecycle({
       employeeId,
       toStage: "sop_assigned",
@@ -1008,14 +1088,12 @@ export async function advanceToNext(
     case "hr_verification":
       return verifyEmployee(employeeId, actor);
     case "induction_assigned": {
-      const { listInductionModules } = await import("@/lib/services/induction");
-      const catalog = await listInductionModules();
-      const moduleIds = catalog.filter((m) => m.isMandatory).map((m) => m.id);
-      if (!moduleIds.length && catalog.length) moduleIds.push(catalog[0].id);
-      if (!moduleIds.length) {
-        throw new Error("No induction modules in catalog — create modules first");
+      if (!employee.inductionSignedPaper?.downloadUrl) {
+        throw new Error(
+          "Upload the signed induction PDF on the Induction page before advancing"
+        );
       }
-      return assignInductionLifecycle(employeeId, moduleIds, actor);
+      return completeInductionLifecycle(employeeId, actor);
     }
     case "induction_completed":
       return completeInductionLifecycle(employeeId, actor);
@@ -1058,8 +1136,12 @@ export function lifecycleDashboardStats(employees: Employee[]) {
   return {
     total: employees.length,
     pendingVerification: employees.filter((e) => e.lifecycleStage === "hr_verification").length,
-    inductionInProgress: employees.filter((e) =>
-      ["induction_assigned"].includes(e.lifecycleStage)
+    inductionInProgress: employees.filter(
+      (e) =>
+        e.lifecycleStage === "induction_assigned" ||
+        (e.lifecycleStage === "hr_verification" &&
+          Boolean(e.verifiedAt) &&
+          !e.inductionSignedPaper?.downloadUrl)
     ).length,
     readyForHandover: employees.filter((e) => e.lifecycleStage === "induction_completed").length,
     inTraining: employees.filter((e) =>

@@ -58,9 +58,11 @@ export function useSopDirectory() {
     const onUpdate = () => void refresh();
     window.addEventListener("pharma-sops-updated", onUpdate);
     window.addEventListener("pharma-lifecycle-updated", onUpdate);
+    window.addEventListener("pharma-training-updated", onUpdate);
     return () => {
       window.removeEventListener("pharma-sops-updated", onUpdate);
       window.removeEventListener("pharma-lifecycle-updated", onUpdate);
+      window.removeEventListener("pharma-training-updated", onUpdate);
     };
   }, [refresh]);
 
@@ -92,7 +94,7 @@ export function useSopDetail(sopId: string | undefined) {
         const allowed = await employeeCanAccessSop(profile.employeeId, sopId);
         if (!allowed) {
           throw new Error(
-            "This SOP is not assigned to you. Only SOPs from your Training / TNI are visible."
+            "This SOP is not assigned to you. Only SOPs from your TNI are visible."
           );
         }
       }
@@ -122,9 +124,11 @@ export function useSopDetail(sopId: string | undefined) {
     const onUpdate = () => void refresh();
     window.addEventListener("pharma-sops-updated", onUpdate);
     window.addEventListener("pharma-lifecycle-updated", onUpdate);
+    window.addEventListener("pharma-training-updated", onUpdate);
     return () => {
       window.removeEventListener("pharma-sops-updated", onUpdate);
       window.removeEventListener("pharma-lifecycle-updated", onUpdate);
+      window.removeEventListener("pharma-training-updated", onUpdate);
     };
   }, [refresh]);
 

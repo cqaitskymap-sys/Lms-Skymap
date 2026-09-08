@@ -20,8 +20,12 @@ import {
   getExam,
   startAssessment,
   submitAssessment,
+  updateExamSopLink,
 } from "@/lib/services/assessments";
+import { listSopsDetailed } from "@/lib/services/sops";
 import { getEmployeeAssignments } from "@/lib/services/training";
+import { useMyTniLearning } from "@/hooks/use-tni-learning";
+import { TRAINING_UPDATED_EVENT } from "@/lib/training/demo-store";
 import { ExamTimer } from "@/components/exams/exam-timer";
 import { ExamProgressNav } from "@/components/exams/exam-progress-nav";
 import { QuestionRenderer } from "@/components/exams/question-renderer";
@@ -29,7 +33,7 @@ import { AnswerReview } from "@/components/exams/answer-review";
 import { ExamResultSummary } from "@/components/exams/exam-result-summary";
 import { LeaderboardTable } from "@/components/exams/leaderboard-table";
 import { AssessmentAnalyticsPanel } from "@/components/exams/assessment-analytics-panel";
-import { RequirePermission } from "@/components/auth/require-permission";
+import { RequirePermission, Can } from "@/components/auth/require-permission";
 import { AdminDeleteButton } from "@/components/auth/admin-delete-button";
 import { AiExamBlueprintDialog } from "@/components/ai/ai-exam-blueprint-dialog";
 import { CreateExamDialog } from "@/components/exams/create-exam-dialog";
@@ -38,7 +42,15 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import type { AssessmentAttempt, Exam, TrainingAssignment } from "@/types";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import type { AssessmentAttempt, Exam, SopDocument, TrainingAssignment } from "@/types";
 
 type Phase = "list" | "exam" | "result" | "review";
 
@@ -60,22 +72,53 @@ function ExamsPageInner() {
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
   const [selectedExamId, setSelectedExamId] = useState<string>("");
   const [pendingTraining, setPendingTraining] = useState<TrainingAssignment[]>([]);
+  const [myAssignments, setMyAssignments] = useState<TrainingAssignment[]>([]);
+  const [sops, setSops] = useState<SopDocument[]>([]);
+  const [linkExamId, setLinkExamId] = useState("");
+  const [linkSopId, setLinkSopId] = useState("");
   const submittingRef = useRef(false);
   const deepLinkStarted = useRef(false);
   const answersRef = useRef(answers);
   answersRef.current = answers;
 
   const isEmployee = profile?.role === "employee";
+  const { progress: tniLearning } = useMyTniLearning(
+    isEmployee ? profile?.employeeId : undefined,
+    isEmployee ? profile?.uid : undefined
+  );
 
-  useEffect(() => {
+  const loadAssignments = useCallback(() => {
     if (!profile?.employeeId) {
       setPendingTraining([]);
+      setMyAssignments([]);
       return;
     }
-    void getEmployeeAssignments(profile.employeeId).then((rows) =>
-      setPendingTraining(rows.filter((a) => a.status === "assessment_pending"))
-    );
-  }, [profile?.employeeId, phase]);
+    void getEmployeeAssignments(profile.employeeId).then((rows) => {
+      setMyAssignments(rows);
+      setPendingTraining(
+        rows.filter(
+          (a) => a.status === "assessment_pending" || a.status === "retraining"
+        )
+      );
+    });
+  }, [profile?.employeeId]);
+
+  useEffect(() => {
+    loadAssignments();
+    const onUpdate = () => loadAssignments();
+    window.addEventListener("pharma-sops-updated", onUpdate);
+    window.addEventListener(TRAINING_UPDATED_EVENT, onUpdate);
+    return () => {
+      window.removeEventListener("pharma-sops-updated", onUpdate);
+      window.removeEventListener(TRAINING_UPDATED_EVENT, onUpdate);
+    };
+  }, [profile?.employeeId, phase, loadAssignments]);
+
+  useEffect(() => {
+    void listSopsDetailed()
+      .then((rows) => setSops(rows.filter((s) => s.status !== "obsolete")))
+      .catch(() => setSops([]));
+  }, []);
 
   const { entries: leaderboard } = useExamLeaderboard(
     phase === "list" || phase === "result" ? selectedExamId : undefined
@@ -129,6 +172,65 @@ function ExamsPageInner() {
     },
     [profile, router, lockExam, unlockExam]
   );
+
+  const sopLabel = (sopId?: string) => {
+    if (!sopId) return "Not assigned to a SOP";
+    const sop = sops.find((s) => s.id === sopId);
+    return sop ? `${sop.sopNumber} · ${sop.title}` : sopId;
+  };
+
+  const intendedSopIds = useMemo(() => {
+    const ids = new Set(tniLearning.items.map((i) => i.sopId));
+    for (const a of myAssignments) {
+      if (a.sopId) ids.add(a.sopId);
+    }
+    return ids;
+  }, [tniLearning.items, myAssignments]);
+
+  const acknowledgedSopIds = useMemo(
+    () => new Set(tniLearning.acknowledgedSopIds),
+    [tniLearning.acknowledgedSopIds]
+  );
+
+  const visibleExams = useMemo(() => {
+    if (!isEmployee) return exams;
+    return exams.filter((e) => {
+      if (e.inductionModuleId) return true;
+      if (e.sopId) return intendedSopIds.has(e.sopId);
+      return tniLearning.items.length === 0;
+    });
+  }, [isEmployee, exams, intendedSopIds, tniLearning.items.length]);
+
+  const canStartExam = (e: Exam) => {
+    if (!isEmployee) return true;
+    if (!e.sopId) return tniLearning.items.length === 0 || tniLearning.allRead;
+    return intendedSopIds.has(e.sopId) && acknowledgedSopIds.has(e.sopId);
+  };
+
+  const assignmentForExam = (sopId?: string) =>
+    myAssignments.find(
+      (a) => a.sopId === sopId && a.status !== "passed" && a.status !== "failed"
+    );
+
+  const handleAssignExam = async () => {
+    if (!profile) return;
+    if (!linkExamId || !linkSopId) {
+      toast.error("Select an exam and a SOP");
+      return;
+    }
+    setBusy(true);
+    try {
+      await updateExamSopLink(linkExamId, linkSopId, profile.uid);
+      toast.success("Exam assigned to SOP. TNI employees with this SOP will get it after reading.");
+      setLinkExamId("");
+      setLinkSopId("");
+      await refreshExams();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not assign exam");
+    } finally {
+      setBusy(false);
+    }
+  };
 
   useEffect(() => {
     const examParam = searchParams.get("exam");
@@ -188,9 +290,14 @@ function ExamsPageInner() {
             : `Did not pass (${result.percentage}%)`
         );
       }
-      void getEmployeeAssignments(profile.employeeId || "").then((rows) =>
-        setPendingTraining(rows.filter((a) => a.status === "assessment_pending"))
-      );
+      void getEmployeeAssignments(profile.employeeId || "").then((rows) => {
+        setMyAssignments(rows);
+        setPendingTraining(
+          rows.filter(
+            (a) => a.status === "assessment_pending" || a.status === "retraining"
+          )
+        );
+      });
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Submit failed");
     } finally {
@@ -363,7 +470,9 @@ function ExamsPageInner() {
           <div>
             <h1 className="text-2xl font-bold tracking-tight">Assessment engine</h1>
             <p className="text-muted-foreground">
-              Timed exams · question banks · autosave · analytics · certificates
+              {isEmployee
+                ? "After you acknowledge a SOP, take the exam assigned to that SOP."
+                : "Assign an exam to a SOP. Employees take that exam after they acknowledge the SOP."}
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -384,12 +493,78 @@ function ExamsPageInner() {
           </TabsList>
 
           <TabsContent value="exams" className="space-y-4">
+            <Can permission="exams:write">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">Assign exam to SOP</CardTitle>
+                  <CardDescription>
+                    Pick an exam and the SOP it belongs to. Employees who have that SOP in their TNI
+                    can take the exam after they acknowledge that SOP.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="grid gap-4 sm:grid-cols-[1fr_1fr_auto]">
+                  <div className="space-y-2">
+                    <Label>Exam</Label>
+                    <Select value={linkExamId} onValueChange={setLinkExamId}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select exam" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {exams.map((e) => (
+                          <SelectItem key={e.id} value={e.id}>
+                            {e.title}
+                            {e.sopId ? ` · ${sopLabel(e.sopId)}` : ""}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>SOP</Label>
+                    <Select value={linkSopId} onValueChange={setLinkSopId}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select SOP" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {sops.map((s) => (
+                          <SelectItem key={s.id} value={s.id}>
+                            {s.sopNumber} · {s.title}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="flex items-end">
+                    <Button disabled={busy} onClick={() => void handleAssignExam()}>
+                      {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                      Assign
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            </Can>
+            {isEmployee && tniLearning.items.length > 0 && !tniLearning.allRead && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">Keep reading TNI SOPs</CardTitle>
+                  <CardDescription>
+                    {tniLearning.acknowledgedCount}/{tniLearning.items.length} SOPs acknowledged.
+                    Each SOP unlocks its own exam after you acknowledge it.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <Button size="sm" asChild>
+                    <Link href="/dashboard/sops">Open my SOPs</Link>
+                  </Button>
+                </CardContent>
+              </Card>
+            )}
             {pendingTraining.length > 0 && (
               <Card className="border-primary/30">
                 <CardHeader>
                   <CardTitle className="text-base">Pending training assessments</CardTitle>
                   <CardDescription>
-                    Complete these assessments after your training session
+                    Ready after you acknowledge the SOP linked to this exam
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-3">
@@ -431,19 +606,28 @@ function ExamsPageInner() {
               <div className="flex items-center gap-2 text-muted-foreground">
                 <Loader2 className="h-4 w-4 animate-spin" /> Loading exams…
               </div>
-            ) : exams.length === 0 ? (
+            ) : visibleExams.length === 0 ? (
               <Card>
                 <CardContent className="flex flex-col items-center gap-3 py-12 text-center">
-                  <p className="font-medium">No exams yet</p>
-                  <p className="text-sm text-muted-foreground">
-                    Create an exam manually or generate a blueprint with AI.
+                  <p className="font-medium">
+                    {isEmployee ? "No exam for your SOPs yet" : "No exams yet"}
                   </p>
-                  <CreateExamDialog banks={banks} onCreated={refreshExams} />
+                  <p className="text-sm text-muted-foreground">
+                    {isEmployee
+                      ? "Ask QA to link an exam to the SOP you acknowledged. Opening the PDF is not enough — use Sign & acknowledge."
+                      : "Create an exam manually or generate a blueprint with AI."}
+                  </p>
+                  {!isEmployee && (
+                    <CreateExamDialog banks={banks} onCreated={refreshExams} />
+                  )}
                 </CardContent>
               </Card>
             ) : (
               <div className="grid gap-4 md:grid-cols-2">
-                {exams.map((e) => (
+                {visibleExams.map((e) => {
+                  const unlocked = canStartExam(e);
+                  const assignmentId = assignmentForExam(e.sopId)?.id;
+                  return (
                   <Card
                     key={e.id}
                     className={
@@ -467,7 +651,9 @@ function ExamsPageInner() {
                         )}
                       </div>
                       <CardTitle className="text-base">{e.title}</CardTitle>
-                      <CardDescription>{e.description}</CardDescription>
+                      <CardDescription>
+                        {e.description || sopLabel(e.sopId)}
+                      </CardDescription>
                     </CardHeader>
                     <CardContent className="flex items-center justify-between gap-3">
                       <div className="text-sm text-muted-foreground">
@@ -500,10 +686,25 @@ function ExamsPageInner() {
                             Start
                           </Button>
                         )}
+                        {isEmployee && (
+                          <Button
+                            size="sm"
+                            disabled={busy || !unlocked}
+                            onClick={(ev) => {
+                              ev.stopPropagation();
+                              if (!unlocked) return;
+                              void startExam(e.id, null, assignmentId);
+                            }}
+                          >
+                            <Play className="mr-1.5 h-3.5 w-3.5" />
+                            {unlocked ? "Start" : "Read SOP first"}
+                          </Button>
+                        )}
                       </div>
                     </CardContent>
                   </Card>
-                ))}
+                  );
+                })}
               </div>
             )}
             <p className="text-xs text-muted-foreground">

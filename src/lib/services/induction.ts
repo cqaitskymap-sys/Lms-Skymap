@@ -1,5 +1,6 @@
 /**
- * Induction service — module catalog, HR assignment, study progress, assessment handoff.
+ * Induction service — signed PDF upload, module catalog (post JD/TNI),
+ * study progress, and assessment handoff.
  * Uses Firestore when available; falls back to local demo store.
  */
 
@@ -11,11 +12,12 @@ import {
   setDoc,
   updateDoc,
   deleteDoc,
+  deleteField,
   query,
   where,
   orderBy,
 } from "firebase/firestore/lite";
-import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
+import { ref, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
 import { db, storage, COLLECTIONS } from "@/lib/firebase/client";
 import type {
   InductionModule,
@@ -180,7 +182,7 @@ export async function uploadInductionDocument(
 }
 
 /**
- * HR uploads the physical induction paper after department heads have signed it.
+ * HR uploads the signed induction PDF (circulated for department-head signatures).
  * Stored on the employee record for audit / handover evidence.
  */
 export async function uploadSignedInductionPaper(params: {
@@ -191,9 +193,10 @@ export async function uploadSignedInductionPaper(params: {
   notes?: string;
 }): Promise<InductionSignedPaper> {
   const { employeeId, file, actorId, actorName, notes } = params;
-  const allowed = /^(application\/pdf|image\/(png|jpe?g|webp))$/i.test(file.type);
-  if (!allowed) {
-    throw new Error("Upload a PDF or image (PNG/JPG) of the signed induction paper");
+  const isPdf =
+    file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+  if (!isPdf) {
+    throw new Error("Upload the signed induction paper as a PDF");
   }
   if (file.size > 15 * 1024 * 1024) {
     throw new Error("File too large (max 15 MB)");
@@ -249,6 +252,7 @@ export async function uploadSignedInductionPaper(params: {
       updatedAt: nowISO(),
       updatedBy: actorId,
     });
+    notifyInductionUpdated();
     return paper;
   }
 
@@ -274,7 +278,99 @@ export async function uploadSignedInductionPaper(params: {
     }
   }
 
+  notifyInductionUpdated();
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event("pharma-lifecycle-updated"));
+  }
   return paper;
+}
+
+function notifyLifecycleUpdated() {
+  notifyInductionUpdated();
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event("pharma-lifecycle-updated"));
+  }
+}
+
+export async function deleteSignedInductionPaper(params: {
+  employeeId: string;
+  actorId: string;
+}): Promise<void> {
+  const { employeeId, actorId } = params;
+
+  let employee: Employee | null = null;
+  if (isDemoMode()) {
+    employee = readLifecycleStore().employees.find((e) => e.id === employeeId) ?? null;
+  } else {
+    const snap = await getDoc(doc(db, COLLECTIONS.employees, employeeId));
+    employee = snap.exists() ? ({ id: snap.id, ...snap.data() } as Employee) : null;
+    if (!employee) {
+      employee = readLifecycleStore().employees.find((e) => e.id === employeeId) ?? null;
+    }
+  }
+
+  if (!employee) throw new Error("Employee not found");
+  if (employee.handedOverAt) {
+    throw new Error("Cannot delete the signed PDF after department handover");
+  }
+  const paper = employee.inductionSignedPaper;
+  if (!paper) throw new Error("No signed induction PDF to delete");
+
+  if (paper.downloadUrl?.startsWith("blob:") && typeof URL !== "undefined") {
+    try {
+      URL.revokeObjectURL(paper.downloadUrl);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  if (
+    !isDemoMode() &&
+    paper.storagePath &&
+    !paper.storagePath.startsWith("demo/") &&
+    !paper.storagePath.startsWith("local/")
+  ) {
+    try {
+      await deleteObject(ref(storage, paper.storagePath));
+    } catch (err) {
+      console.error("[deleteSignedInductionPaper] storage failed:", err);
+    }
+  }
+
+  const { inductionSignedPaper: _removed, ...withoutPaper } = employee;
+
+  if (isDemoMode()) {
+    upsertDemoEmployee({
+      ...withoutPaper,
+      updatedAt: nowISO(),
+      updatedBy: actorId,
+    });
+    notifyLifecycleUpdated();
+    return;
+  }
+
+  try {
+    await updateDoc(doc(db, COLLECTIONS.employees, employeeId), {
+      inductionSignedPaper: deleteField(),
+      updatedAt: nowISO(),
+      updatedBy: actorId,
+    });
+  } catch {
+    const store = readLifecycleStore();
+    const emp = store.employees.find((e) => e.id === employeeId);
+    if (emp) {
+      const { inductionSignedPaper: _paper, ...cached } = emp;
+      upsertDemoEmployee({
+        ...cached,
+        updatedAt: nowISO(),
+        updatedBy: actorId,
+      });
+    } else {
+      throw new Error("Failed to delete signed induction PDF");
+    }
+  }
+
+  notifyLifecycleUpdated();
 }
 
 export async function assignInductionModules(
@@ -336,15 +432,6 @@ export async function assignInductionModules(
 
   if (moduleIds.length > 0 && assignments.length === 0) {
     throw new Error("Selected module(s) are already assigned to this employee");
-  }
-
-  if (!local) {
-    await updateDoc(doc(db, COLLECTIONS.employees, employeeId), {
-      status: "induction",
-      inductionStatus: "in_progress",
-      updatedAt: now,
-      updatedBy: actorId,
-    });
   }
 
   notifyInductionUpdated();

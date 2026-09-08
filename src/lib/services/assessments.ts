@@ -10,6 +10,7 @@ import {
   setDoc,
   updateDoc,
   deleteDoc,
+  deleteField,
   query,
   where,
   orderBy,
@@ -259,6 +260,15 @@ export async function startAssessment(params: {
 
   const exam = await loadExam(params.examId);
   if (!exam) throw new Error("Exam not found");
+
+  if (params.employeeId && params.actorId) {
+    const { assertTniSopsReadForExam } = await import("@/lib/services/tni-learning");
+    await assertTniSopsReadForExam({
+      employeeId: params.employeeId,
+      userId: params.actorId,
+      examSopId: exam.sopId,
+    });
+  }
 
   const prior = await listAttemptsForEmployee(params.examId, params.employeeId);
   const now = new Date();
@@ -1123,6 +1133,38 @@ export async function createExam(
 
   await setDoc(doc(db, COLLECTIONS.exams, id), stripUndefined(exam));
   return exam;
+}
+
+/** Link (or unlink) an exam to a SOP so TNI employees receive it after reading. */
+export async function updateExamSopLink(
+  examId: string,
+  sopId: string | null,
+  actorId: string
+): Promise<Exam> {
+  const existing = await loadExam(examId);
+  if (!existing) throw new Error("Exam not found");
+
+  const now = nowISO();
+  const next: Exam = {
+    ...existing,
+    sopId: sopId || undefined,
+    updatedAt: now,
+    updatedBy: actorId,
+  };
+
+  if (await preferLocalData()) {
+    const store = readAssessmentStore();
+    store.exams = store.exams.map((e) => (e.id === examId ? next : e));
+    writeAssessmentStore(store);
+    return next;
+  }
+
+  await updateDoc(doc(db, COLLECTIONS.exams, examId), {
+    ...(sopId ? { sopId } : { sopId: deleteField() }),
+    updatedAt: now,
+    updatedBy: actorId,
+  });
+  return next;
 }
 
 /** Super Admin only — delete an exam definition. */

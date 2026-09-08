@@ -3,20 +3,17 @@
 import { use, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
-import { KeyRound, Loader2, ArrowRight, FileUp, ExternalLink } from "lucide-react";
+import { KeyRound, Loader2, ArrowRight, FileUp, ExternalLink, Trash2 } from "lucide-react";
 import { listDepartments, departmentLabel } from "@/lib/services/departments";
 import { useAuth } from "@/contexts/auth-context";
 import { useEmployeeLifecycle } from "@/hooks/use-employee-lifecycle";
-import { useInductionCatalog } from "@/hooks/use-induction";
 import {
   advanceToNext,
-  assignInductionLifecycle,
-  completeInductionLifecycle,
-  handoverLifecycle,
+  handoverAfterSignedInduction,
   verifyEmployee,
   type LifecycleActor,
 } from "@/lib/services/lifecycle";
-import { uploadSignedInductionPaper } from "@/lib/services/induction";
+import { deleteSignedInductionPaper, uploadSignedInductionPaper } from "@/lib/services/induction";
 import { reissueCredentials, type OnboardingCredentials } from "@/lib/services/onboarding";
 import { CredentialsCard } from "@/components/onboarding/credentials-card";
 import { getStageDefinition, nextStage } from "@/lib/lifecycle/stages";
@@ -29,9 +26,7 @@ import { LifecycleActivityLog } from "@/components/lifecycle/lifecycle-activity-
 import { LifecycleApprovals } from "@/components/lifecycle/lifecycle-approvals";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -51,8 +46,6 @@ export default function EmployeeDetailPage({
   const { id } = use(params);
   const { profile, can } = useAuth();
   const { employee, events, approvals, loading, error, refresh } = useEmployeeLifecycle(id);
-  const { modules: inductionModules } = useInductionCatalog();
-  const [selectedModules, setSelectedModules] = useState<string[]>([]);
   const [handoverDept, setHandoverDept] = useState("");
   const [departments, setDepartments] = useState<Department[]>([]);
   const [assignedSops, setAssignedSops] = useState<(SopDocument & { version?: unknown })[]>([]);
@@ -139,12 +132,6 @@ export default function EmployeeDetailPage({
     } finally {
       setBusy(false);
     }
-  };
-
-  const toggleModule = (moduleId: string) => {
-    setSelectedModules((prev) =>
-      prev.includes(moduleId) ? prev.filter((m) => m !== moduleId) : [...prev, moduleId]
-    );
   };
 
   return (
@@ -435,61 +422,20 @@ export default function EmployeeDetailPage({
                 </Button>
               )}
 
-              {can("induction:assign") &&
-                (Boolean(employee.verifiedAt) || stage === "induction_assigned") && (
+              {can("induction:write") &&
+                Boolean(employee.verifiedAt) &&
+                ["hr_verification", "induction_assigned", "induction_completed"].includes(stage) && (
                   <div className="space-y-3 rounded-md border p-3">
                     <div className="flex flex-wrap items-center justify-between gap-2">
-                      <p className="text-sm font-medium">Assign induction modules</p>
+                      <p className="text-sm font-medium">Signed induction PDF</p>
                       <Button variant="link" size="sm" className="h-auto p-0" asChild>
                         <Link href={`/dashboard/induction?assign=${employee.id}`}>
                           Open in Induction
                         </Link>
                       </Button>
                     </div>
-                    {inductionModules.length === 0 ? (
-                      <p className="text-sm text-muted-foreground">
-                        No induction modules yet. Create them under Induction → Catalog → Create
-                        module.
-                      </p>
-                    ) : (
-                      inductionModules.map((m) => (
-                        <div key={m.id} className="flex items-start gap-3">
-                          <Checkbox
-                            id={m.id}
-                            checked={selectedModules.includes(m.id)}
-                            onCheckedChange={() => toggleModule(m.id)}
-                          />
-                          <Label htmlFor={m.id} className="font-normal">
-                            {m.title}
-                          </Label>
-                        </div>
-                      ))
-                    )}
-                    <Button
-                      disabled={busy || !selectedModules.length}
-                      onClick={() =>
-                        run(
-                          () => assignInductionLifecycle(employee.id, selectedModules, actor),
-                          "Induction assigned"
-                        )
-                      }
-                    >
-                      Assign modules
-                    </Button>
-                  </div>
-                )}
-
-              {can("induction:write") &&
-                (stage === "induction_assigned" ||
-                  stage === "hr_verification" ||
-                  Boolean(employee.verifiedAt)) &&
-                stage !== "qualified" && (
-                  <div className="space-y-3 rounded-md border p-3">
-                    <p className="text-sm font-medium">Signed induction paper (HR upload)</p>
                     <p className="text-xs text-muted-foreground">
-                      Circulate the physical induction form to department heads for signatures,
-                      then upload the signed PDF or scan here. Induction can be marked complete
-                      only after upload.
+                      Upload only the signed induction PDF, then hand over to the department.
                     </p>
                     {employee.inductionSignedPaper?.downloadUrl ? (
                       <div className="flex flex-wrap items-center gap-2 text-sm">
@@ -508,13 +454,13 @@ export default function EmployeeDetailPage({
                       </div>
                     ) : (
                       <p className="text-sm text-amber-700 dark:text-amber-400">
-                        Signed paper not uploaded yet.
+                        Signed PDF not uploaded yet.
                       </p>
                     )}
                     <Input
                       ref={paperInputRef}
                       type="file"
-                      accept="application/pdf,image/png,image/jpeg,image/jpg,image/webp"
+                      accept="application/pdf,.pdf"
                       className="hidden"
                       disabled={busy || uploadingPaper}
                       onChange={(e) => {
@@ -528,7 +474,7 @@ export default function EmployeeDetailPage({
                           actorName: actor.name,
                         })
                           .then(async () => {
-                            toast.success("Signed induction paper uploaded");
+                            toast.success("Signed induction PDF uploaded");
                             await refresh();
                           })
                           .catch((err) => {
@@ -542,49 +488,54 @@ export default function EmployeeDetailPage({
                           });
                       }}
                     />
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      disabled={busy || uploadingPaper}
-                      onClick={() => paperInputRef.current?.click()}
-                    >
-                      {uploadingPaper ? (
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      ) : (
-                        <FileUp className="mr-2 h-4 w-4" />
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={busy || uploadingPaper}
+                        onClick={() => paperInputRef.current?.click()}
+                      >
+                        {uploadingPaper ? (
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        ) : (
+                          <FileUp className="mr-2 h-4 w-4" />
+                        )}
+                        {employee.inductionSignedPaper
+                          ? "Replace signed PDF"
+                          : "Upload signed PDF"}
+                      </Button>
+                      {employee.inductionSignedPaper?.downloadUrl && !employee.handedOverAt && (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          disabled={busy || uploadingPaper}
+                          className="text-destructive hover:text-destructive"
+                          onClick={() =>
+                            run(
+                              () =>
+                                deleteSignedInductionPaper({
+                                  employeeId: employee.id,
+                                  actorId: actor.uid,
+                                }),
+                              "Signed induction PDF deleted"
+                            )
+                          }
+                        >
+                          <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+                          Delete
+                        </Button>
                       )}
-                      {employee.inductionSignedPaper
-                        ? "Replace signed paper"
-                        : "Upload signed paper"}
-                    </Button>
+                    </div>
                   </div>
                 )}
 
-              {can("induction:write") && stage === "induction_assigned" && (
-                <Button
-                  disabled={busy || !employee.inductionSignedPaper?.downloadUrl}
-                  variant="secondary"
-                  onClick={() =>
-                    run(
-                      () => completeInductionLifecycle(employee.id, actor),
-                      "Induction marked complete"
-                    )
-                  }
-                >
-                  {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                  Mark induction completed
-                </Button>
-              )}
-              {can("induction:write") &&
-                stage === "induction_assigned" &&
-                !employee.inductionSignedPaper?.downloadUrl && (
-                  <p className="text-xs text-muted-foreground">
-                    Upload the signed induction paper first to enable complete.
-                  </p>
-                )}
-
-              {can("employees:handover") && stage === "induction_completed" && (
+              {can("employees:handover") &&
+                Boolean(employee.verifiedAt) &&
+                Boolean(employee.inductionSignedPaper?.downloadUrl) &&
+                stage !== "qualified" &&
+                !employee.handedOverAt && (
                 <div className="space-y-3 rounded-md border p-3">
                   <p className="text-sm font-medium">Department handover</p>
                   <Select value={deptId} onValueChange={setHandoverDept}>
@@ -603,7 +554,7 @@ export default function EmployeeDetailPage({
                     disabled={busy || !deptId}
                     onClick={() =>
                       run(
-                        () => handoverLifecycle(employee.id, deptId, actor),
+                        () => handoverAfterSignedInduction(employee.id, deptId, actor),
                         "Handover completed"
                       )
                     }

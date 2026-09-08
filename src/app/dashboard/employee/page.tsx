@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { BookOpen, ClipboardCheck, GraduationCap } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
-import { useMyInduction } from "@/hooks/use-induction";
+import { useMyTniLearning } from "@/hooks/use-tni-learning";
 import { DashboardShell } from "@/components/dashboard/dashboard-shell";
 import { MotionItem } from "@/components/dashboard/motion";
 import { GlassCard, GlassCardHeader } from "@/components/dashboard/glass-card";
@@ -14,68 +14,87 @@ import { Progress } from "@/components/ui/progress";
 export default function EmployeeDashboardPage() {
   const { profile } = useAuth();
   const employeeId = profile?.employeeId;
-  const { items, loading, progress } = useMyInduction(employeeId);
+  const { progress, loading } = useMyTniLearning(employeeId, profile?.uid);
+  const percent =
+    progress.items.length === 0
+      ? 0
+      : Math.round((progress.acknowledgedCount / progress.items.length) * 100);
 
   return (
     <DashboardShell
       role="employee"
       title="My Learning"
-      subtitle="Induction, trainings, exams & certificates"
+      subtitle="Read your TNI SOPs, then take the exam"
     >
       <MotionItem>
         <GlassCard>
           <GlassCardHeader
-            title="Onboarding checklist"
-            description="Complete induction modules assigned by HR"
+            title="TNI SOPs"
+            description="SOPs added in your Training Need Identification — acknowledge a SOP, then take its exam"
             action={
               <Button size="sm" asChild>
-                <Link href="/dashboard/induction">Open induction</Link>
+                <Link href={progress.acknowledgedCount > 0 ? "/dashboard/exams" : "/dashboard/sops"}>
+                  {progress.acknowledgedCount > 0 ? "Take exam" : "Open SOPs"}
+                </Link>
               </Button>
             }
           />
           <div className="mb-4 space-y-2">
             <div className="flex items-center justify-between text-sm">
-              <span className="text-muted-foreground">Induction progress</span>
-              <span className="font-medium">{progress}%</span>
+              <span className="text-muted-foreground">SOPs read</span>
+              <span className="font-medium">
+                {progress.acknowledgedCount}/{progress.items.length || 0}
+              </span>
             </div>
-            <Progress value={progress} className="h-2" />
+            <Progress value={percent} className="h-2" />
           </div>
           {loading ? (
-            <p className="text-sm text-muted-foreground">Loading assignments…</p>
-          ) : items.length === 0 ? (
+            <p className="text-sm text-muted-foreground">Loading your SOPs…</p>
+          ) : !progress.hasTni ? (
             <div className="rounded-xl border border-dashed border-white/30 bg-white/20 p-6 text-sm text-muted-foreground dark:bg-white/5">
               <GraduationCap className="mb-2 h-8 w-8 opacity-60" />
-              No induction modules yet. HR will assign your onboarding modules after verification.
+              After induction handover, your department will create your Job Description and TNI.
+              SOPs added there will appear here.
+            </div>
+          ) : progress.items.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-white/30 bg-white/20 p-6 text-sm text-muted-foreground dark:bg-white/5">
+              <BookOpen className="mb-2 h-8 w-8 opacity-60" />
+              Your TNI has no SOPs yet. Department will add the SOPs you need to read.
             </div>
           ) : (
             <div className="space-y-3">
-              {items.map((item) => (
+              {progress.items.map((item) => (
                 <div
-                  key={item.assignment.id}
+                  key={item.sopId}
                   className="flex flex-col gap-3 rounded-xl border border-white/20 bg-white/30 p-4 sm:flex-row sm:items-center sm:justify-between dark:bg-white/5"
                 >
-                  <div className="min-w-0 space-y-2">
-                    <p className="font-medium">{item.module.title}</p>
+                  <div className="min-w-0 space-y-1">
+                    <p className="font-medium">{item.title}</p>
                     <div className="flex flex-wrap items-center gap-2">
-                      <StatusBadge status={item.assignment.status} />
-                      <span className="text-xs text-muted-foreground">
-                        {item.assignment.progressPercent ?? 0}% complete
+                      <span className="font-mono text-xs text-muted-foreground">
+                        {item.sopNumber}
                       </span>
+                      <StatusBadge
+                        status={item.acknowledged ? "passed" : "in_progress"}
+                      />
                     </div>
-                    <Progress
-                      value={item.assignment.progressPercent ?? 0}
-                      className="h-1.5 w-full max-w-xs"
-                    />
                   </div>
                   <Button size="sm" asChild>
-                    <Link href="/dashboard/induction">
-                      {item.assignment.status === "assessment_pending"
-                        ? "Take assessment"
-                        : "Continue"}
+                    <Link href={`/dashboard/sops/${item.sopId}`}>
+                      {item.acknowledged ? "Review" : "Read SOP"}
                     </Link>
                   </Button>
                 </div>
               ))}
+              {progress.allRead ? (
+                <p className="text-sm font-medium text-emerald-700 dark:text-emerald-400">
+                  All TNI SOPs acknowledged. You can take the exams now.
+                </p>
+              ) : progress.acknowledgedCount > 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  Acknowledged SOPs have their exams unlocked. Finish the rest when you can.
+                </p>
+              ) : null}
             </div>
           )}
         </GlassCard>
@@ -87,10 +106,10 @@ export default function EmployeeDashboardPage() {
             <div className="flex items-start gap-3 p-1">
               <BookOpen className="mt-0.5 h-5 w-5 text-cyan-700" />
               <div>
-                <p className="font-medium">Training</p>
-                <p className="text-sm text-muted-foreground">SOP assignments after handover</p>
+                <p className="font-medium">SOPs</p>
+                <p className="text-sm text-muted-foreground">Read every TNI SOP</p>
                 <Button size="sm" variant="link" className="px-0" asChild>
-                  <Link href="/dashboard/training">View training</Link>
+                  <Link href="/dashboard/sops">Open SOPs</Link>
                 </Button>
               </div>
             </div>
@@ -101,8 +120,8 @@ export default function EmployeeDashboardPage() {
             <div className="flex items-start gap-3 p-1">
               <ClipboardCheck className="mt-0.5 h-5 w-5 text-cyan-700" />
               <div>
-                <p className="font-medium">Assessments</p>
-                <p className="text-sm text-muted-foreground">Exams linked to your modules</p>
+                <p className="font-medium">Exam</p>
+                <p className="text-sm text-muted-foreground">Unlocks after you acknowledge the SOP</p>
                 <Button size="sm" variant="link" className="px-0" asChild>
                   <Link href="/dashboard/exams">Open exams</Link>
                 </Button>
@@ -116,7 +135,7 @@ export default function EmployeeDashboardPage() {
               <GraduationCap className="mt-0.5 h-5 w-5 text-cyan-700" />
               <div>
                 <p className="font-medium">Certificates</p>
-                <p className="text-sm text-muted-foreground">Issued after you pass assessments</p>
+                <p className="text-sm text-muted-foreground">Issued after you pass the exam</p>
                 <Button size="sm" variant="link" className="px-0" asChild>
                   <Link href="/dashboard/certificates">My certificates</Link>
                 </Button>

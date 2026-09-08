@@ -1,10 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Loader2, Plus } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
 import { createExam, createQuestionBank } from "@/lib/services/assessments";
+import { listSopsDetailed } from "@/lib/services/sops";
 import { Can } from "@/components/auth/require-permission";
 import { Button } from "@/components/ui/button";
 import {
@@ -25,7 +26,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import type { QuestionBank } from "@/types";
+import type { QuestionBank, SopDocument } from "@/types";
 
 interface Props {
   banks: QuestionBank[];
@@ -37,16 +38,29 @@ export function CreateExamDialog({ banks, onCreated }: Props) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [title, setTitle] = useState("");
+  const [sopId, setSopId] = useState("");
+  const [sops, setSops] = useState<SopDocument[]>([]);
   const [bankId, setBankId] = useState("");
   const [newBankName, setNewBankName] = useState("");
   const [questionCount, setQuestionCount] = useState(10);
   const [durationMinutes, setDurationMinutes] = useState(30);
   const [passPercentage, setPassPercentage] = useState(80);
 
+  useEffect(() => {
+    if (!open) return;
+    void listSopsDetailed()
+      .then((rows) => setSops(rows.filter((s) => s.status !== "obsolete")))
+      .catch(() => setSops([]));
+  }, [open]);
+
   const handleCreate = async () => {
     if (!profile) return;
     if (!title.trim()) {
       toast.error("Exam title required");
+      return;
+    }
+    if (!sopId) {
+      toast.error("Select the SOP this exam is for — that assigns it to TNI employees");
       return;
     }
     if (questionCount < 1) {
@@ -71,7 +85,7 @@ export function CreateExamDialog({ banks, onCreated }: Props) {
           return;
         }
         const bank = await createQuestionBank(
-          { name: newBankName.trim(), description: `Bank for ${title.trim()}` },
+          { name: newBankName.trim(), description: `Bank for ${title.trim()}`, sopId },
           profile.uid
         );
         resolvedBankId = bank.id;
@@ -82,6 +96,7 @@ export function CreateExamDialog({ banks, onCreated }: Props) {
           title: title.trim(),
           description: "",
           bankId: resolvedBankId,
+          sopId,
           questionCount,
           durationMinutes,
           passPercentage,
@@ -101,9 +116,12 @@ export function CreateExamDialog({ banks, onCreated }: Props) {
         },
         profile.uid
       );
-      toast.success("Exam created — add questions via Question Bank / AI");
+      toast.success(
+        "Exam assigned to SOP — employees with this SOP in TNI can take it after acknowledging that SOP"
+      );
       setOpen(false);
       setTitle("");
+      setSopId("");
       setBankId("");
       setNewBankName("");
       onCreated();
@@ -124,9 +142,10 @@ export function CreateExamDialog({ banks, onCreated }: Props) {
         </DialogTrigger>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Create assessment</DialogTitle>
+            <DialogTitle>Create & assign exam</DialogTitle>
             <DialogDescription>
-              Manual exam setup without AI. Add questions to the bank afterward.
+              Link the exam to a SOP. Anyone whose TNI includes that SOP gets this exam after they
+              acknowledge that SOP.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-2">
@@ -137,6 +156,21 @@ export function CreateExamDialog({ banks, onCreated }: Props) {
                 onChange={(e) => setTitle(e.target.value)}
                 placeholder="GMP basics assessment"
               />
+            </div>
+            <div className="space-y-2">
+              <Label>Assign to SOP</Label>
+              <Select value={sopId} onValueChange={setSopId}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select SOP" />
+                </SelectTrigger>
+                <SelectContent>
+                  {sops.map((s) => (
+                    <SelectItem key={s.id} value={s.id}>
+                      {s.sopNumber} · {s.title}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div className="space-y-2">
               <Label>Question bank</Label>
@@ -201,7 +235,7 @@ export function CreateExamDialog({ banks, onCreated }: Props) {
           <DialogFooter>
             <Button disabled={busy} onClick={() => void handleCreate()}>
               {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Create
+              Create & assign
             </Button>
           </DialogFooter>
         </DialogContent>

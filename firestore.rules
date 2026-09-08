@@ -42,6 +42,28 @@ service cloud.firestore {
       return request.resource.data.diff(resource.data).affectedKeys().hasOnly(fields);
     }
 
+    function currentNum(field) {
+      return field in resource.data && resource.data[field] is number
+        ? resource.data[field]
+        : 0;
+    }
+
+    // JS clients often store whole numbers as doubles; increment() is a number either way.
+    function isIncrement(field) {
+      return request.resource.data[field] is number
+        && request.resource.data[field] == currentNum(field) + 1;
+    }
+
+    // Any active user may bump SOP read/ack counters, but cannot change SOP content.
+    // Transform-only writes (FieldValue.increment) can report empty affectedKeys.
+    function isSopCounterBump() {
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+      return isActive()
+        && changed.hasOnly(['viewCount', 'acknowledgementCount'])
+        && (!changed.hasAny(['viewCount']) || isIncrement('viewCount'))
+        && (!changed.hasAny(['acknowledgementCount']) || isIncrement('acknowledgementCount'));
+    }
+
     // ─── Auth / RBAC config ───────────────────────────────────────────
     match /users/{userId} {
       allow read: if isSignedIn() && (
@@ -175,13 +197,15 @@ service cloud.firestore {
     // ─── SOPs ─────────────────────────────────────────────────────────
     match /sops/{id} {
       allow read: if isActive();
-      allow create, update: if hasRole(['super_admin', 'qa']);
+      allow create: if hasRole(['super_admin', 'qa']);
+      allow update: if hasRole(['super_admin', 'qa']) || isSopCounterBump();
       allow delete: if isSuperAdmin();
     }
 
     match /sop_versions/{id} {
       allow read: if isActive();
-      allow create, update: if hasRole(['super_admin', 'qa']);
+      allow create: if hasRole(['super_admin', 'qa']);
+      allow update: if hasRole(['super_admin', 'qa']) || isSopCounterBump();
       allow delete: if isSuperAdmin();
     }
 
@@ -232,7 +256,16 @@ service cloud.firestore {
         resource.data.employeeId == userDoc().employeeId
       );
       allow create: if hasRole(['super_admin', 'department_head']);
-      allow update: if hasRole(['super_admin', 'department_head', 'trainer', 'qa']);
+      allow update: if hasRole(['super_admin', 'department_head', 'trainer', 'qa'])
+        || (
+          isActive()
+          && userDoc().keys().hasAny(['employeeId'])
+          && resource.data.employeeId == userDoc().employeeId
+          && onlyUpdating(['status', 'startedAt', 'trainingCompletedAt', 'updatedAt', 'updatedBy'])
+          && request.resource.data.status in [
+            'assigned', 'in_progress', 'training_completed', 'assessment_pending'
+          ]
+        );
       allow delete: if isSuperAdmin();
     }
 
@@ -248,7 +281,7 @@ service cloud.firestore {
     // ─── Assessments ──────────────────────────────────────────────────
     match /question_banks/{id} {
       allow read: if isActive();
-      allow create, update: if hasRole(['super_admin', 'qa', 'hr']);
+      allow create, update: if hasRole(['super_admin', 'qa', 'hr', 'department_head']);
       allow delete: if isSuperAdmin();
     }
 
@@ -256,13 +289,13 @@ service cloud.firestore {
       // Contains answer keys. Prefer Admin SDK for exam assembly.
       // Client startAssessment still reads banks for employees until a start API exists.
       allow read: if isActive();
-      allow create, update: if hasRole(['super_admin', 'qa', 'hr']);
+      allow create, update: if hasRole(['super_admin', 'qa', 'hr', 'department_head']);
       allow delete: if isSuperAdmin();
     }
 
     match /exams/{id} {
       allow read: if isActive();
-      allow create, update: if hasRole(['super_admin', 'qa', 'hr']);
+      allow create, update: if hasRole(['super_admin', 'qa', 'hr', 'department_head']);
       allow delete: if isSuperAdmin();
     }
 

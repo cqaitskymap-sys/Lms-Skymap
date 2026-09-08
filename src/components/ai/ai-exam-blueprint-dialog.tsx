@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Loader2, Sparkles } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
@@ -11,6 +11,7 @@ import {
   type ExamBlueprint,
 } from "@/lib/services/ai";
 import { createExam, createQuestion } from "@/lib/services/assessments";
+import { listSopsDetailed } from "@/lib/services/sops";
 import type { QuestionBank } from "@/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -49,12 +50,27 @@ export function AiExamBlueprintDialog({ banks, onSaved }: Props) {
     "general"
   );
   const [bankId, setBankId] = useState("");
+  const [sopId, setSopId] = useState("");
+  const [sops, setSops] = useState<{ id: string; sopNumber: string; title: string }[]>([]);
   const [alsoGenerateQuestions, setAlsoGenerateQuestions] = useState(true);
   const [busy, setBusy] = useState(false);
   const [saving, setSaving] = useState(false);
   const [blueprint, setBlueprint] = useState<ExamBlueprint | null>(null);
 
   const activeBanks = useMemo(() => banks.filter((b) => b.isActive), [banks]);
+
+  useEffect(() => {
+    if (!open) return;
+    void listSopsDetailed()
+      .then((rows) =>
+        setSops(
+          rows
+            .filter((s) => s.status !== "obsolete")
+            .map((s) => ({ id: s.id, sopNumber: s.sopNumber, title: s.title }))
+        )
+      )
+      .catch(() => setSops([]));
+  }, [open]);
 
   async function handleGenerate() {
     if (!topic.trim()) {
@@ -83,6 +99,10 @@ export function AiExamBlueprintDialog({ banks, onSaved }: Props) {
     if (!profile || !blueprint) return;
     if (!bankId) {
       toast.error("Select a question bank");
+      return;
+    }
+    if (!sopId) {
+      toast.error("Select the SOP this exam is for — that assigns it to TNI employees");
       return;
     }
     setSaving(true);
@@ -123,6 +143,7 @@ export function AiExamBlueprintDialog({ banks, onSaved }: Props) {
           title: blueprint.title,
           description: blueprint.description,
           bankId,
+          sopId,
           questionCount: blueprint.questionCount,
           durationMinutes: blueprint.durationMinutes,
           passPercentage: blueprint.passPercentage,
@@ -144,7 +165,7 @@ export function AiExamBlueprintDialog({ banks, onSaved }: Props) {
         profile.uid
       );
 
-      toast.success("Exam created from AI blueprint");
+      toast.success("Exam assigned to SOP from AI blueprint");
       setOpen(false);
       setBlueprint(null);
       setTopic("");
@@ -209,6 +230,21 @@ export function AiExamBlueprintDialog({ banks, onSaved }: Props) {
                     <SelectItem value="general">General</SelectItem>
                     <SelectItem value="induction">Induction</SelectItem>
                     <SelectItem value="sop_retrain">SOP retrain</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label>Assign to SOP</Label>
+                <Select value={sopId} onValueChange={setSopId}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select SOP" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {sops.map((s) => (
+                      <SelectItem key={s.id} value={s.id}>
+                        {s.sopNumber} · {s.title}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>

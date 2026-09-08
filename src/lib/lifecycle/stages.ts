@@ -34,8 +34,8 @@ export const LIFECYCLE_STAGES: StageDefinition[] = [
   {
     stage: "induction_assigned",
     order: 2,
-    label: "Induction Assigned",
-    description: "Onboarding modules assigned",
+    label: "Induction Paper",
+    description: "HR uploads the signed induction PDF",
     employeeStatus: "induction",
     progress: 16,
     actorRoles: ["hr", "super_admin"],
@@ -44,10 +44,10 @@ export const LIFECYCLE_STAGES: StageDefinition[] = [
     stage: "induction_completed",
     order: 3,
     label: "Induction Completed",
-    description: "Induction modules and assessment passed",
+    description: "Signed induction PDF on file — ready for department handover",
     employeeStatus: "induction_complete",
     progress: 28,
-    actorRoles: ["hr", "super_admin", "employee"],
+    actorRoles: ["hr", "super_admin"],
   },
   {
     stage: "department_handover",
@@ -166,6 +166,22 @@ export function nextStage(stage: LifecycleStage): LifecycleStage | null {
   const idx = getStageIndex(stage);
   if (idx < 0 || idx >= STAGE_ORDER.length - 1) return null;
   return STAGE_ORDER[idx + 1]!;
+}
+
+/** JD created and TNI recorded — catalog / assign / tracking unlocks after this. */
+export const POST_TNI_STAGES: LifecycleStage[] = [
+  "tni_created",
+  "trainer_assigned",
+  "sop_assigned",
+  "training",
+  "exam",
+  "passed",
+  "certified",
+  "qualified",
+];
+
+export function isPostTni(stage: LifecycleStage): boolean {
+  return getStageIndex(stage) >= getStageIndex("tni_created");
 }
 
 export function stageStatus(
