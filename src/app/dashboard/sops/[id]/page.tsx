@@ -22,6 +22,9 @@ import {
   submitSopForReview,
   type SopActor,
 } from "@/lib/services/sops";
+import { useSopReadingSession } from "@/hooks/use-sop-reading";
+import { SopReadingBanner } from "@/components/sops/sop-reading-banner";
+import { formatReadingClock } from "@/lib/sops/reading";
 import { RequirePermission, Can } from "@/components/auth/require-permission";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { SopMediaPreview, SopFileDropzone, SopLoading, ViewerBadge } from "@/components/sops/sop-media-preview";
@@ -71,6 +74,28 @@ export default function SopDetailPage({ params }: { params: Promise<{ id: string
   }, [currentVersion]);
 
   const activeVersion = selected || currentVersion;
+  const isEmployee = profile?.role === "employee";
+  const alreadyAcked = Boolean(
+    profile &&
+      activeVersion &&
+      acknowledgements.some((a) => a.versionId === activeVersion.id && a.userId === profile.uid)
+  );
+  const hasPdf = Boolean(
+    activeVersion?.attachments?.some((a) => a.type === "pdf") ||
+      ((!activeVersion?.attachments || activeVersion.attachments.length === 0) &&
+        Boolean(activeVersion?.downloadUrl))
+  );
+  const enforceReading = Boolean(
+    isEmployee && !alreadyAcked && activeVersion?.status === "approved"
+  );
+  const reading = useSopReadingSession({
+    enabled: enforceReading && Boolean(sop && activeVersion && actor),
+    sopId: sop?.id || id,
+    versionId: activeVersion?.id || "",
+    versionNumber: activeVersion?.versionNumber || "",
+    userId: actor?.uid,
+    hasPdf,
+  });
 
   useEffect(() => {
     viewedOnce.current = false;
@@ -85,7 +110,7 @@ export default function SopDetailPage({ params }: { params: Promise<{ id: string
       versionNumber: activeVersion.versionNumber,
       actor,
       source: "preview",
-    }).then(() => refresh());
+    });
   }, [sop, activeVersion, actor, refresh]);
 
   if (loading) return <SopLoading />;
@@ -340,9 +365,24 @@ export default function SopDetailPage({ params }: { params: Promise<{ id: string
                 PDF / video / PPT for v{activeVersion.versionNumber}
               </CardDescription>
             </CardHeader>
-            <CardContent>
+            <CardContent className="space-y-3">
+              {enforceReading && (
+                <SopReadingBanner
+                  remainingSeconds={reading.remainingSeconds}
+                  requiredSeconds={reading.requiredSeconds}
+                  elapsedSeconds={reading.elapsedSeconds}
+                  pagesSeen={reading.pagesSeen}
+                  pageCount={reading.pageCount}
+                  allPagesViewed={reading.allPagesViewed}
+                  timerComplete={reading.timerComplete}
+                  readingComplete={reading.readingComplete}
+                  hasPdf={hasPdf}
+                />
+              )}
               <SopMediaPreview
                 version={activeVersion}
+                trackReading={enforceReading}
+                onPagesProgress={reading.reportPages}
                 onDownload={(att) => {
                   if (!actor) return;
                   void recordSopView({
@@ -424,7 +464,9 @@ export default function SopDetailPage({ params }: { params: Promise<{ id: string
               <CardHeader>
                 <CardTitle className="text-base">Digital acknowledgement</CardTitle>
                 <CardDescription>
-                  Employees confirm they have read and understood the approved SOP
+                  {enforceReading
+                    ? "Finish the reading timer and scroll every page, then confirm you have understood this SOP"
+                    : "Employees confirm they have read and understood the approved SOP"}
                 </CardDescription>
               </CardHeader>
               <CardContent>
@@ -438,6 +480,17 @@ export default function SopDetailPage({ params }: { params: Promise<{ id: string
                     )}
                     onDone={() => void refresh()}
                     canAcknowledge={Boolean(profile)}
+                    readingRequired={enforceReading}
+                    readingComplete={reading.readingComplete}
+                    readingHint={
+                      !reading.timerComplete && !reading.allPagesViewed
+                        ? `Keep reading for ${formatReadingClock(reading.remainingSeconds)} and scroll every page before acknowledging.`
+                        : !reading.timerComplete
+                          ? `Keep this SOP open for ${formatReadingClock(reading.remainingSeconds)} more.`
+                          : !reading.allPagesViewed
+                            ? "Scroll every page of the SOP to the last page before acknowledging."
+                            : undefined
+                    }
                   />
                 )}
               </CardContent>

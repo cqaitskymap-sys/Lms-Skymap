@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import dynamic from "next/dynamic";
 import { Download, Eye, FileText, Film, Presentation, Loader2 } from "lucide-react";
 import type { SopAttachment, SopVersion } from "@/types";
 import { PdfViewer } from "@/components/shared/pdf-viewer";
@@ -9,12 +10,27 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { formatBytes } from "@/lib/utils";
 import { cn } from "@/lib/utils";
+import type { SopPageProgress } from "@/hooks/use-sop-reading";
+
+const SopPdfReader = dynamic(
+  () => import("@/components/sops/sop-pdf-reader").then((m) => m.SopPdfReader),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex min-h-[480px] items-center justify-center rounded-lg border">
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      </div>
+    ),
+  }
+);
 
 interface SopMediaPreviewProps {
   version: SopVersion;
   onPreview?: () => void;
   onDownload?: (attachment: SopAttachment) => void;
   className?: string;
+  trackReading?: boolean;
+  onPagesProgress?: (progress: SopPageProgress) => void;
 }
 
 export function SopMediaPreview({
@@ -22,6 +38,8 @@ export function SopMediaPreview({
   onPreview,
   onDownload,
   className,
+  trackReading = false,
+  onPagesProgress,
 }: SopMediaPreviewProps) {
   const attachments = version.attachments?.length
     ? version.attachments
@@ -60,7 +78,7 @@ export function SopMediaPreview({
 
         {pdfs.length > 0 && (
           <TabsContent value="pdf" className="mt-3 space-y-3">
-            {pdfs.map((pdf) => (
+            {pdfs.map((pdf, index) => (
               <div key={pdf.id} className="space-y-2">
                 <div className="flex items-center justify-between gap-2">
                   <p className="text-sm font-medium">{pdf.title}</p>
@@ -76,7 +94,17 @@ export function SopMediaPreview({
                     Download
                   </Button>
                 </div>
-                <PdfViewer url={pdf.downloadUrl} title={pdf.title} />
+                {trackReading && index === 0 ? (
+                  <SopPdfReader
+                    url={pdf.downloadUrl}
+                    storagePath={pdf.storagePath}
+                    title={pdf.title}
+                    trackPages
+                    onPagesProgress={onPagesProgress}
+                  />
+                ) : (
+                  <PdfViewer url={pdf.downloadUrl} title={pdf.title} />
+                )}
               </div>
             ))}
           </TabsContent>

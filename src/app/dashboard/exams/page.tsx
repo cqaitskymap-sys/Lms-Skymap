@@ -300,9 +300,7 @@ function ExamsPageInner() {
       }
       if (result.passed) {
         toast.success(`Passed with ${result.percentage}%`);
-        if (result.certificateEligible) {
-          toast.success("Certificate will appear under Certificates when issued");
-        }
+        toast.message("Certificate is issued after all assigned exams are completed");
       } else {
         toast.error(
           result.status === "expired"
@@ -569,7 +567,7 @@ function ExamsPageInner() {
                   <CardTitle className="text-base">Keep reading TNI SOPs</CardTitle>
                   <CardDescription>
                     {tniLearning.acknowledgedCount}/{tniLearning.items.length} SOPs acknowledged.
-                    Each SOP unlocks its own exam after you acknowledge it.
+                    Each SOP unlocks its own exam after you finish reading it and acknowledge it.
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
@@ -634,7 +632,7 @@ function ExamsPageInner() {
                   </p>
                   <p className="text-sm text-muted-foreground">
                     {isEmployee
-                      ? "Ask QA to link an exam to the SOP you acknowledged. Opening the PDF is not enough — use Sign & acknowledge."
+                      ? "Ask QA to link an exam to the SOP you acknowledged. Finish the reading timer, scroll every page, then Sign & acknowledge."
                       : "Create an exam manually or generate a blueprint with AI."}
                   </p>
                   {!isEmployee && (

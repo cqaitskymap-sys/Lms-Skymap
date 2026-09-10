@@ -78,7 +78,7 @@ export default function HomePage() {
             {
               icon: Award,
               title: "QR certificates",
-              desc: "Digital signatures and public verification links",
+              desc: "Electronically computer-generated certificates with public verification links",
             },
           ].map((f) => (
             <div

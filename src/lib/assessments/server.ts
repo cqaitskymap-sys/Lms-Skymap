@@ -498,9 +498,12 @@ export async function submitAssessmentServer(
     }
   }
 
-  if (updated.passed && updated.certificateEligible) {
+  if (updated.passed) {
     try {
-      await issueCertificateForAttemptServer(updated.id, input.actorId);
+      const issued = await issueCertificateForAttemptServer(updated.id, input.actorId);
+      if (!issued.ok && issued.status !== 409) {
+        console.error("[submitAssessmentServer] certificate issue failed:", issued.error);
+      }
     } catch (err) {
       console.error("[submitAssessmentServer] certificate issue failed:", err);
     }
@@ -528,19 +531,12 @@ async function handleTrainingResultServer(
   const prev = { id: assignSnap.id, ...assignSnap.data() } as TrainingAssignment;
 
   if (attempt.passed) {
-    let certificateId: string | undefined;
-    if (attempt.certificateEligible) {
-      const cert = await issueCertificateForAttemptServer(attempt.id, actorId);
-      if (cert.ok) certificateId = cert.certificate.id;
-    }
-
     await assignRef.set(
       {
         status: "passed",
         score: attempt.percentage,
         passed: true,
         assessmentAttemptId: attempt.id,
-        ...(certificateId ? { certificateId } : {}),
         updatedAt: now,
         updatedBy: actorId,
       },
@@ -562,11 +558,7 @@ async function handleTrainingResultServer(
     const currentStage = (empSnap.data()?.lifecycleStage || "created") as LifecycleStage;
     const currentIdx = getStageIndex(currentStage);
 
-    const targetStage: LifecycleStage = outstanding.length
-      ? "exam"
-      : certificateId
-        ? "certified"
-        : "passed";
+    const targetStage: LifecycleStage = outstanding.length ? "exam" : "passed";
     const targetIdx = getStageIndex(targetStage);
     if (targetIdx > currentIdx) {
       await empRef.set(

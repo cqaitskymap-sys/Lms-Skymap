@@ -16,6 +16,7 @@ export const APP_MODULES = [
   "sops",
   "trainers",
   "training",
+  "ojt",
   "matrix",
   "questions",
   "exams",
@@ -101,6 +102,12 @@ export const APP_MODULE_DEFS: AppModuleDef[] = [
     title: "Training",
     href: "/dashboard/training",
     roles: ["super_admin", "department_head", "trainer", "employee", "hr", "qa"],
+  },
+  {
+    id: "ojt",
+    title: "OJT",
+    href: "/dashboard/ojt",
+    roles: ["super_admin", "qa", "department_head", "trainer", "employee", "hr"],
   },
   {
     id: "matrix",

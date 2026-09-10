@@ -61,7 +61,7 @@ cd functions && npm install && npm run build
 10. Employee takes timed randomized exam  
 11. System auto-evaluates (Cloud Function + client engine)  
 12. Fail → auto-retraining  
-13. Pass → QR certificate + digital signature  
+13. Pass all assigned exams → QR certificate (electronically computer-generated)  
 14. SOP revision → auto-reassign affected trainees  
 15. Audit logs for all critical actions  
 

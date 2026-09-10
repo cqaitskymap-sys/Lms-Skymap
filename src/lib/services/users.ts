@@ -77,23 +77,33 @@ export async function listStaffUsers(): Promise<UserProfile[]> {
   return json.users as UserProfile[];
 }
 
-/** Active department-head users (readable by HR via Firestore; not Super-Admin-only API). */
-export async function listDepartmentHeads(): Promise<UserProfile[]> {
+export async function listUsersByRoles(roles: UserProfile["role"][]): Promise<UserProfile[]> {
+  const wanted = [...new Set(roles)];
+  if (wanted.length === 0) return [];
+
   if (isDemoMode()) {
     return demoStaffUsers()
-      .filter((p) => p.role === "department_head" && p.isActive)
+      .filter((p) => wanted.includes(p.role) && p.isActive !== false)
       .sort((a, b) => a.displayName.localeCompare(b.displayName));
   }
 
-  const q = query(
-    collection(db, COLLECTIONS.users),
-    where("role", "==", "department_head")
-  );
+  const q =
+    wanted.length === 1
+      ? query(collection(db, COLLECTIONS.users), where("role", "==", wanted[0]))
+      : query(collection(db, COLLECTIONS.users), where("role", "in", wanted));
   const snap = await getDocs(q);
   return snap.docs
-    .map((d) => ({ id: d.id, ...d.data() } as UserProfile))
+    .map((d) => {
+      const data = d.data() as UserProfile;
+      return { ...data, id: data.id || d.id, uid: data.uid || d.id } as UserProfile;
+    })
     .filter((p) => p.isActive !== false)
     .sort((a, b) => (a.displayName || "").localeCompare(b.displayName || ""));
+}
+
+/** Active department-head users (readable by HR via Firestore; not Super-Admin-only API). */
+export async function listDepartmentHeads(): Promise<UserProfile[]> {
+  return listUsersByRoles(["department_head"]);
 }
 
 export async function createStaffUser(

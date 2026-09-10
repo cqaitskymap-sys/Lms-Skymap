@@ -29,6 +29,7 @@ export const DASHBOARD_ROUTE_RULES: RouteAccessRule[] = [
   { pattern: "/dashboard/sops", permissions: ["sops:read"] },
   { pattern: "/dashboard/trainers", permissions: ["trainers:read"] },
   { pattern: "/dashboard/training", permissions: ["training:read"] },
+  { pattern: "/dashboard/ojt", permissions: ["ojt:read"] },
   { pattern: "/dashboard/matrix", permissions: ["reports:read"] },
   { pattern: "/dashboard/questions", permissions: ["questions:read"] },
   { pattern: "/dashboard/exams", permissions: ["exams:read", "assessments:take"] },

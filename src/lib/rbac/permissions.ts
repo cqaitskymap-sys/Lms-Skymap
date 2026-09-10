@@ -42,6 +42,18 @@ export type Permission =
   | "training:conduct"
   | "training:attend"
   | "training:delete"
+  | "ojt:read"
+  | "ojt:write"
+  | "ojt:assign"
+  | "ojt:schedule"
+  | "ojt:conduct"
+  | "ojt:evaluate"
+  | "ojt:acknowledge"
+  | "ojt:verify"
+  | "ojt:approve"
+  | "ojt:retrain"
+  | "ojt:export"
+  | "ojt:admin"
   | "assessments:read"
   | "assessments:write"
   | "assessments:take"
@@ -110,6 +122,18 @@ const ALL_PERMISSIONS: Permission[] = [
   "training:conduct",
   "training:attend",
   "training:delete",
+  "ojt:read",
+  "ojt:write",
+  "ojt:assign",
+  "ojt:schedule",
+  "ojt:conduct",
+  "ojt:evaluate",
+  "ojt:acknowledge",
+  "ojt:verify",
+  "ojt:approve",
+  "ojt:retrain",
+  "ojt:export",
+  "ojt:admin",
   "assessments:read",
   "assessments:write",
   "assessments:take",
@@ -172,6 +196,8 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     "audit:read",
     "dashboard:hr",
     "training:read",
+    "ojt:read",
+    "ojt:export",
     "settings:write",
   ],
   qa: [
@@ -182,6 +208,17 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     "departments:read",
     "employees:read",
     "training:read",
+    "ojt:read",
+    "ojt:write",
+    "ojt:assign",
+    "ojt:schedule",
+    "ojt:conduct",
+    "ojt:evaluate",
+    "ojt:verify",
+    "ojt:approve",
+    "ojt:retrain",
+    "ojt:export",
+    "ojt:admin",
     "trainers:read",
     "assessments:read",
     "questions:read",
@@ -212,6 +249,15 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     "trainers:read",
     "training:read",
     "training:write",
+    "ojt:read",
+    "ojt:write",
+    "ojt:assign",
+    "ojt:schedule",
+    "ojt:conduct",
+    "ojt:evaluate",
+    "ojt:verify",
+    "ojt:retrain",
+    "ojt:export",
     "assessments:read",
     "assessments:write",
     "exams:read",
@@ -231,6 +277,9 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     "sops:read",
     "training:read",
     "training:conduct",
+    "ojt:read",
+    "ojt:conduct",
+    "ojt:evaluate",
     "trainers:read",
     "assessments:read",
     "certificates:read",
@@ -244,6 +293,8 @@ export const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
     "sops:read",
     "training:read",
     "training:attend",
+    "ojt:read",
+    "ojt:acknowledge",
     "assessments:take",
     "exams:read",
     "certificates:read",

@@ -121,6 +121,7 @@ export type NotificationType =
   | "sop_revision"
   | "handover"
   | "retraining"
+  | "ojt"
   | "system";
 
 export type AuditAction =
@@ -492,6 +493,22 @@ export interface SopViewRecord {
   source: "preview" | "download" | "acknowledge";
 }
 
+export interface SopReadingProgress {
+  id: string;
+  sopId: string;
+  versionId: string;
+  versionNumber: string;
+  userId: string;
+  elapsedSeconds: number;
+  requiredSeconds: number;
+  pageCount: number;
+  pagesSeen: number[];
+  reachedLastPage: boolean;
+  allPagesViewed: boolean;
+  completedAt?: string;
+  updatedAt: string;
+}
+
 export interface SopAcknowledgement {
   id: string;
   sopId: string;
@@ -505,6 +522,9 @@ export interface SopAcknowledgement {
   statement: string;
   signatureDataUrl?: string;
   ipAddress?: string;
+  readingSeconds?: number;
+  pagesViewed?: number;
+  pageCount?: number;
 }
 
 export interface TrainerProfile extends Timestamps {
@@ -771,6 +791,11 @@ export interface Certificate extends Timestamps {
   sopVersionId: string;
   sopNumber: string;
   sopTitle: string;
+  /** One programme certificate after all assigned exams, vs legacy per-attempt */
+  kind?: "attempt" | "programme";
+  programmeTitle?: string;
+  examsCompleted?: number;
+  computerGenerated?: boolean;
   examId: string;
   attemptId: string;
   title: string;
@@ -806,6 +831,8 @@ export interface CertificateVerification {
   trainerName?: string;
   sopNumber?: string;
   sopTitle?: string;
+  programmeTitle?: string;
+  examsCompleted?: number;
   issuedAt?: string;
   percentage?: number;
   companyName?: string;

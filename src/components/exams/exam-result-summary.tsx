@@ -76,10 +76,16 @@ export function ExamResultSummary({
         </div>
 
         <div className="flex justify-center">
-          <CertificateEligibilityBadge
-            eligible={attempt.certificateEligible}
-            threshold={exam.certificatePassPercentage ?? exam.passPercentage}
-          />
+          {passed ? (
+            <Badge className="gap-1 bg-emerald-600 hover:bg-emerald-600">
+              <Award className="h-3 w-3" /> Exam passed
+            </Badge>
+          ) : (
+            <Badge variant="secondary" className="gap-1">
+              <Ban className="h-3 w-3" /> Exam not passed
+              {exam.passPercentage != null && ` (need ≥${exam.passPercentage}%)`}
+            </Badge>
+          )}
         </div>
 
         <p className="text-sm text-muted-foreground">
@@ -88,6 +94,11 @@ export function ExamResultSummary({
             ? " · Auto-submitted on timeout"
             : null}
         </p>
+        {passed ? (
+          <p className="text-sm text-muted-foreground">
+            A training certificate is generated only after every assigned exam is passed.
+          </p>
+        ) : null}
 
         <div className="flex flex-wrap justify-center gap-2">
           {exam.allowReview && onReview && (
@@ -95,9 +106,9 @@ export function ExamResultSummary({
               <CheckCircle2 className="mr-2 h-4 w-4" /> Review answers
             </Button>
           )}
-          {attempt.certificateEligible && (
+          {passed && (
             <Button variant="outline" asChild>
-              <Link href="/dashboard/certificates">View certificate</Link>
+              <Link href="/dashboard/certificates">Certificates</Link>
             </Button>
           )}
           {leaderboardHref && exam.leaderboardEnabled && (

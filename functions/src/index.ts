@@ -355,6 +355,51 @@ export const overdueTrainingReminders = onSchedule("every day 09:00", async () =
       );
     }
   }
+
+  const ojtSnap = await db
+    .collection("ojt_assignments")
+    .where("status", "in", [
+      "selected",
+      "assigned",
+      "scheduled",
+      "in_progress",
+      "trainer_completed",
+      "employee_acknowledged",
+      "verification_pending",
+      "qa_pending",
+      "rescheduled",
+    ])
+    .get();
+
+  const today = new Date();
+  for (const docSnap of ojtSnap.docs) {
+    const a = docSnap.data();
+    const year = Number(a.year);
+    const month = Number(a.plannedExecutionMonth);
+    if (!year || !month) continue;
+    const deadline = new Date(year, month, 0, 23, 59, 59, 999);
+    if (today.getTime() <= deadline.getTime()) continue;
+    const emp = await db.collection("employees").doc(a.employeeId).get();
+    const userId = emp.data()?.userId as string | undefined;
+    if (userId) {
+      await notify(
+        userId,
+        "reminder",
+        "Overdue OJT",
+        `On Job Training is overdue: ${a.trainingTopic || "assigned topic"}.`,
+        `/dashboard/ojt/assignments/${docSnap.id}`
+      );
+    }
+    if (a.trainerId) {
+      await notify(
+        a.trainerId as string,
+        "reminder",
+        "Overdue OJT — trainer action",
+        `${a.employeeName || "Employee"} — ${a.trainingTopic || "OJT"} is overdue.`,
+        `/dashboard/ojt/assignments/${docSnap.id}`
+      );
+    }
+  }
 });
 
 /**
@@ -501,7 +546,7 @@ export const onCertificateCreated = onDocumentCreated(
       employeeId: data.employeeId,
       stage: "certified",
       title: "Certificate Issued",
-      description: `Certificate ${data.certificateNumber} issued for SOP training`,
+      description: `Certificate ${data.certificateNumber} issued after all assigned exams`,
       status: "completed",
       actorId: "system",
       actorName: "Cloud Function",

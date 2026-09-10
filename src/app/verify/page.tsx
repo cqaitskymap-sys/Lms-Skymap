@@ -138,15 +138,19 @@ function VerifyInner() {
                   <span className="text-muted-foreground">Department:</span>{" "}
                   {result.departmentName}
                 </p>
-                <p>
-                  <span className="text-muted-foreground">Trainer:</span> {result.trainerName}
-                </p>
                 <p className="sm:col-span-2">
-                  <span className="text-muted-foreground">SOP:</span> {result.sopNumber} —{" "}
-                  {result.sopTitle}
+                  <span className="text-muted-foreground">Programme:</span>{" "}
+                  {result.programmeTitle || result.sopTitle || "Prescribed Training Programme"}
                 </p>
+                {result.examsCompleted ? (
+                  <p>
+                    <span className="text-muted-foreground">Assessments:</span>{" "}
+                    {result.examsCompleted}
+                  </p>
+                ) : null}
                 <p>
-                  <span className="text-muted-foreground">Score:</span> {result.percentage}%
+                  <span className="text-muted-foreground">Average score:</span>{" "}
+                  {result.percentage}%
                 </p>
                 <p>
                   <span className="text-muted-foreground">Issued:</span>{" "}

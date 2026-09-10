@@ -4,25 +4,26 @@ import { createHash } from "crypto";
 import QRCode from "qrcode";
 import { adminDb } from "@/lib/firebase/admin";
 import { COLLECTIONS } from "@/lib/firebase/client";
-const CERTIFICATE_SIGNED_BY = "ONS SIR";
-const CERTIFICATE_SIGNED_BY_TITLE = "Head of Quality Assurance";
-
-function resolveCertificateSignatory(signedBy?: string | null): string {
-  const name = (signedBy || "").trim();
-  const legacy = new Set(["dr. meera iyer", "meera iyer", "authorized signatory"]);
-  if (!name || legacy.has(name.toLowerCase())) return CERTIFICATE_SIGNED_BY;
-  return name;
-}
 import { nowISO, stripUndefined } from "@/lib/services/helpers";
 import { generateCertificateNumber } from "@/lib/utils";
+import {
+  COMPUTER_GENERATED_NOTICE,
+  PROGRAMME_SOP_ID,
+  PROGRAMME_SOP_NUMBER,
+  PROGRAMME_TITLE,
+} from "@/lib/certificates/copy";
+import {
+  collectRequiredSopIds,
+  evaluateProgrammeEligibility,
+  requiredExamsForEmployee,
+} from "@/lib/certificates/eligibility";
 import type {
   AssessmentAttempt,
   Certificate,
   Employee,
   Exam,
-  SopDocument,
-  TrainerProfile,
   TrainingAssignment,
+  TrainingNeedIdentification,
 } from "@/types";
 
 const COMPANY_NAME = process.env.NEXT_PUBLIC_COMPANY_NAME || "SkyMap Pharma";
@@ -35,50 +36,39 @@ function hashCertificate(input: string): string {
   return createHash("sha256").update(input).digest("hex");
 }
 
-async function findCertificateByAttempt(attemptId: string): Promise<Certificate | null> {
+function programmeDocId(employeeId: string): string {
+  return `employee_${employeeId}`;
+}
+
+async function findProgrammeCertificate(employeeId: string): Promise<Certificate | null> {
   const byId = await adminDb
     .collection(COLLECTIONS.certificates)
-    .doc(`attempt_${attemptId}`)
+    .doc(programmeDocId(employeeId))
     .get();
   if (byId.exists) {
-    return { id: byId.id, ...byId.data() } as Certificate;
+    const cert = { id: byId.id, ...byId.data() } as Certificate;
+    if (!cert.isRevoked) return cert;
   }
-  const snap = await adminDb
-    .collection(COLLECTIONS.certificates)
-    .where("attemptId", "==", attemptId)
-    .limit(1)
-    .get();
-  if (snap.empty) return null;
-  const d = snap.docs[0]!;
-  return { id: d.id, ...d.data() } as Certificate;
+
+  try {
+    const snap = await adminDb
+      .collection(COLLECTIONS.certificates)
+      .where("employeeId", "==", employeeId)
+      .limit(20)
+      .get();
+    const active = snap.docs
+      .map((d) => ({ id: d.id, ...d.data() } as Certificate))
+      .find((c) => !c.isRevoked && (c.kind === "programme" || c.sopNumber === PROGRAMME_SOP_NUMBER));
+    return active || null;
+  } catch {
+    return null;
+  }
 }
 
 async function loadEmployee(employeeId: string): Promise<Employee | null> {
   const snap = await adminDb.collection(COLLECTIONS.employees).doc(employeeId).get();
   if (!snap.exists) return null;
   return { id: snap.id, ...snap.data() } as Employee;
-}
-
-async function loadSop(sopId: string): Promise<SopDocument | null> {
-  const snap = await adminDb.collection(COLLECTIONS.sops).doc(sopId).get();
-  if (!snap.exists) return null;
-  return { id: snap.id, ...snap.data() } as SopDocument;
-}
-
-async function loadTrainer(trainerId?: string): Promise<TrainerProfile | null> {
-  if (!trainerId) return null;
-  const byId = await adminDb.collection(COLLECTIONS.trainers).doc(trainerId).get();
-  if (byId.exists) {
-    return { id: byId.id, ...byId.data() } as TrainerProfile;
-  }
-  const byUser = await adminDb
-    .collection(COLLECTIONS.trainers)
-    .where("userId", "==", trainerId)
-    .limit(1)
-    .get();
-  if (byUser.empty) return null;
-  const doc = byUser.docs[0]!;
-  return { id: doc.id, ...doc.data() } as TrainerProfile;
 }
 
 async function loadDepartmentName(departmentId?: string): Promise<string> {
@@ -89,20 +79,46 @@ async function loadDepartmentName(departmentId?: string): Promise<string> {
   return data.name || "—";
 }
 
+async function loadRequiredExams(employeeId: string): Promise<Exam[]> {
+  const [tniSnap, assignSnap, examsSnap] = await Promise.all([
+    adminDb.collection(COLLECTIONS.tni).where("employeeId", "==", employeeId).get(),
+    adminDb
+      .collection(COLLECTIONS.trainingAssignments)
+      .where("employeeId", "==", employeeId)
+      .get(),
+    adminDb.collection(COLLECTIONS.exams).get(),
+  ]);
+
+  const tniNeeds = tniSnap.docs.flatMap((d) => {
+    const row = d.data() as TrainingNeedIdentification;
+    return row.needs || [];
+  });
+  const assignments = assignSnap.docs.map(
+    (d) => ({ id: d.id, ...d.data() }) as TrainingAssignment
+  );
+  const sopIds = collectRequiredSopIds({ tniNeeds, assignments });
+  const exams = examsSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Exam));
+  return requiredExamsForEmployee(exams, sopIds);
+}
+
+async function loadPassedAttempts(employeeId: string): Promise<AssessmentAttempt[]> {
+  const snap = await adminDb
+    .collection(COLLECTIONS.assessmentAttempts)
+    .where("employeeId", "==", employeeId)
+    .where("status", "==", "passed")
+    .get();
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() } as AssessmentAttempt));
+}
+
 export type IssueCertificateServerResult =
   | { ok: true; certificate: Certificate; created: boolean }
   | { ok: false; status: number; error: string };
 
-/** Issue (or return existing) certificate for a passed, eligible attempt — Admin SDK only. */
+/** Issue one programme certificate after every assigned SOP exam is passed. */
 export async function issueCertificateForAttemptServer(
   attemptId: string,
   actorId: string
 ): Promise<IssueCertificateServerResult> {
-  const existing = await findCertificateByAttempt(attemptId);
-  if (existing) {
-    return { ok: true, certificate: existing, created: false };
-  }
-
   const attemptSnap = await adminDb
     .collection(COLLECTIONS.assessmentAttempts)
     .doc(attemptId)
@@ -112,22 +128,43 @@ export async function issueCertificateForAttemptServer(
   }
 
   const attempt = { id: attemptSnap.id, ...attemptSnap.data() } as AssessmentAttempt;
-  if (!["passed"].includes(attempt.status)) {
+  if (attempt.status !== "passed" || !attempt.passed) {
     return { ok: false, status: 400, error: "Attempt is not passed — certificate cannot be issued" };
   }
-  if (!attempt.certificateEligible) {
+
+  const existing = await findProgrammeCertificate(attempt.employeeId);
+  if (existing) {
+    return { ok: true, certificate: existing, created: false };
+  }
+
+  const requiredExams = await loadRequiredExams(attempt.employeeId);
+  if (!requiredExams.length) {
     return {
       ok: false,
-      status: 400,
-      error: "Attempt is not certificate eligible (score below certificate threshold)",
+      status: 409,
+      error: "Certificate is issued after all assigned exams are passed — none are assigned yet",
+    };
+  }
+
+  const attempts = await loadPassedAttempts(attempt.employeeId);
+  if (!attempts.some((row) => row.id === attempt.id)) {
+    attempts.push(attempt);
+  }
+
+  const eligibility = evaluateProgrammeEligibility(requiredExams, attempts);
+  if (!eligibility.ready) {
+    const remaining = eligibility.remaining.length;
+    return {
+      ok: false,
+      status: 409,
+      error: `Certificate is issued after all assigned exams are passed (${remaining} remaining)`,
     };
   }
 
   const examSnap = await adminDb.collection(COLLECTIONS.exams).doc(attempt.examId).get();
-  if (!examSnap.exists) {
-    return { ok: false, status: 404, error: "Exam not found" };
-  }
-  const exam = { id: examSnap.id, ...examSnap.data() } as Exam;
+  const exam = examSnap.exists
+    ? ({ id: examSnap.id, ...examSnap.data() } as Exam)
+    : null;
 
   let assignment: TrainingAssignment | null = null;
   if (attempt.assignmentId) {
@@ -145,50 +182,29 @@ export async function issueCertificateForAttemptServer(
     attempt.employeeName ||
     (employee ? `${employee.firstName} ${employee.lastName}`.trim() : attempt.employeeId);
   const employeeCode = employee?.employeeCode || attempt.employeeId;
-
-  const sopId = assignment?.sopId || exam.sopId || exam.inductionModuleId || `standalone_${exam.id}`;
-  const sopVersionId = assignment?.sopVersionId || "n/a";
-  let sopNumber = "SOP";
-  let sopTitle = exam.title || "Training";
-  const trainerId = assignment?.trainerId;
   const departmentId = assignment?.departmentId || employee?.departmentId;
   let departmentName = employee?.departmentName || "—";
-
-  const sop = sopId.startsWith("standalone_") ? null : await loadSop(sopId);
-  if (sop) {
-    sopNumber = sop.sopNumber;
-    sopTitle = sop.title;
-  }
-
   if (departmentId && departmentName === "—") {
     departmentName = await loadDepartmentName(departmentId);
   }
 
-  const trainer = await loadTrainer(trainerId);
-  let trainerName = "Assigned Trainer";
-  if (trainer?.userId) {
-    const userSnap = await adminDb.collection(COLLECTIONS.users).doc(trainer.userId).get();
-    if (userSnap.exists) {
-      const user = userSnap.data() as { displayName?: string };
-      if (user.displayName) trainerName = user.displayName;
-    }
-  }
-
   const now = nowISO();
-  const id = `attempt_${attemptId}`;
+  const id = programmeDocId(attempt.employeeId);
   const certRef = adminDb.collection(COLLECTIONS.certificates).doc(id);
+  const programmeTitle = departmentName !== "—"
+    ? `${departmentName} Training Programme`
+    : PROGRAMME_TITLE;
 
-  // Transactional create — doc id is unique per attempt
   try {
     await adminDb.runTransaction(async (tx) => {
       const existingSnap = await tx.get(certRef);
       if (existingSnap.exists) {
-        throw new Error("ALREADY_EXISTS");
+        const current = existingSnap.data() as Certificate;
+        if (!current.isRevoked) throw new Error("ALREADY_EXISTS");
       }
 
       const certificateNumber = generateCertificateNumber();
       const verifyUrl = `${APP_URL}/verify/${encodeURIComponent(certificateNumber)}`;
-      // QR generated outside would be nicer; keep sync-friendly placeholder then update
       tx.set(
         certRef,
         stripUndefined({
@@ -199,27 +215,27 @@ export async function issueCertificateForAttemptServer(
           employeeCode,
           departmentId,
           departmentName,
-          trainingAssignmentId: attempt.assignmentId || `standalone_${attempt.id}`,
-          sopId,
-          sopVersionId,
-          sopNumber,
-          sopTitle,
-          examId: exam.id,
+          trainingAssignmentId: attempt.assignmentId || `programme_${attempt.employeeId}`,
+          sopId: PROGRAMME_SOP_ID,
+          sopVersionId: "n/a",
+          sopNumber: PROGRAMME_SOP_NUMBER,
+          sopTitle: PROGRAMME_TITLE,
+          kind: "programme",
+          programmeTitle,
+          examsCompleted: eligibility.examsCompleted,
+          computerGenerated: true,
+          examId: exam?.id || attempt.examId,
           attemptId: attempt.id,
-          title: `Certificate of Training — ${sopTitle}`,
+          title: `Certificate of Training — ${PROGRAMME_TITLE}`,
           issuedAt: now,
-          score: attempt.score || 0,
-          percentage: attempt.percentage || 0,
-          trainerId,
-          trainerName,
+          score: eligibility.averagePercentage,
+          percentage: eligibility.averagePercentage,
+          trainerName: "—",
           companyName: COMPANY_NAME,
           companyLogoUrl: "/brand/skymap-logo.png",
-          digitalSignatureUrl: "/brand/qa-signature.svg",
-          signedBy: resolveCertificateSignatory(undefined),
-          signedByTitle: CERTIFICATE_SIGNED_BY_TITLE,
           qrCodeData: verifyUrl,
           verificationHash: hashCertificate(
-            `${certificateNumber}|${employeeCode}|${sopNumber}|${attempt.percentage}|${now}`
+            `${certificateNumber}|${employeeCode}|${PROGRAMME_SOP_NUMBER}|${eligibility.averagePercentage}|${now}`
           ),
           isRevoked: false,
           createdAt: now,
@@ -230,11 +246,10 @@ export async function issueCertificateForAttemptServer(
     });
   } catch (err) {
     if (err instanceof Error && err.message === "ALREADY_EXISTS") {
-      const again = await findCertificateByAttempt(attemptId);
+      const again = await findProgrammeCertificate(attempt.employeeId);
       if (again) return { ok: true, certificate: again, created: false };
     }
-    // Fall through if race lost — re-read
-    const raced = await findCertificateByAttempt(attemptId);
+    const raced = await findProgrammeCertificate(attempt.employeeId);
     if (raced) return { ok: true, certificate: raced, created: false };
     throw err;
   }
@@ -251,25 +266,21 @@ export async function issueCertificateForAttemptServer(
   await certRef.set({ qrCodeImageUrl, updatedAt: nowISO() }, { merge: true });
   certificate = { ...certificate, qrCodeImageUrl };
 
-  if (attempt.assignmentId && assignment) {
-    await adminDb
-      .collection(COLLECTIONS.trainingAssignments)
-      .doc(attempt.assignmentId)
-      .set(
-        stripUndefined({
-          status: "passed",
-          score: attempt.percentage,
-          passed: true,
-          assessmentAttemptId: attempt.id,
-          certificateId: id,
-          updatedAt: now,
-          updatedBy: actorId,
-        }),
-        { merge: true }
-      );
-  }
+  const assignSnap = await adminDb
+    .collection(COLLECTIONS.trainingAssignments)
+    .where("employeeId", "==", attempt.employeeId)
+    .get();
+  await Promise.all(
+    assignSnap.docs
+      .filter((d) => (d.data() as { status?: string }).status === "passed")
+      .map((d) =>
+        d.ref.set(
+          { certificateId: id, updatedAt: now, updatedBy: actorId },
+          { merge: true }
+        )
+      )
+  );
 
-  // Mark employee certified for this SOP — do not auto-qualify org-wide
   await adminDb
     .collection(COLLECTIONS.employees)
     .doc(attempt.employeeId)
@@ -284,7 +295,6 @@ export async function issueCertificateForAttemptServer(
       { merge: true }
     );
 
-  // Inbox: notify employee when a new certificate is issued
   try {
     const empSnap = await adminDb
       .collection(COLLECTIONS.employees)
@@ -302,7 +312,7 @@ export async function issueCertificateForAttemptServer(
             userId: authUid,
             type: "certificate",
             title: "Certificate Issued",
-            message: `Your training certificate ${certificate.certificateNumber} for ${certificate.sopTitle} is ready.`,
+            message: `Your training certificate ${certificate.certificateNumber} is ready.`,
             link: "/dashboard/certificates",
             isRead: false,
             createdAt: now,
@@ -331,12 +341,14 @@ export async function issueCertificateForAttemptServer(
         action: "create",
         resourceType: "certificate",
         resourceId: certificate.id,
-        description: `Certificate ${certificate.certificateNumber} issued for ${certificate.employeeName} · ${certificate.sopNumber}`,
+        description: `Certificate ${certificate.certificateNumber} issued for ${certificate.employeeName} after ${eligibility.examsCompleted} exams`,
         after: {
           certificateNumber: certificate.certificateNumber,
           employeeId: certificate.employeeId,
           attemptId: certificate.attemptId,
           percentage: certificate.percentage,
+          examsCompleted: eligibility.examsCompleted,
+          notice: COMPUTER_GENERATED_NOTICE,
         },
       },
       { merge: true }
@@ -347,10 +359,7 @@ export async function issueCertificateForAttemptServer(
 
   return {
     ok: true,
-    certificate: {
-      ...certificate,
-      signedBy: resolveCertificateSignatory(certificate.signedBy),
-    },
+    certificate,
     created: true,
   };
 }

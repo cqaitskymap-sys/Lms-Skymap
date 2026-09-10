@@ -5,10 +5,12 @@ import { cn, statusColor } from "@/lib/utils";
 interface StatusBadgeProps {
   status: string;
   className?: string;
+  /** Override the auto-generated label (underscores → spaces). */
+  label?: string;
 }
 
-export function StatusBadge({ status, className }: StatusBadgeProps) {
-  const label = status.replace(/_/g, " ");
+export function StatusBadge({ status, className, label }: StatusBadgeProps) {
+  const text = label ?? status.replace(/_/g, " ");
   return (
     <span
       className={cn(
@@ -17,7 +19,7 @@ export function StatusBadge({ status, className }: StatusBadgeProps) {
         className
       )}
     >
-      {label}
+      {text}
     </span>
   );
 }

@@ -5,6 +5,11 @@
 import { jsPDF } from "jspdf";
 import type { Certificate } from "@/types";
 import { formatDate } from "@/lib/utils";
+import {
+  COMPUTER_GENERATED_NOTICE,
+  certificateSubjectLine,
+  isProgrammeCertificate,
+} from "@/lib/certificates/copy";
 
 async function loadImageAsDataUrl(url: string): Promise<string | null> {
   try {
@@ -113,59 +118,50 @@ export async function buildCertificatePdf(
     { align: "center" }
   );
 
-  doc.text("has successfully completed training on", w / 2, 104, { align: "center" });
+  doc.text("has successfully completed the prescribed training programme", w / 2, 104, {
+    align: "center",
+  });
+  if (isProgrammeCertificate(certificate)) {
+    doc.text("and all assigned assessments", w / 2, 109, { align: "center" });
+  }
 
   doc.setFont("times", "bold");
   doc.setFontSize(14);
   doc.setTextColor(11, 61, 74);
-  doc.text(`${certificate.sopNumber} — ${certificate.sopTitle}`, w / 2, 113, {
+  doc.text(certificateSubjectLine(certificate), w / 2, 118, {
     align: "center",
   });
 
   doc.setFont("times", "normal");
   doc.setFontSize(10);
   doc.setTextColor(90, 90, 90);
-  doc.text(
-    `Trainer: ${certificate.trainerName}  ·  Score: ${certificate.percentage}%  ·  Issued: ${formatDate(certificate.issuedAt)}`,
-    w / 2,
-    122,
-    { align: "center" }
-  );
+  const stats =
+    isProgrammeCertificate(certificate) && certificate.examsCompleted
+      ? `Assessments completed: ${certificate.examsCompleted}  ·  Average score: ${certificate.percentage}%  ·  Issued: ${formatDate(certificate.issuedAt)}`
+      : `Average score: ${certificate.percentage}%  ·  Issued: ${formatDate(certificate.issuedAt)}`;
+  doc.text(stats, w / 2, 126, { align: "center" });
 
   doc.setFontSize(9);
-  doc.text(`Certificate No. ${certificate.certificateNumber}`, w / 2, 130, {
+  doc.text(`Certificate No. ${certificate.certificateNumber}`, w / 2, 133, {
     align: "center",
   });
 
-  // Signature
-  const sig =
-    (certificate.digitalSignatureUrl &&
-      (await loadImageAsDataUrl(certificate.digitalSignatureUrl))) ||
-    null;
-  const sigX = 40;
-  const sigY = h - 48;
-  if (sig) {
-    try {
-      doc.addImage(sig, "PNG", sigX, sigY - 12, 45, 14);
-    } catch {
-      doc.setDrawColor(11, 61, 74);
-      doc.line(sigX, sigY, sigX + 45, sigY);
-    }
-  } else {
-    doc.setDrawColor(11, 61, 74);
-    doc.line(sigX, sigY, sigX + 45, sigY);
-  }
+  // Computer-generated notice (no signature)
+  const noticeX = w / 2;
+  const noticeY = h - 42;
   doc.setFont("times", "bold");
-  doc.setFontSize(10);
+  doc.setFontSize(9);
   doc.setTextColor(11, 61, 74);
-  doc.text(certificate.signedBy || "ONS SIR", sigX + 22, sigY + 6, {
-    align: "center",
-  });
-  doc.setFont("times", "normal");
+  doc.text("ELECTRONICALLY COMPUTER-GENERATED", noticeX, noticeY, { align: "center" });
+  doc.setDrawColor(11, 61, 74);
+  doc.setLineWidth(0.3);
+  doc.line(noticeX - 42, noticeY + 2, noticeX + 42, noticeY + 2);
+  doc.setFont("times", "italic");
   doc.setFontSize(8);
   doc.setTextColor(100, 100, 100);
-  doc.text(certificate.signedByTitle || "Digitally signed", sigX + 22, sigY + 11, {
+  doc.text(COMPUTER_GENERATED_NOTICE, noticeX, noticeY + 8, {
     align: "center",
+    maxWidth: 110,
   });
 
   // QR

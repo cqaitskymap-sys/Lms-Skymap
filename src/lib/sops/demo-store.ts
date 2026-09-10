@@ -6,6 +6,7 @@ import type {
   SopAcknowledgement,
   SopAttachment,
   SopDocument,
+  SopReadingProgress,
   SopViewRecord,
   SopVersion,
   TrainingAssignment,
@@ -22,6 +23,7 @@ export interface SopStore {
   versions: SopVersion[];
   views: SopViewRecord[];
   acknowledgements: SopAcknowledgement[];
+  readingProgress: SopReadingProgress[];
   trainingAssignments: TrainingAssignment[];
 }
 
@@ -31,6 +33,7 @@ function emptyStore(): SopStore {
     versions: [],
     views: [],
     acknowledgements: [],
+    readingProgress: [],
     trainingAssignments: [],
   };
 }
@@ -44,16 +47,20 @@ export function readSopStore(): SopStore {
       localStorage.setItem(STORE_KEY, JSON.stringify(store));
       return store;
     }
-    return JSON.parse(raw) as SopStore;
+    const parsed = JSON.parse(raw) as SopStore;
+    if (!Array.isArray(parsed.readingProgress)) parsed.readingProgress = [];
+    return parsed;
   } catch {
     return emptyStore();
   }
 }
 
-export function writeSopStore(store: SopStore): void {
+export function writeSopStore(store: SopStore, options?: { silent?: boolean }): void {
   if (typeof window === "undefined") return;
   localStorage.setItem(STORE_KEY, JSON.stringify(store));
-  window.dispatchEvent(new CustomEvent("pharma-sops-updated"));
+  if (!options?.silent) {
+    window.dispatchEvent(new CustomEvent("pharma-sops-updated"));
+  }
 }
 
 export function ensureSopDemoMode(): boolean {

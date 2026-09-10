@@ -42,6 +42,7 @@ import {
   readTrainingStore,
   writeTrainingStore,
 } from "@/lib/training/demo-store";
+import { assertEmployeeReadingComplete } from "@/lib/services/sop-reading";
 
 export interface SopActor {
   uid: string;
@@ -1015,6 +1016,23 @@ export async function acknowledgeSop(params: {
   actor: SopActor;
   signatureDataUrl?: string;
 }): Promise<SopAcknowledgement> {
+  let readingProof: {
+    readingSeconds?: number;
+    pagesViewed?: number;
+    pageCount?: number;
+  } = {};
+  if (params.actor.role === "employee") {
+    const progress = await assertEmployeeReadingComplete({
+      userId: params.actor.uid,
+      versionId: params.versionId,
+    });
+    readingProof = {
+      readingSeconds: progress.elapsedSeconds,
+      pagesViewed: progress.pagesSeen.length,
+      pageCount: progress.pageCount,
+    };
+  }
+
   const ack: SopAcknowledgement = {
     id: generateId("ack"),
     sopId: params.sopId,
@@ -1028,6 +1046,7 @@ export async function acknowledgeSop(params: {
     statement:
       "I have read and understood this Standard Operating Procedure and agree to comply with its requirements in my role.",
     signatureDataUrl: params.signatureDataUrl,
+    ...readingProof,
   };
 
   if (isDemoMode() || (await preferLocalSopStore())) {

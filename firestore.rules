@@ -244,6 +244,19 @@ service cloud.firestore {
       allow delete: if isSuperAdmin();
     }
 
+    match /sop_reading_progress/{id} {
+      allow read: if isActive() && (
+        hasRole(['super_admin', 'qa', 'hr', 'department_head']) ||
+        resource.data.userId == request.auth.uid
+      );
+      allow create: if isActive()
+        && request.resource.data.userId == request.auth.uid;
+      allow update: if isActive()
+        && resource.data.userId == request.auth.uid
+        && request.resource.data.userId == resource.data.userId;
+      allow delete: if isSuperAdmin();
+    }
+
     // ─── Training ─────────────────────────────────────────────────────
     match /trainers/{id} {
       allow read: if isActive();
@@ -288,6 +301,52 @@ service cloud.firestore {
         resource.data.employeeId == userDoc().employeeId
       );
       allow create, update: if false;
+      allow delete: if isSuperAdmin();
+    }
+
+    // ─── On Job Training ──────────────────────────────────────────────
+    match /ojt_topics/{id} {
+      allow read: if isActive();
+      allow create, update: if hasRole(['super_admin', 'qa', 'department_head']);
+      allow delete: if isSuperAdmin();
+    }
+
+    match /ojt_plans/{id} {
+      // Unfiltered list queries (planner/matrix) require a resource-independent read rule.
+      allow read: if isActive();
+      allow create, update: if hasRole(['super_admin', 'qa', 'department_head']);
+      allow delete: if isSuperAdmin();
+    }
+
+    match /ojt_assignments/{id} {
+      allow read: if isActive() && (
+        hasRole(['super_admin', 'hr', 'qa', 'department_head', 'trainer']) ||
+        resource.data.employeeId == userDoc().employeeId
+      );
+      allow create: if hasRole(['super_admin', 'qa', 'department_head']);
+      allow update: if hasRole(['super_admin', 'qa', 'department_head', 'trainer'])
+        || (
+          isActive()
+          && userDoc().keys().hasAny(['employeeId'])
+          && resource.data.employeeId == userDoc().employeeId
+          && onlyUpdating(['acknowledgement', 'status', 'updatedAt', 'updatedBy'])
+          && request.resource.data.status in [
+            'trainer_completed', 'employee_acknowledged', 'verification_pending',
+            'qa_pending', 'completed'
+          ]
+        );
+      allow delete: if isSuperAdmin();
+    }
+
+    match /ojt_evaluation_criteria/{id} {
+      allow read: if isActive();
+      allow create, update: if hasRole(['super_admin', 'qa']);
+      allow delete: if isSuperAdmin();
+    }
+
+    match /ojt_settings/{id} {
+      allow read: if isActive();
+      allow create, update: if hasRole(['super_admin', 'qa']);
       allow delete: if isSuperAdmin();
     }
 

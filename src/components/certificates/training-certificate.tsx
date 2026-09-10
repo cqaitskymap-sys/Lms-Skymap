@@ -3,6 +3,11 @@
 import { forwardRef } from "react";
 import { formatDate } from "@/lib/utils";
 import type { Certificate } from "@/types";
+import {
+  COMPUTER_GENERATED_NOTICE,
+  certificateSubjectLine,
+  isProgrammeCertificate,
+} from "@/lib/certificates/copy";
 
 export interface TrainingCertificateProps {
   certificate: Certificate;
@@ -18,6 +23,8 @@ export interface TrainingCertificateProps {
 export const TrainingCertificate = forwardRef<HTMLDivElement, TrainingCertificateProps>(
   function TrainingCertificate({ certificate, qrDataUrl, compact }, ref) {
     const qr = qrDataUrl || certificate.qrCodeImageUrl;
+    const programme = isProgrammeCertificate(certificate);
+    const subject = certificateSubjectLine(certificate);
 
     return (
       <div
@@ -136,29 +143,31 @@ export const TrainingCertificate = forwardRef<HTMLDivElement, TrainingCertificat
                 </span>
               </p>
               <p className="text-base italic" style={{ color: "#5c6b70" }}>
-                has successfully completed training on
+                {programme
+                  ? "has successfully completed the prescribed training programme and all assigned assessments"
+                  : "has successfully completed the prescribed training programme"}
               </p>
               <p className="text-xl font-semibold md:text-2xl" style={{ color: "#0b3d4a" }}>
-                {certificate.sopNumber}
-                <span className="mx-2 font-normal" style={{ color: "#b8944a" }}>
-                  —
-                </span>
-                {certificate.sopTitle}
+                {subject}
               </p>
               <p className="text-sm" style={{ color: "#5c6b70" }}>
-                Trainer:{" "}
-                <span className="font-medium" style={{ color: "#0b3d4a" }}>
-                  {certificate.trainerName}
-                </span>
-                {" · "}
-                Score:{" "}
+                {programme && certificate.examsCompleted ? (
+                  <>
+                    Assessments completed:{" "}
+                    <span className="font-medium" style={{ color: "#0b3d4a" }}>
+                      {certificate.examsCompleted}
+                    </span>
+                    {" · "}
+                  </>
+                ) : null}
+                Average score:{" "}
                 <span className="font-medium" style={{ color: "#0b3d4a" }}>
                   {certificate.percentage}%
                 </span>
               </p>
             </div>
 
-            {/* Footer meta + signature + QR */}
+            {/* Footer meta + computer-generated notice + QR */}
             <div className="grid w-full grid-cols-3 items-end gap-4 px-6 pb-2">
               <div className="text-left">
                 <p className="text-[10px] uppercase tracking-wider" style={{ color: "#8a9498" }}>
@@ -171,19 +180,16 @@ export const TrainingCertificate = forwardRef<HTMLDivElement, TrainingCertificat
                 <p className="text-sm font-medium">{formatDate(certificate.issuedAt)}</p>
               </div>
 
-              <div className="flex flex-col items-center">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={certificate.digitalSignatureUrl || "/brand/qa-signature.svg"}
-                  alt="Digital signature"
-                  className="h-12 w-40 object-contain"
-                />
-                <div className="mt-1 h-px w-44" style={{ background: "#0b3d4a" }} />
-                <p className="mt-1 text-sm font-semibold">
-                  {certificate.signedBy || "ONS SIR"}
+              <div className="flex max-w-[240px] flex-col items-center px-2">
+                <p
+                  className="text-center text-[10px] font-semibold uppercase tracking-[0.18em] leading-relaxed"
+                  style={{ color: "#0b3d4a" }}
+                >
+                  Electronically computer-generated
                 </p>
-                <p className="text-[10px]" style={{ color: "#8a9498" }}>
-                  {certificate.signedByTitle || "Digitally signed"} · e-Sign
+                <div className="mt-2 h-px w-44" style={{ background: "#0b3d4a" }} />
+                <p className="mt-2 text-center text-[9px] leading-snug" style={{ color: "#8a9498" }}>
+                  {COMPUTER_GENERATED_NOTICE}
                 </p>
               </div>
 

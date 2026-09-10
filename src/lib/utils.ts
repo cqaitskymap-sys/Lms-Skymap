@@ -100,6 +100,15 @@ export function statusColor(status: string): string {
     under_review: "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300",
     expired: "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300",
     cancelled: "bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400",
+    selected: "bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300",
+    trainer_completed: "bg-teal-100 text-teal-700 dark:bg-teal-900/40 dark:text-teal-300",
+    employee_acknowledged: "bg-cyan-100 text-cyan-700 dark:bg-cyan-900/40 dark:text-cyan-300",
+    verification_pending: "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300",
+    qa_pending: "bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300",
+    retraining_required: "bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300",
+    rescheduled: "bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300",
+    overdue: "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300",
+    not_applicable: "bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400",
   };
   return map[status] ?? "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300";
 }

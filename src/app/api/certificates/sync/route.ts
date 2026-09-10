@@ -20,30 +20,48 @@ export async function POST(request: NextRequest) {
     .where("status", "==", "passed")
     .get();
 
-  const issued: Certificate[] = [];
-  const skipped: string[] = [];
-  const errors: Array<{ attemptId: string; error: string }> = [];
+  const attempts = attemptsSnap.docs
+    .map((doc) => ({ id: doc.id, ...doc.data() } as AssessmentAttempt))
+    .sort((a, b) => (b.submittedAt || "").localeCompare(a.submittedAt || ""));
 
-  for (const doc of attemptsSnap.docs) {
-    const attempt = { id: doc.id, ...doc.data() } as AssessmentAttempt;
-    if (!attempt.certificateEligible) {
-      skipped.push(attempt.id);
-      continue;
-    }
+  if (!attempts.length) {
+    return NextResponse.json({
+      success: true,
+      issuedCount: 0,
+      certificates: [] as Certificate[],
+      skippedAttemptIds: [] as string[],
+      errors: [] as Array<{ attemptId: string; error: string }>,
+    });
+  }
 
-    const result = await issueCertificateForAttemptServer(attempt.id, verified.auth.uid);
-    if (result.ok) {
-      issued.push(result.certificate);
-    } else {
-      errors.push({ attemptId: attempt.id, error: result.error });
-    }
+  const latest = attempts[0]!;
+  const result = await issueCertificateForAttemptServer(latest.id, verified.auth.uid);
+  if (result.ok) {
+    return NextResponse.json({
+      success: true,
+      issuedCount: result.created ? 1 : 0,
+      certificates: [result.certificate],
+      skippedAttemptIds: [] as string[],
+      errors: [] as Array<{ attemptId: string; error: string }>,
+    });
+  }
+
+  if (result.status === 409) {
+    return NextResponse.json({
+      success: true,
+      issuedCount: 0,
+      certificates: [] as Certificate[],
+      skippedAttemptIds: attempts.map((a) => a.id),
+      errors: [] as Array<{ attemptId: string; error: string }>,
+      message: result.error,
+    });
   }
 
   return NextResponse.json({
     success: true,
-    issuedCount: issued.length,
-    certificates: issued,
-    skippedAttemptIds: skipped,
-    errors,
+    issuedCount: 0,
+    certificates: [] as Certificate[],
+    skippedAttemptIds: [] as string[],
+    errors: [{ attemptId: latest.id, error: result.error }],
   });
 }

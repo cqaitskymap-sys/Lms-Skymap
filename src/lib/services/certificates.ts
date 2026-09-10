@@ -20,9 +20,8 @@ import type {
   Certificate,
   CertificateVerification,
 } from "@/types";
-import { generateId, nowISO } from "@/lib/services/helpers";
+import { nowISO } from "@/lib/services/helpers";
 import { generateCertificateNumber } from "@/lib/utils";
-import { getTrainerProfile } from "@/lib/services/training";
 import { isDemoMode } from "@/lib/demo/data";
 import {
   readCertificateStore,
@@ -30,6 +29,17 @@ import {
   writeCertificateStore,
 } from "@/lib/certificates/demo-store";
 import { buildCertificatePdf } from "@/lib/certificates/pdf";
+import {
+  PROGRAMME_SOP_ID,
+  PROGRAMME_SOP_NUMBER,
+  PROGRAMME_TITLE,
+} from "@/lib/certificates/copy";
+import {
+  collectRequiredSopIds,
+  evaluateProgrammeEligibility,
+  requiredExamsForEmployee,
+} from "@/lib/certificates/eligibility";
+import type { AssessmentAttempt, Exam } from "@/types";
 
 const COMPANY_NAME = process.env.NEXT_PUBLIC_COMPANY_NAME || "SkyMap Pharma";
 const APP_URL =
@@ -37,30 +47,12 @@ const APP_URL =
     ? window.location.origin
     : process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
 
-/** Default certificate signatory — never use legacy demo names. */
-export const CERTIFICATE_SIGNED_BY = "ONS SIR";
-export const CERTIFICATE_SIGNED_BY_TITLE = "Head of Quality Assurance";
-
-const LEGACY_SIGNATORIES = new Set([
-  "dr. meera iyer",
-  "meera iyer",
-  "authorized signatory",
-]);
-
-export function resolveCertificateSignatory(signedBy?: string | null): string {
-  const name = (signedBy || "").trim();
-  if (!name || LEGACY_SIGNATORIES.has(name.toLowerCase())) {
-    return CERTIFICATE_SIGNED_BY;
-  }
-  return name;
-}
-
 function normalizeCertificate(cert: Certificate): Certificate {
   return {
     ...cert,
-    signedBy: resolveCertificateSignatory(cert.signedBy),
-    signedByTitle: cert.signedByTitle || CERTIFICATE_SIGNED_BY_TITLE,
-    digitalSignatureUrl: cert.digitalSignatureUrl || "/brand/qa-signature.svg",
+    computerGenerated: true,
+    kind: cert.kind || (cert.sopNumber === PROGRAMME_SOP_NUMBER ? "programme" : cert.kind),
+    programmeTitle: cert.programmeTitle || (cert.sopNumber === PROGRAMME_SOP_NUMBER ? PROGRAMME_TITLE : cert.programmeTitle),
   };
 }
 
@@ -118,26 +110,6 @@ async function hashString(input: string): Promise<string> {
   return Math.abs(h).toString(16);
 }
 
-async function resolveTrainerNameAsync(
-  trainerId?: string,
-  trainerName?: string
-): Promise<string> {
-  if (trainerName) return trainerName;
-  if (!trainerId) return "Assigned Trainer";
-  const profile = await getTrainerProfile(trainerId);
-  const userId = profile?.userId || trainerId;
-  try {
-    const userSnap = await getDoc(doc(db, COLLECTIONS.users, userId));
-    if (userSnap.exists()) {
-      const user = userSnap.data() as { displayName?: string };
-      if (user.displayName) return user.displayName;
-    }
-  } catch {
-    /* user lookup optional */
-  }
-  return "Assigned Trainer";
-}
-
 export type IssueCertificateInput = {
   employeeId: string;
   employeeName?: string;
@@ -156,8 +128,8 @@ export type IssueCertificateInput = {
   trainerId?: string;
   trainerName?: string;
   actorId: string;
-  signedBy?: string;
-  signedByTitle?: string;
+  programmeTitle?: string;
+  examsCompleted?: number;
 };
 
 /** Issue certificate via server API (bypasses Firestore rules for employees). */
@@ -196,6 +168,95 @@ export async function issueCertificateForAttempt(attemptId: string): Promise<Cer
   }
 }
 
+/** Issue one programme certificate when every assigned SOP exam is passed. */
+export async function maybeIssueProgrammeCertificate(params: {
+  employeeId: string;
+  attemptId: string;
+  actorId: string;
+}): Promise<Certificate | null> {
+  if (!(await preferLocal())) {
+    return issueCertificateForAttempt(params.attemptId);
+  }
+
+  const existing = readCertificateStore().certificates.find(
+    (c) =>
+      c.employeeId === params.employeeId &&
+      !c.isRevoked &&
+      (c.kind === "programme" || c.sopNumber === PROGRAMME_SOP_NUMBER)
+  );
+  if (existing) return normalizeCertificate(existing);
+
+  const { listTNIs, getEmployeeAssignments } = await import("@/lib/services/training");
+  const { listExams } = await import("@/lib/services/assessments");
+  const { readAssessmentStore } = await import("@/lib/assessments/demo-store");
+  const { getEmployee } = await import("@/lib/services/employees");
+
+  const [tnis, assignments, exams, employee] = await Promise.all([
+    listTNIs({ employeeId: params.employeeId }).catch(() => []),
+    getEmployeeAssignments(params.employeeId).catch(() => []),
+    listExams().catch(() => [] as Exam[]),
+    getEmployee(params.employeeId).catch(() => null),
+  ]);
+
+  const sopIds = collectRequiredSopIds({
+    tniNeeds: tnis.flatMap((t) => t.needs || []),
+    assignments,
+  });
+  const requiredExams = requiredExamsForEmployee(exams, sopIds);
+  if (!requiredExams.length) return null;
+
+  const attempts = readAssessmentStore().attempts.filter(
+    (a) => a.employeeId === params.employeeId
+  ) as AssessmentAttempt[];
+  const eligibility = evaluateProgrammeEligibility(requiredExams, attempts);
+  if (!eligibility.ready) return null;
+
+  const trigger =
+    attempts.find((a) => a.id === params.attemptId) ||
+    attempts
+      .filter((a) => a.status === "passed")
+      .sort((a, b) => (b.submittedAt || "").localeCompare(a.submittedAt || ""))[0];
+  if (!trigger) return null;
+
+  const employeeName = employee
+    ? `${employee.firstName} ${employee.lastName}`.trim()
+    : trigger.employeeName || params.employeeId;
+  const departmentName = employee?.departmentName || "—";
+  const programmeTitle =
+    departmentName !== "—" ? `${departmentName} Training Programme` : PROGRAMME_TITLE;
+
+  const certificate = await issueTrainingCertificate({
+    employeeId: params.employeeId,
+    employeeName,
+    employeeCode: employee?.employeeCode,
+    departmentId: employee?.departmentId,
+    departmentName,
+    trainingAssignmentId: trigger.assignmentId || `programme_${params.employeeId}`,
+    sopId: PROGRAMME_SOP_ID,
+    sopVersionId: "n/a",
+    sopNumber: PROGRAMME_SOP_NUMBER,
+    sopTitle: PROGRAMME_TITLE,
+    examId: trigger.examId,
+    attemptId: trigger.id,
+    score: eligibility.averagePercentage,
+    percentage: eligibility.averagePercentage,
+    actorId: params.actorId,
+    programmeTitle,
+    examsCompleted: eligibility.examsCompleted,
+  });
+  try {
+    const { markCertifiedLifecycle } = await import("@/lib/services/lifecycle");
+    await markCertifiedLifecycle(params.employeeId, certificate.id, {
+      uid: params.actorId,
+      name: "Assessment Engine",
+      role: "super_admin",
+    });
+  } catch {
+    /* lifecycle optional in demo */
+  }
+  return certificate;
+}
+
 /** Issue a training certificate, generate QR, PDF, and upload to Storage when available. */
 export async function issueTrainingCertificate(
   input: IssueCertificateInput
@@ -208,15 +269,17 @@ export async function issueTrainingCertificate(
   }
 
   const now = nowISO();
-  const id = generateId("cert");
-  const certificateNumber = generateCertificateNumber();
+  const id = `employee_${input.employeeId}`;
+  const already = readCertificateStore().certificates.find((c) => c.id === id && !c.isRevoked);
+  if (already) return normalizeCertificate(already);
 
+  const certificateNumber = generateCertificateNumber();
   const employeeName = input.employeeName || input.employeeId;
   const employeeCode = input.employeeCode || input.employeeId;
   const departmentName = input.departmentName || "—";
-  const sopNumber = input.sopNumber || "SOP";
-  const sopTitle = input.sopTitle || "Training";
-  const trainerName = await resolveTrainerNameAsync(input.trainerId, input.trainerName);
+  const sopNumber = input.sopNumber || PROGRAMME_SOP_NUMBER;
+  const sopTitle = input.sopTitle || PROGRAMME_TITLE;
+  const programmeTitle = input.programmeTitle || sopTitle;
 
   const verifyUrl = `${APP_URL}/verify/${encodeURIComponent(certificateNumber)}`;
   const qrCodeImageUrl = await QRCode.toDataURL(verifyUrl, {
@@ -242,19 +305,19 @@ export async function issueTrainingCertificate(
     sopVersionId: input.sopVersionId,
     sopNumber,
     sopTitle,
+    kind: "programme",
+    programmeTitle,
+    examsCompleted: input.examsCompleted,
+    computerGenerated: true,
     examId: input.examId,
     attemptId: input.attemptId,
-    title: `Certificate of Training — ${sopTitle}`,
+    title: `Certificate of Training — ${PROGRAMME_TITLE}`,
     issuedAt: now,
     score: input.score,
     percentage: input.percentage,
-    trainerId: input.trainerId,
-    trainerName,
+    trainerName: "—",
     companyName: COMPANY_NAME,
     companyLogoUrl: "/brand/skymap-logo.png",
-    digitalSignatureUrl: "/brand/qa-signature.svg",
-    signedBy: resolveCertificateSignatory(input.signedBy),
-    signedByTitle: input.signedByTitle || CERTIFICATE_SIGNED_BY_TITLE,
     qrCodeData: verifyUrl,
     qrCodeImageUrl,
     verificationHash,
@@ -401,7 +464,8 @@ export async function verifyCertificate(
     employeeName: cert.employeeName,
     employeeCode: cert.employeeCode,
     departmentName: cert.departmentName,
-    trainerName: cert.trainerName,
+    programmeTitle: cert.programmeTitle || cert.sopTitle,
+    examsCompleted: cert.examsCompleted,
     sopNumber: cert.sopNumber,
     sopTitle: cert.sopTitle,
     issuedAt: cert.issuedAt,

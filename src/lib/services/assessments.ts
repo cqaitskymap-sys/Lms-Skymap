@@ -472,7 +472,7 @@ export async function submitAssessment(
   writeAssessmentStore(store);
 
   if (attempt.assignmentId) {
-    await handleTrainingAssessmentResult(attempt.assignmentId, updated, exam, actorId);
+    await handleTrainingAssessmentResult(attempt.assignmentId, updated, actorId);
   }
 
   if (attempt.inductionAssignmentId) {
@@ -491,25 +491,15 @@ export async function submitAssessment(
     }
   }
 
-  if (updated.passed && updated.certificateEligible) {
+  if (updated.passed) {
     try {
-      const { issueTrainingCertificate, listCertificates } =
+      const { maybeIssueProgrammeCertificate } =
         await import("@/lib/services/certificates");
-      const existing = (await listCertificates()).find((c) => c.attemptId === updated.id);
-      if (!existing) {
-        await issueTrainingCertificate({
-          employeeId: updated.employeeId,
-          employeeName: updated.employeeName,
-          trainingAssignmentId: updated.assignmentId || `standalone_${updated.id}`,
-          sopId: exam.sopId || exam.inductionModuleId || `standalone_${exam.id}`,
-          sopVersionId: exam.sopId ? "sopv_current" : "n/a",
-          examId: exam.id,
-          attemptId: updated.id,
-          score: updated.score || 0,
-          percentage: updated.percentage || 0,
-          actorId,
-        });
-      }
+      await maybeIssueProgrammeCertificate({
+        employeeId: updated.employeeId,
+        attemptId: updated.id,
+        actorId,
+      });
     } catch (err) {
       console.error("[submitAssessment] certificate issue failed:", err);
     }
@@ -525,7 +515,6 @@ export async function submitAssessment(
 async function handleTrainingAssessmentResult(
   assignmentId: string,
   attempt: AssessmentAttempt,
-  exam: Exam,
   actorId: string
 ) {
   const now = nowISO();
@@ -547,26 +536,11 @@ async function handleTrainingAssessmentResult(
   }
 
   if (attempt.passed) {
-    let certId: string | undefined;
-    if (attempt.certificateEligible) {
-      const cert = await issueCertificate({
-        employeeId: attempt.employeeId,
-        trainingAssignmentId: assignmentId,
-        examId: exam.id,
-        attemptId: attempt.id!,
-        score: attempt.score!,
-        percentage: attempt.percentage!,
-        actorId,
-      });
-      certId = cert.id;
-    }
-
     await updateDoc(doc(db, COLLECTIONS.trainingAssignments, assignmentId), {
       status: "passed",
       score: attempt.percentage,
       passed: true,
       assessmentAttemptId: attempt.id,
-      ...(certId ? { certificateId: certId } : {}),
       updatedAt: now,
       updatedBy: actorId,
     });
@@ -575,7 +549,6 @@ async function handleTrainingAssessmentResult(
       const {
         markExamLifecycle,
         markPassedLifecycle,
-        markCertifiedLifecycle,
       } = await import("@/lib/services/lifecycle");
       const actor = {
         uid: actorId,
@@ -584,9 +557,6 @@ async function handleTrainingAssessmentResult(
       };
       await markExamLifecycle(attempt.employeeId, actor);
       await markPassedLifecycle(attempt.employeeId, actor, attempt.percentage);
-      if (certId) {
-        await markCertifiedLifecycle(attempt.employeeId, certId, actor);
-      }
     } catch {
       /* lifecycle may already be ahead */
     }
@@ -637,53 +607,16 @@ export async function issueCertificate(params: {
   actorId: string;
   trainerId?: string;
 }): Promise<Certificate> {
-  if (!(await preferLocalData())) {
-    const { issueCertificateForAttempt } = await import("@/lib/services/certificates");
-    const viaApi = await issueCertificateForAttempt(params.attemptId);
-    if (viaApi) return viaApi;
-  }
-
-  const { issueTrainingCertificate } = await import("@/lib/services/certificates");
-
-  let sopId = `standalone_${params.examId}`;
-  let sopVersionId = "n/a";
-  let trainerId = params.trainerId;
-
-  try {
-    const { listTrainingAssignments } = await import("@/lib/services/training");
-    const all = await listTrainingAssignments();
-    const assignment = all.find((a) => a.id === params.trainingAssignmentId);
-    if (assignment) {
-      sopId = assignment.sopId;
-      sopVersionId = assignment.sopVersionId;
-      trainerId = trainerId || assignment.trainerId;
-    } else if (!(await preferLocalData())) {
-      const assignSnap = await getDoc(
-        doc(db, COLLECTIONS.trainingAssignments, params.trainingAssignmentId)
-      );
-      if (assignSnap.exists()) {
-        const row = assignSnap.data() as TrainingAssignment;
-        sopId = row.sopId;
-        sopVersionId = row.sopVersionId;
-        trainerId = trainerId || row.trainerId;
-      }
-    }
-  } catch {
-    /* use standalone defaults */
-  }
-
-  return issueTrainingCertificate({
+  const { maybeIssueProgrammeCertificate } = await import("@/lib/services/certificates");
+  const cert = await maybeIssueProgrammeCertificate({
     employeeId: params.employeeId,
-    trainingAssignmentId: params.trainingAssignmentId,
-    sopId,
-    sopVersionId,
-    examId: params.examId,
     attemptId: params.attemptId,
-    score: params.score,
-    percentage: params.percentage,
-    trainerId,
     actorId: params.actorId,
   });
+  if (!cert) {
+    throw new Error("Certificate is issued after all assigned exams are passed");
+  }
+  return cert;
 }
 
 export async function listAttemptsForEmployee(

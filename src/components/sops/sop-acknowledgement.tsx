@@ -18,6 +18,9 @@ interface SopAcknowledgementPanelProps {
   acknowledgements: SopAcknowledgement[];
   onDone?: () => void;
   canAcknowledge?: boolean;
+  readingRequired?: boolean;
+  readingComplete?: boolean;
+  readingHint?: string;
 }
 
 export function SopAcknowledgementPanel({
@@ -27,14 +30,22 @@ export function SopAcknowledgementPanel({
   acknowledgements,
   onDone,
   canAcknowledge = true,
+  readingRequired = false,
+  readingComplete = true,
+  readingHint,
 }: SopAcknowledgementPanelProps) {
   const [agreed, setAgreed] = useState(false);
   const [busy, setBusy] = useState(false);
   const mine = acknowledgements.find(
     (a) => a.versionId === version.id && a.userId === actor.uid
   );
+  const blockedByReading = readingRequired && !readingComplete;
 
   const submit = async () => {
+    if (blockedByReading) {
+      toast.error(readingHint || "Finish reading the SOP before acknowledging");
+      return;
+    }
     if (!agreed) {
       toast.error("Confirm that you have read and understood the SOP");
       return;
@@ -80,13 +91,23 @@ export function SopAcknowledgementPanel({
             I have read and understood this Standard Operating Procedure (v
             {version.versionNumber}) and agree to comply with its requirements in my role.
           </p>
+          {blockedByReading && (
+            <p className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-200">
+              {readingHint ||
+                "Stay on the document until the timer finishes and you have scrolled every page."}
+            </p>
+          )}
           <label className="flex items-start gap-2 text-sm">
-            <Checkbox checked={agreed} onCheckedChange={(c) => setAgreed(Boolean(c))} />
+            <Checkbox
+              checked={agreed}
+              disabled={blockedByReading}
+              onCheckedChange={(c) => setAgreed(Boolean(c))}
+            />
             <Label className="font-normal leading-snug">
               I confirm I have reviewed the document and attachments
             </Label>
           </label>
-          <Button disabled={busy || !agreed} onClick={() => void submit()}>
+          <Button disabled={busy || !agreed || blockedByReading} onClick={() => void submit()}>
             {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
             Sign & acknowledge
           </Button>

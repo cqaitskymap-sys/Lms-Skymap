@@ -29,6 +29,7 @@ import { Badge } from "@/components/ui/badge";
 import { formatDate } from "@/lib/utils";
 import type { Certificate } from "@/types";
 import Link from "next/link";
+import { certificateSubjectLine } from "@/lib/certificates/copy";
 
 export default function CertificatesPage() {
   const { profile, role } = useAuth();
@@ -53,7 +54,10 @@ export default function CertificatesPage() {
         employeeOnly ? { employeeId: employeeOnly } : undefined
       );
 
-      if (!rows.length && role === "employee" && profile?.employeeId) {
+      const hasProgramme = rows.some(
+        (c) => !c.isRevoked && (c.kind === "programme" || c.sopNumber === "TRAINING")
+      );
+      if (!hasProgramme && role === "employee" && profile?.employeeId) {
         try {
           const { auth } = await import("@/lib/firebase/client");
           const user = auth.currentUser;
@@ -122,7 +126,7 @@ export default function CertificatesPage() {
           <div>
             <h1 className="text-2xl font-bold tracking-tight">Certificates</h1>
             <p className="text-muted-foreground">
-              Auto-issued training certificates with QR verification & PDF storage
+              Issued after all assigned exams are passed. Electronically computer-generated — QR verification, no signature.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -163,9 +167,9 @@ export default function CertificatesPage() {
                   <TableRow>
                     <TableHead>Number</TableHead>
                     <TableHead>Employee</TableHead>
-                    <TableHead>SOP</TableHead>
-                    <TableHead>Trainer</TableHead>
-                    <TableHead>Score</TableHead>
+                    <TableHead>Programme</TableHead>
+                    <TableHead>Assessments</TableHead>
+                    <TableHead>Avg. score</TableHead>
                     <TableHead>Issued</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead />
@@ -186,12 +190,9 @@ export default function CertificatesPage() {
                         </div>
                       </TableCell>
                       <TableCell>
-                        <p className="text-sm">{c.sopNumber}</p>
-                        <p className="text-xs text-muted-foreground line-clamp-1">
-                          {c.sopTitle}
-                        </p>
+                        <p className="text-sm">{certificateSubjectLine(c)}</p>
                       </TableCell>
-                      <TableCell>{c.trainerName}</TableCell>
+                      <TableCell>{c.examsCompleted ?? "—"}</TableCell>
                       <TableCell>
                         <Badge variant="secondary">{c.percentage}%</Badge>
                       </TableCell>
@@ -259,7 +260,7 @@ export default function CertificatesPage() {
                   {!visible.length && (
                     <TableRow>
                       <TableCell colSpan={8} className="text-center text-muted-foreground">
-                        No certificates yet — pass an assessment to auto-issue one.
+                        No certificates yet — pass all assigned exams to receive one.
                       </TableCell>
                     </TableRow>
                   )}

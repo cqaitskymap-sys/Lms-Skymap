@@ -11,12 +11,16 @@ import { StatusBadge } from "@/components/shared/status-badge";
 import { Button } from "@/components/ui/button";
 import { formatDateTime } from "@/lib/utils";
 import { listTrainingSessions } from "@/lib/services/training";
+import { listOjtAssignments } from "@/lib/services/ojt";
 import { TRAINING_UPDATED_EVENT } from "@/lib/training/demo-store";
+import { OJT_UPDATED_EVENT } from "@/lib/ojt/demo-store";
 import type { TrainingSession } from "@/types";
+import type { OjtAssignment } from "@/types/ojt";
 
 export default function TrainerDashboardPage() {
   const { profile } = useAuth();
   const [sessions, setSessions] = useState<TrainingSession[]>([]);
+  const [ojtRows, setOjtRows] = useState<OjtAssignment[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -29,6 +33,9 @@ export default function TrainerDashboardPage() {
         ? all.filter((s) => s.trainerId === profile.uid || s.createdBy === profile.uid)
         : [];
       setSessions(mine);
+      if (profile?.uid) {
+        setOjtRows(await listOjtAssignments({ trainerId: profile.uid }));
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load sessions");
       setSessions([]);
@@ -41,7 +48,11 @@ export default function TrainerDashboardPage() {
     void refresh();
     const onUpdate = () => void refresh();
     window.addEventListener(TRAINING_UPDATED_EVENT, onUpdate);
-    return () => window.removeEventListener(TRAINING_UPDATED_EVENT, onUpdate);
+    window.addEventListener(OJT_UPDATED_EVENT, onUpdate);
+    return () => {
+      window.removeEventListener(TRAINING_UPDATED_EVENT, onUpdate);
+      window.removeEventListener(OJT_UPDATED_EVENT, onUpdate);
+    };
   }, [refresh]);
 
   return (
@@ -61,12 +72,14 @@ export default function TrainerDashboardPage() {
             Retry
           </Button>
         </div>
-      ) : sessions.length === 0 ? (
+      ) : sessions.length === 0 && ojtRows.length === 0 ? (
         <p className="text-sm text-muted-foreground">
-          No training sessions assigned yet. Department Head can assign SOP training from
-          the Training page.
+          No SOP sessions or OJT assigned yet. Department Head can assign training from the Training
+          and OJT pages.
         </p>
       ) : (
+        <div className="space-y-6">
+          {sessions.length > 0 && (
         <div className="grid gap-4 md:grid-cols-2">
           {sessions.map((s) => (
             <MotionItem key={s.id}>
@@ -91,6 +104,31 @@ export default function TrainerDashboardPage() {
               </GlassCard>
             </MotionItem>
           ))}
+        </div>
+          )}
+          {ojtRows.length > 0 && (
+            <div className="grid gap-4 md:grid-cols-2">
+              {ojtRows.slice(0, 8).map((a) => (
+                <MotionItem key={a.id}>
+                  <GlassCard hover className="h-full">
+                    <GlassCardHeader
+                      title={a.trainingTopic}
+                      description={`${a.employeeName} · ${a.employeeCode}`}
+                      action={<StatusBadge status={a.status} />}
+                    />
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-muted-foreground">On Job Training</span>
+                      <Button size="sm" asChild>
+                        <Link href={`/dashboard/ojt/assignments/${a.id}`}>
+                          {a.status === "scheduled" || a.status === "in_progress" ? "Execute" : "Open"}
+                        </Link>
+                      </Button>
+                    </div>
+                  </GlassCard>
+                </MotionItem>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </DashboardShell>

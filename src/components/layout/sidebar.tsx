@@ -22,6 +22,7 @@ import {
   Briefcase,
   Target,
   Calendar,
+  HardHat,
   X,
   type LucideIcon,
 } from "lucide-react";
@@ -48,6 +49,7 @@ const MODULE_ICONS: Record<AppModule, LucideIcon> = {
   sops: FileText,
   trainers: UserCog,
   training: Calendar,
+  ojt: HardHat,
   matrix: ClipboardList,
   questions: HelpCircle,
   exams: BookOpen,

@@ -58,5 +58,12 @@ service firebase.storage {
         && request.resource.contentType.matches('application/pdf|image/(png|jpeg|jpg|webp)');
       allow delete: if isSuperAdmin() || hasRole(['hr']);
     }
+
+    match /ojt/{assignmentId}/{fileName} {
+      allow read: if isSignedIn();
+      allow write: if hasRole(['super_admin', 'qa', 'department_head', 'trainer'])
+        && request.resource.size < 25 * 1024 * 1024;
+      allow delete: if isSuperAdmin() || hasRole(['qa', 'department_head', 'trainer']);
+    }
   }
 }

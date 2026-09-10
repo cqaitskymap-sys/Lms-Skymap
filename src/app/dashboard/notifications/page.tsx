@@ -29,6 +29,7 @@ const TYPE_LABEL: Record<NotificationType, string> = {
   sop_revision: "SOP revision",
   handover: "Handover",
   retraining: "Retraining",
+  ojt: "OJT",
   system: "System",
 };
 

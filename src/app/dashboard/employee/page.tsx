@@ -24,13 +24,13 @@ export default function EmployeeDashboardPage() {
     <DashboardShell
       role="employee"
       title="My Learning"
-      subtitle="Read your TNI SOPs, then take the exam"
+      subtitle="Read your TNI SOPs for the required time, then take the exam"
     >
       <MotionItem>
         <GlassCard>
           <GlassCardHeader
             title="TNI SOPs"
-            description="SOPs added in your Training Need Identification — acknowledge a SOP, then take its exam"
+            description="Read every page of each TNI SOP for the required time, acknowledge it, then take its exam"
             action={
               <Button size="sm" asChild>
                 <Link href={progress.acknowledgedCount > 0 ? "/dashboard/exams" : "/dashboard/sops"}>
@@ -100,7 +100,7 @@ export default function EmployeeDashboardPage() {
         </GlassCard>
       </MotionItem>
 
-      <div className="grid gap-4 sm:grid-cols-3">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <MotionItem>
           <GlassCard className="h-full">
             <div className="flex items-start gap-3 p-1">
@@ -121,7 +121,7 @@ export default function EmployeeDashboardPage() {
               <ClipboardCheck className="mt-0.5 h-5 w-5 text-cyan-700" />
               <div>
                 <p className="font-medium">Exam</p>
-                <p className="text-sm text-muted-foreground">Unlocks after you acknowledge the SOP</p>
+                <p className="text-sm text-muted-foreground">Unlocks after you finish reading and acknowledge the SOP</p>
                 <Button size="sm" variant="link" className="px-0" asChild>
                   <Link href="/dashboard/exams">Open exams</Link>
                 </Button>
@@ -138,6 +138,20 @@ export default function EmployeeDashboardPage() {
                 <p className="text-sm text-muted-foreground">Issued after you pass the exam</p>
                 <Button size="sm" variant="link" className="px-0" asChild>
                   <Link href="/dashboard/certificates">My certificates</Link>
+                </Button>
+              </div>
+            </div>
+          </GlassCard>
+        </MotionItem>
+        <MotionItem>
+          <GlassCard className="h-full">
+            <div className="flex items-start gap-3 p-1">
+              <ClipboardCheck className="mt-0.5 h-5 w-5 text-cyan-700" />
+              <div>
+                <p className="font-medium">On Job Training</p>
+                <p className="text-sm text-muted-foreground">View assigned OJT and acknowledge completed practical training</p>
+                <Button size="sm" variant="link" className="px-0" asChild>
+                  <Link href="/dashboard/ojt/assignments">My OJT</Link>
                 </Button>
               </div>
             </div>
