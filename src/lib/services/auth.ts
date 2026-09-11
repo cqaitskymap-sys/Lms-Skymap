@@ -113,6 +113,19 @@ export async function updateUserProfile(params: {
   phone?: string;
 }): Promise<void> {
   if (isDemoMode()) {
+    const found = findDemoAdminUserByUid(params.userId);
+    if (found) {
+      const [email, entry] = found;
+      updateDemoAdminUser(email, {
+        password: entry.password,
+        profile: {
+          ...entry.profile,
+          displayName: params.displayName.trim(),
+          phone: params.phone !== undefined ? params.phone.trim() || undefined : entry.profile.phone,
+          updatedAt: new Date().toISOString(),
+        },
+      });
+    }
     return;
   }
 

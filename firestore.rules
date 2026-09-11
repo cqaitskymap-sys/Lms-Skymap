@@ -350,6 +350,12 @@ service cloud.firestore {
       allow delete: if isSuperAdmin();
     }
 
+    match /ojt_form_documents/{id} {
+      allow read: if isActive();
+      allow create, update: if hasRole(['super_admin', 'qa', 'department_head']);
+      allow delete: if isSuperAdmin();
+    }
+
     // ─── Assessments ──────────────────────────────────────────────────
     match /question_banks/{id} {
       allow read: if isActive();

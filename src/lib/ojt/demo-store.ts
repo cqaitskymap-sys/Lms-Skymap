@@ -1,6 +1,7 @@
 import type {
   OjtAssignment,
   OjtEvaluationCriterion,
+  OjtFormDocument,
   OjtPlan,
   OjtSettings,
   OjtTopic,
@@ -17,6 +18,7 @@ export interface OjtStore {
   assignments: OjtAssignment[];
   criteria: OjtEvaluationCriterion[];
   settings: OjtSettings | null;
+  formDocuments: OjtFormDocument[];
 }
 
 function emptyStore(): OjtStore {
@@ -26,6 +28,7 @@ function emptyStore(): OjtStore {
     assignments: [],
     criteria: [],
     settings: null,
+    formDocuments: [],
   };
 }
 
@@ -38,7 +41,13 @@ export function readOjtStore(): OjtStore {
       localStorage.setItem(STORE_KEY, JSON.stringify(store));
       return store;
     }
-    return { ...emptyStore(), ...(JSON.parse(raw) as OjtStore) };
+    const parsed = { ...emptyStore(), ...(JSON.parse(raw) as OjtStore) };
+    parsed.formDocuments = parsed.formDocuments || [];
+    parsed.topics = parsed.topics || [];
+    parsed.plans = parsed.plans || [];
+    parsed.assignments = parsed.assignments || [];
+    parsed.criteria = parsed.criteria || [];
+    return parsed;
   } catch {
     return emptyStore();
   }

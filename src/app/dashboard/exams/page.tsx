@@ -110,7 +110,8 @@ function ExamsPageInner() {
       .then((items) => {
         const map: Record<string, string> = {};
         for (const item of items) {
-          if (item.assignment.status !== "passed" && item.assignment.status !== "failed") {
+          const st = item.assignment.status;
+          if (st === "assessment_pending" || st === "failed") {
             map[item.module.id] = item.assignment.id;
           }
         }

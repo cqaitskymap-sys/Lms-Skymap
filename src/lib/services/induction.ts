@@ -497,12 +497,20 @@ export async function markDocumentViewed(
   }
 
   if (!assignment || !inductionModule) return null;
+  if (assignment.status === "passed" || assignment.status === "failed") {
+    return assignment;
+  }
 
   const viewed = Array.from(new Set([...assignment.documentsViewed, documentId]));
   const total = Math.max(inductionModule.documents?.length || 1, 1);
   const progress = Math.min(100, Math.round((viewed.length / total) * 100));
   const now = nowISO();
-  const nextStatus = progress >= 100 ? "assessment_pending" : "in_progress";
+  const nextStatus =
+    assignment.status === "assessment_pending"
+      ? "assessment_pending"
+      : progress >= 100
+        ? "assessment_pending"
+        : "in_progress";
   const updated: InductionAssignment = {
     ...assignment,
     documentsViewed: viewed,
@@ -560,6 +568,9 @@ export async function markModuleStudied(
   }
 
   if (!assignment || !inductionModule) return null;
+  if (assignment.status === "passed") {
+    return assignment;
+  }
 
   const allDocIds = (inductionModule.documents || []).map((d) => d.id);
   const now = nowISO();

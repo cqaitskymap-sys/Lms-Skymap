@@ -134,30 +134,18 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const requiredIds = DEFAULT_COMPANY_POLICIES.filter((p) => p.isRequired).map((p) => p.id);
+    const policiesSnap = await adminDb.collection(COLLECTIONS.companyPolicies).where("isActive", "==", true).get();
+    const requiredIds = policiesSnap.empty
+      ? DEFAULT_COMPANY_POLICIES.filter((p) => p.isRequired).map((p) => p.id)
+      : policiesSnap.docs
+          .filter((d) => Boolean(d.data().isRequired))
+          .map((d) => d.id);
     const missing = requiredIds.filter((id) => !parsed.data.policyIds.includes(id));
     if (missing.length > 0) {
-      // Also allow Firestore-backed policy IDs if present
-      const snap = await adminDb
-        .collection(COLLECTIONS.companyPolicies)
-        .where("isActive", "==", true)
-        .where("isRequired", "==", true)
-        .get();
-      if (!snap.empty) {
-        const req = snap.docs.map((d) => d.id);
-        const stillMissing = req.filter((id) => !parsed.data.policyIds.includes(id));
-        if (stillMissing.length > 0) {
-          return NextResponse.json(
-            { success: false, error: "All required policies must be accepted" },
-            { status: 400 }
-          );
-        }
-      } else if (missing.length > 0) {
-        return NextResponse.json(
-          { success: false, error: "All required policies must be accepted" },
-          { status: 400 }
-        );
-      }
+      return NextResponse.json(
+        { success: false, error: "All required policies must be accepted" },
+        { status: 400 }
+      );
     }
 
     const batch = adminDb.batch();

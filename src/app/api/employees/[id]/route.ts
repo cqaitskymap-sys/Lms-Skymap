@@ -14,16 +14,20 @@ async function deleteQueryBatch(
   field: string,
   value: string
 ): Promise<number> {
-  const snap = await adminDb
-    .collection(collectionName)
-    .where(field, "==", value)
-    .limit(500)
-    .get();
-  if (snap.empty) return 0;
-  const batch = adminDb.batch();
-  snap.docs.forEach((d) => batch.delete(d.ref));
-  await batch.commit();
-  return snap.size;
+  let total = 0;
+  while (true) {
+    const snap = await adminDb
+      .collection(collectionName)
+      .where(field, "==", value)
+      .limit(500)
+      .get();
+    if (snap.empty) return total;
+    const batch = adminDb.batch();
+    snap.docs.forEach((d) => batch.delete(d.ref));
+    await batch.commit();
+    total += snap.size;
+    if (snap.size < 500) return total;
+  }
 }
 
 /**
@@ -71,6 +75,19 @@ export async function DELETE(
   await deleteQueryBatch(COLLECTIONS.lifecycleApprovals, "employeeId", id);
   await deleteQueryBatch(COLLECTIONS.inductionAssignments, "employeeId", id);
   await deleteQueryBatch(COLLECTIONS.trainingAssignments, "employeeId", id);
+  await deleteQueryBatch(COLLECTIONS.jobDescriptions, "employeeId", id);
+  await deleteQueryBatch(COLLECTIONS.tni, "employeeId", id);
+  await deleteQueryBatch(COLLECTIONS.certificates, "employeeId", id);
+  await deleteQueryBatch(COLLECTIONS.ojtAssignments, "employeeId", id);
+  await deleteQueryBatch(COLLECTIONS.assessmentAttempts, "employeeId", id);
+  await deleteQueryBatch(COLLECTIONS.examResults, "employeeId", id);
+  await deleteQueryBatch(COLLECTIONS.sopAcknowledgements, "employeeId", id);
+  await deleteQueryBatch(COLLECTIONS.sopViews, "employeeId", id);
+  await deleteQueryBatch(COLLECTIONS.sopReadingProgress, "employeeId", id);
+  if (userId) {
+    await deleteQueryBatch(COLLECTIONS.notifications, "userId", userId);
+    await deleteQueryBatch(COLLECTIONS.policyAcceptances, "userId", userId);
+  }
 
   await empRef.delete();
 

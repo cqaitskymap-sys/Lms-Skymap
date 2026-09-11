@@ -5,6 +5,31 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+export function localDayBound(dateStr: string, endOfDay: boolean): number {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(dateStr.trim());
+  if (m) {
+    const y = Number(m[1]);
+    const mo = Number(m[2]) - 1;
+    const d = Number(m[3]);
+    return endOfDay
+      ? new Date(y, mo, d, 23, 59, 59, 999).getTime()
+      : new Date(y, mo, d, 0, 0, 0, 0).getTime();
+  }
+  const parsed = new Date(dateStr);
+  if (endOfDay) parsed.setHours(23, 59, 59, 999);
+  else parsed.setHours(0, 0, 0, 0);
+  return parsed.getTime();
+}
+
+export function isoInLocalDateRange(iso: string | undefined, dateFrom?: string, dateTo?: string): boolean {
+  if (!iso) return true;
+  if (!dateFrom && !dateTo) return true;
+  const t = new Date(iso).getTime();
+  if (dateFrom && t < localDayBound(dateFrom, false)) return false;
+  if (dateTo && t > localDayBound(dateTo, true)) return false;
+  return true;
+}
+
 export function formatDate(date: string | Date | undefined, opts?: Intl.DateTimeFormatOptions) {
   if (!date) return "—";
   const d = typeof date === "string" ? new Date(date) : date;

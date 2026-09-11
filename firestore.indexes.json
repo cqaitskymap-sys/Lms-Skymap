@@ -33,6 +33,14 @@
       ]
     },
     {
+      "collectionGroup": "training_assignments",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "employeeId", "order": "ASCENDING" },
+        { "fieldPath": "sessionId", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "sop_versions",
       "queryScope": "COLLECTION",
       "fields": [
@@ -277,6 +285,15 @@
       "fields": [
         { "fieldPath": "trainerId", "order": "ASCENDING" },
         { "fieldPath": "year", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "ojt_form_documents",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "departmentId", "order": "ASCENDING" },
+        { "fieldPath": "year", "order": "ASCENDING" },
+        { "fieldPath": "kind", "order": "ASCENDING" }
       ]
     }
   ],

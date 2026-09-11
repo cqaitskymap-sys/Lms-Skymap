@@ -191,7 +191,15 @@ export async function startAssessmentServer(
     return { ok: false, status: 404, error: "Exam not found or inactive" };
   }
 
-  if (!input.skipTniGate) {
+  if (exam.inductionModuleId && !input.inductionAssignmentId) {
+    return {
+      ok: false,
+      status: 400,
+      error: "Induction assignment is required for this exam",
+    };
+  }
+
+  if (!input.skipTniGate && !exam.inductionModuleId && !input.inductionAssignmentId) {
     const tniBlock = await assertTniSopsReadServer({
       employeeId: input.employeeId,
       userId: input.actorId,
@@ -243,11 +251,18 @@ export async function startAssessmentServer(
     if (exam.inductionModuleId && induction.moduleId && exam.inductionModuleId !== induction.moduleId) {
       return { ok: false, status: 400, error: "Exam is not linked to this induction module" };
     }
-    if (["passed", "failed"].includes(induction.status || "")) {
+    if (induction.status === "passed") {
       return {
         ok: false,
         status: 400,
-        error: `Induction assignment is not ready for assessment (status: ${induction.status})`,
+        error: "Induction assignment is already completed",
+      };
+    }
+    if (induction.status !== "assessment_pending" && induction.status !== "failed") {
+      return {
+        ok: false,
+        status: 400,
+        error: `Complete induction study before the exam (status: ${induction.status || "not_started"})`,
       };
     }
   }
@@ -478,12 +493,20 @@ export async function submitAssessmentServer(
   if (attempt.inductionAssignmentId) {
     try {
       const nowIso = now.toISOString();
+      const priorAttempts = await listAttemptsForEmployee(attempt.examId, attempt.employeeId);
+      const finishedBefore = priorAttempts.filter((a) => a.status !== "in_progress").length;
+      const attemptsExhausted = finishedBefore + 1 >= (exam.maxAttempts || 1);
+      const inductionStatus = updated.passed
+        ? "passed"
+        : attemptsExhausted
+          ? "failed"
+          : "assessment_pending";
       await adminDb
         .collection(COLLECTIONS.inductionAssignments)
         .doc(attempt.inductionAssignmentId)
         .set(
           {
-            status: updated.passed ? "passed" : "failed",
+            status: inductionStatus,
             score: updated.percentage,
             passed: !!updated.passed,
             assessmentAttemptId: attempt.id,

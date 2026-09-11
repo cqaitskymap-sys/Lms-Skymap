@@ -6,7 +6,7 @@ import { Loader2 } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
 import { hasPermission } from "@/lib/rbac/permissions";
 import { listAuditLogs } from "@/lib/services/audit-logs";
-import { listOjtAssignments, listOjtPlans } from "@/lib/services/ojt";
+import { listOjtAssignments, listOjtPlans, getOjtSettings } from "@/lib/services/ojt";
 import { OJT_UPDATED_EVENT } from "@/lib/ojt/demo-store";
 import { currentCalendarYear, monthName } from "@/lib/ojt/constants";
 import { isOjtOverdue } from "@/lib/ojt/workflow";
@@ -73,6 +73,7 @@ export default function OjtReportsPage() {
   const [type, setType] = useState<OjtReportId>("ojt_employee");
   const [assignments, setAssignments] = useState<OjtAssignment[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
+  const [graceDays, setGraceDays] = useState(0);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const year = currentCalendarYear();
@@ -91,12 +92,14 @@ export default function OjtReportsPage() {
           : profile?.role === "employee" && profile.employeeId
             ? { employeeId: profile.employeeId }
             : undefined;
-      const [asg, emps] = await Promise.all([
+      const [asg, emps, cfg] = await Promise.all([
         listOjtAssignments(filters),
         listEmployeesForLifecycle().catch(() => [] as Employee[]),
+        getOjtSettings().catch(() => null),
       ]);
       setAssignments(asg);
       setEmployees(emps);
+      setGraceDays(cfg?.overdueGraceDays ?? 0);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to load OJT reports");
     } finally {
@@ -138,7 +141,7 @@ export default function OjtReportsPage() {
     if (type === "ojt_pending") {
       rows = assignments.filter((a) => match(a) && !["completed", "cancelled"].includes(a.status)).map(assignmentRow);
     } else if (type === "ojt_overdue") {
-      rows = assignments.filter((a) => match(a) && isOjtOverdue(a)).map(assignmentRow);
+      rows = assignments.filter((a) => match(a) && isOjtOverdue(a, new Date(), graceDays)).map(assignmentRow);
     } else if (type === "ojt_failed") {
       rows = assignments
         .filter((a) => match(a) && (a.status === "failed" || a.status === "retraining_required"))
@@ -244,7 +247,7 @@ export default function OjtReportsPage() {
       ],
       charts: [],
     };
-  }, [assignments, search, type, year]);
+  }, [assignments, search, type, year, graceDays]);
 
   const loadSpecial = useCallback(async () => {
     if (type === "ojt_monthly_planner") {
@@ -263,14 +266,24 @@ export default function OjtReportsPage() {
           { key: "trainer", label: "Trainer" },
           { key: "status", label: "Status" },
         ],
-        rows: plans.map((p) => ({
-          topic: p.trainingTopic,
-          sop: p.referenceDocumentNumber || p.sopNumber || "NA",
-          selection: p.selectionMonths.map(monthName).join(", "),
-          execution: p.executionMonths.map(monthName).join(", "),
-          trainer: p.trainerName || "",
-          status: p.status,
-        })),
+        rows: plans.flatMap((p, index) => [
+          {
+            topic: p.trainingTopic,
+            sop: p.referenceDocumentNumber || p.sopNumber || "NA",
+            selection: "S",
+            execution: p.selectionMonths.map(monthName).join(", "),
+            trainer: p.trainerName || "",
+            status: `${index + 1}`,
+          },
+          {
+            topic: "",
+            sop: "",
+            selection: "E",
+            execution: p.executionMonths.map(monthName).join(", "),
+            trainer: "",
+            status: p.status,
+          },
+        ]),
         kpis: [{ label: "Planner rows", value: plans.length }],
         charts: [],
       } satisfies ReportDataset;
@@ -288,7 +301,7 @@ export default function OjtReportsPage() {
         };
         for (const emp of emps) {
           const asg = latestAssignmentForCell(assignments, emp.id, plan.topicId, year);
-          row[emp.employeeCode] = OJT_MATRIX_LABELS[matrixCellValue(plan, asg, emp.id)];
+          row[emp.employeeCode] = OJT_MATRIX_LABELS[matrixCellValue(plan, asg, emp.id, graceDays)];
         }
         return row;
       });
@@ -300,7 +313,7 @@ export default function OjtReportsPage() {
         columns: [
           { key: "topic", label: "Training Topic" },
           { key: "sop", label: "SOP / Reference" },
-          ...emps.map((e) => ({ key: e.employeeCode, label: `${e.firstName} ${e.lastName}` })),
+          ...emps.map((e) => ({ key: e.employeeCode, label: `${e.firstName} ${e.lastName} (${e.employeeCode})` })),
         ],
         rows,
         kpis: [{ label: "Topics", value: plans.length }],
@@ -335,7 +348,7 @@ export default function OjtReportsPage() {
       } satisfies ReportDataset;
     }
     return null;
-  }, [assignments, canAudit, employees, profile, type, year]);
+  }, [assignments, canAudit, employees, profile, type, year, graceDays]);
 
   const [special, setSpecial] = useState<ReportDataset | null>(null);
 

@@ -6,6 +6,7 @@
 
 import {
   collection,
+  deleteDoc,
   doc,
   getDoc,
   getDocs,
@@ -25,6 +26,10 @@ import type {
   OjtDashboardStats,
   OjtEvaluation,
   OjtEvaluationCriterion,
+  OjtExecutionDeviation,
+  OjtFormDocument,
+  OjtFormKind,
+  OjtFormSignoffRole,
   OjtPlan,
   OjtSettings,
   OjtTopic,
@@ -34,17 +39,23 @@ import {
   DEFAULT_EVALUATION_CRITERIA,
   DEFAULT_OJT_SETTINGS,
   OJT_ACK_STATEMENT,
+  assertExecutionNotBeforeSelection,
   calendarDateToIso,
   currentCalendarMonth,
   currentCalendarYear,
   dateFallsInMonth,
+  formatRevisionNumber,
+  nextRevisionNumber,
   parseCalendarDateParts,
 } from "@/lib/ojt/constants";
 import {
   assertTransition,
+  evaluationDidFail,
+  evaluationOverallRating,
   isOjtOverdue,
   statusAfterEmployeeAck,
   statusAfterHodDecision,
+  statusAfterQaDecision,
   statusAfterTrainerCompletion,
 } from "@/lib/ojt/workflow";
 import { listDepartments } from "@/lib/services/departments";
@@ -56,6 +67,15 @@ import {
   writeOjtStore,
 } from "@/lib/ojt/demo-store";
 import { QA_OJT_SEED_TOPICS, normalizeSopNumber } from "@/lib/ojt/seed-topics";
+import {
+  assertFormUnlocked,
+  canApproveForm,
+  emptyFormDocument,
+  formApprovalsFor,
+  formDocumentId,
+  mergeOjtSettings,
+  statusAfterFormSignoff,
+} from "@/lib/ojt/forms";
 import { getSopBundle, listSopsDetailed } from "@/lib/services/sops";
 import { createNotification, notifyEmployee } from "@/lib/services/notifications";
 import { recordAuditEvent } from "@/lib/services/audit-logs";
@@ -70,16 +90,22 @@ function sanitize<T>(value: T): T {
   return stripUndefined(JSON.parse(JSON.stringify(value)) as T);
 }
 
+function cloneRow<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
 function isPermissionDenied(err: unknown): boolean {
   if (!err || typeof err !== "object") return false;
   const code = "code" in err ? String((err as { code: unknown }).code) : "";
   return code === "permission-denied" || /insufficient permissions/i.test(String(err));
 }
 
-function rethrowOjtPermission(err: unknown): never {
+function rethrowOjtPermission(err: unknown, collectionHint?: string): never {
   if (isPermissionDenied(err)) {
     throw new Error(
-      "OJT Firestore collections are blocked. Live rules on lms-skymap do not include ojt_topics / ojt_assignments. From this repo run: npx firebase-tools deploy --only firestore:rules,firestore:indexes --project lms-skymap"
+      collectionHint
+        ? `OJT Firestore collection "${collectionHint}" is blocked by live security rules. Deploy this repo's firestore.rules to lms-skymap.`
+        : "OJT Firestore collections are blocked. Live rules on lms-skymap do not include ojt_topics / ojt_assignments. From this repo run: npx firebase-tools deploy --only firestore:rules,firestore:indexes --project lms-skymap"
     );
   }
   throw err;
@@ -110,6 +136,20 @@ async function ojtSetDoc(path: Parameters<typeof setDoc>[0], data: unknown) {
     await setDoc(path, data as Parameters<typeof setDoc>[1]);
   } catch (err) {
     return rethrowOjtPermission(err);
+  }
+}
+
+async function ojtDeleteDoc(path: Parameters<typeof deleteDoc>[0]) {
+  try {
+    await deleteDoc(path);
+  } catch (err) {
+    return rethrowOjtPermission(err);
+  }
+}
+
+function assertOjtSuperAdmin(actor: OjtActor) {
+  if (actor.role !== "super_admin") {
+    throw new Error("Only Super Admin can edit or delete OJT records");
   }
 }
 
@@ -243,6 +283,29 @@ async function saveAssignment(assignment: OjtAssignment): Promise<void> {
   notifyOjtUpdated();
 }
 
+async function saveFormDocument(docRow: OjtFormDocument): Promise<void> {
+  if (preferOjtLocal()) {
+    const store = readOjtStore();
+    const idx = store.formDocuments.findIndex((d) => d.id === docRow.id);
+    if (idx >= 0) store.formDocuments[idx] = docRow;
+    else store.formDocuments.push(docRow);
+    writeOjtStore(store);
+    return;
+  }
+  try {
+    // Use setDoc directly so permission-denied can fall back to the local store.
+    await setDoc(doc(db, COLLECTIONS.ojtFormDocuments, docRow.id), sanitize(docRow));
+    notifyOjtUpdated();
+  } catch (err) {
+    if (!isPermissionDenied(err)) return rethrowOjtPermission(err, COLLECTIONS.ojtFormDocuments);
+    const store = readOjtStore();
+    const idx = store.formDocuments.findIndex((d) => d.id === docRow.id);
+    if (idx >= 0) store.formDocuments[idx] = docRow;
+    else store.formDocuments.push(docRow);
+    writeOjtStore(store);
+  }
+}
+
 export async function getOjtSettings(): Promise<OjtSettings> {
   const now = nowISO();
   const fallback: OjtSettings = {
@@ -253,13 +316,12 @@ export async function getOjtSettings(): Promise<OjtSettings> {
   };
 
   if (preferOjtLocal()) {
-    const stored = readOjtStore().settings;
-    return stored ?? fallback;
+    return mergeOjtSettings(readOjtStore().settings ?? fallback);
   }
 
   const snap = await ojtGetDoc(doc(db, COLLECTIONS.ojtSettings, "global"));
   if (!snap.exists()) return fallback;
-  return { id: snap.id, ...firestoreFields(snap) } as OjtSettings;
+  return mergeOjtSettings({ id: snap.id, ...firestoreFields(snap) } as OjtSettings);
 }
 
 export async function updateOjtSettings(
@@ -375,7 +437,8 @@ export async function listOjtTopics(departmentId?: string): Promise<OjtTopic[]> 
 
 export async function getOjtTopic(id: string): Promise<OjtTopic | null> {
   if (preferOjtLocal()) {
-    return readOjtStore().topics.find((t) => t.id === id) || null;
+    const row = readOjtStore().topics.find((t) => t.id === id);
+    return row ? cloneRow(row) : null;
   }
   const snap = await ojtGetDoc(doc(db, COLLECTIONS.ojtTopics, id));
   return snap.exists() ? ({ id: snap.id, ...firestoreFields(snap) } as OjtTopic) : null;
@@ -384,8 +447,10 @@ export async function getOjtTopic(id: string): Promise<OjtTopic | null> {
 type CurrentSopSnapshot = {
   sopId: string;
   sopNumber: string;
+  sopTitle?: string;
   sopVersionId: string;
   sopVersionNumber: string;
+  sopEffectiveDate?: string;
   effectiveDate?: string;
   revisionNumber?: string;
 };
@@ -404,8 +469,10 @@ export async function resolveCurrentSopSnapshot(sopId: string): Promise<CurrentS
   return {
     sopId: sop.id,
     sopNumber: sop.sopNumber,
+    sopTitle: sop.title,
     sopVersionId: version.id,
     sopVersionNumber: version.versionNumber,
+    sopEffectiveDate: version.effectiveDate || sop.effectiveDate,
     effectiveDate: version.effectiveDate || sop.effectiveDate,
     revisionNumber: version.versionNumber,
   };
@@ -434,12 +501,15 @@ export async function createOjtTopic(
   const topic: OjtTopic = {
     ...data,
     ...snapshot,
+    sopTitle: snapshot.sopTitle || data.sopTitle,
+    sopEffectiveDate: snapshot.sopEffectiveDate || snapshot.effectiveDate || data.sopEffectiveDate,
     id: generateId("ojt_topic"),
     trainingType: data.trainingType || "on_job",
     isActive: data.isActive ?? true,
     createdAt: now,
     updatedAt: now,
     createdBy: actor.uid,
+    createdByName: actor.name,
   };
   await saveTopic(topic);
   await audit({
@@ -459,8 +529,9 @@ export async function updateOjtTopic(
 ): Promise<OjtTopic> {
   const existing = await getOjtTopic(id);
   if (!existing) throw new Error("OJT topic not found");
+  const unlinkSop = Object.prototype.hasOwnProperty.call(patch, "sopId") && !patch.sopId;
   let snapshot: Partial<CurrentSopSnapshot> = {};
-  if (patch.sopId && patch.sopId !== existing.sopId) {
+  if (!unlinkSop && patch.sopId && patch.sopId !== existing.sopId) {
     snapshot = await resolveCurrentSopSnapshot(patch.sopId);
   }
   const next: OjtTopic = {
@@ -469,7 +540,16 @@ export async function updateOjtTopic(
     ...snapshot,
     updatedAt: nowISO(),
     updatedBy: actor.uid,
+    updatedByName: actor.name,
   };
+  if (unlinkSop) {
+    delete next.sopId;
+    delete next.sopNumber;
+    delete next.sopTitle;
+    delete next.sopVersionId;
+    delete next.sopVersionNumber;
+    delete next.sopEffectiveDate;
+  }
   await saveTopic(next);
   await audit({
     action: "update",
@@ -480,6 +560,42 @@ export async function updateOjtTopic(
     after: { trainingTopic: next.trainingTopic, sopId: next.sopId },
   });
   return next;
+}
+
+/** Super Admin only — removes the topic and linked planner rows / OJT records. */
+export async function deleteOjtTopic(id: string, actor: OjtActor): Promise<void> {
+  assertOjtSuperAdmin(actor);
+  const topic = await getOjtTopic(id);
+  if (!topic) throw new Error("OJT topic not found");
+
+  if (preferOjtLocal()) {
+    const store = readOjtStore();
+    store.topics = store.topics.filter((t) => t.id !== id);
+    store.plans = store.plans.filter((p) => p.topicId !== id);
+    store.assignments = store.assignments.filter((a) => a.topicId !== id);
+    writeOjtStore(store);
+  } else {
+    const [plans, assignments] = await Promise.all([
+      listOjtPlans(),
+      listOjtAssignments({ topicId: id }),
+    ]);
+    await ojtDeleteDoc(doc(db, COLLECTIONS.ojtTopics, id));
+    await Promise.all([
+      ...plans
+        .filter((p) => p.topicId === id)
+        .map((p) => ojtDeleteDoc(doc(db, COLLECTIONS.ojtPlans, p.id))),
+      ...assignments.map((a) => ojtDeleteDoc(doc(db, COLLECTIONS.ojtAssignments, a.id))),
+    ]);
+    notifyOjtUpdated();
+  }
+
+  await audit({
+    action: "delete",
+    resourceType: "ojt_topic",
+    resourceId: id,
+    description: `Deleted OJT topic ${topic.trainingTopic}`,
+    before: { trainingTopic: topic.trainingTopic, departmentId: topic.departmentId },
+  });
 }
 
 export async function ensureQaOjtTopicCatalog(
@@ -501,20 +617,33 @@ export async function ensureQaOjtTopicCatalog(
     });
     if (already) continue;
     const matched = seed.sopNumber ? matchSopByNumber(sops, seed.sopNumber) : undefined;
-    await createOjtTopic(
-      {
-        trainingTopic: matched?.title || seed.trainingTopic,
-        description: "Imported from QA On Job Training matrix",
-        departmentId: department.id,
-        departmentName: department.name,
-        sopId: matched?.id,
-        sopNumber: matched?.sopNumber || seed.sopNumber,
-        referenceDocumentNumber: seed.referenceDocumentNumber || seed.sopNumber || "NA",
-      },
-      actor
-    );
-    created += 1;
-    if (matched) linked += 1;
+    const payload = {
+      trainingTopic: matched?.title || seed.trainingTopic,
+      description: "Imported from QA On Job Training matrix",
+      departmentId: department.id,
+      departmentName: department.name,
+      sopId: matched?.id,
+      sopNumber: matched?.sopNumber || seed.sopNumber,
+      sopTitle: matched?.title,
+      referenceDocumentNumber: seed.referenceDocumentNumber || seed.sopNumber || "NA",
+    };
+    try {
+      await createOjtTopic(payload, actor);
+      created += 1;
+      if (matched) linked += 1;
+    } catch (err) {
+      // Live SOP may exist without a current approved version — still import the topic.
+      if (!payload.sopId) {
+        console.warn("[ojt] skipped seed topic", seed.trainingTopic, err);
+        continue;
+      }
+      try {
+        await createOjtTopic({ ...payload, sopId: undefined }, actor);
+        created += 1;
+      } catch (retryErr) {
+        console.warn("[ojt] skipped seed topic", seed.trainingTopic, retryErr);
+      }
+    }
   }
   return { created, linked };
 }
@@ -545,10 +674,40 @@ export async function listOjtPlans(filters?: {
 
 export async function getOjtPlan(id: string): Promise<OjtPlan | null> {
   if (preferOjtLocal()) {
-    return readOjtStore().plans.find((p) => p.id === id) || null;
+    const row = readOjtStore().plans.find((p) => p.id === id);
+    return row ? cloneRow(row) : null;
   }
   const snap = await ojtGetDoc(doc(db, COLLECTIONS.ojtPlans, id));
   return snap.exists() ? ({ id: snap.id, ...firestoreFields(snap) } as OjtPlan) : null;
+}
+
+/** Super Admin only — removes a yearly planner row and its OJT records. */
+export async function deleteOjtPlan(id: string, actor: OjtActor): Promise<void> {
+  assertOjtSuperAdmin(actor);
+  const plan = await getOjtPlan(id);
+  if (!plan) throw new Error("OJT planner row not found");
+
+  if (preferOjtLocal()) {
+    const store = readOjtStore();
+    store.plans = store.plans.filter((p) => p.id !== id);
+    store.assignments = store.assignments.filter((a) => a.planId !== id);
+    writeOjtStore(store);
+  } else {
+    const assignments = await listOjtAssignments({ planId: id });
+    await ojtDeleteDoc(doc(db, COLLECTIONS.ojtPlans, id));
+    await Promise.all(
+      assignments.map((a) => ojtDeleteDoc(doc(db, COLLECTIONS.ojtAssignments, a.id)))
+    );
+    notifyOjtUpdated();
+  }
+
+  await audit({
+    action: "delete",
+    resourceType: "ojt_plan",
+    resourceId: id,
+    description: `Deleted OJT plan ${plan.trainingTopic} (${plan.year})`,
+    before: { trainingTopic: plan.trainingTopic, year: plan.year, departmentId: plan.departmentId },
+  });
 }
 
 export async function upsertOjtPlan(
@@ -557,7 +716,8 @@ export async function upsertOjtPlan(
     departmentId: string;
     topicId: string;
   },
-  actor: OjtActor
+  actor: OjtActor,
+  opts?: { allowWhenLocked?: boolean }
 ): Promise<OjtPlan> {
   const topic = await getOjtTopic(data.topicId);
   if (!topic) throw new Error("OJT topic not found");
@@ -571,22 +731,36 @@ export async function upsertOjtPlan(
           (p) => p.topicId === data.topicId
         );
 
+  if (!opts?.allowWhenLocked) {
+    const form = await getOjtFormDocument("planner", data.year, data.departmentId);
+    assertFormUnlocked(form, "changing planner months");
+  }
+
+  const selectionMonths = data.selectionMonths ?? existing?.selectionMonths ?? [];
+  const executionMonths = data.executionMonths ?? existing?.executionMonths ?? [];
+  assertExecutionNotBeforeSelection(
+    selectionMonths,
+    executionMonths,
+    settings.allowExecutionBeforeSelection
+  );
+
   const now = nowISO();
   const plan: OjtPlan = {
     requireEmployeeAck: settings.requireEmployeeAck,
     requireTrainerSignoff: settings.requireTrainerSignoff,
     requireHodVerification: settings.requireHodVerification,
     requireQaApproval: settings.requireQaApproval,
-    selectionMonths: [],
-    executionMonths: [],
     employeeSelections: [],
     status: "planned",
     sopId: topic.sopId,
     sopNumber: topic.sopNumber,
+    sopTitle: topic.sopTitle,
     referenceDocumentNumber: topic.referenceDocumentNumber || topic.sopNumber || "NA",
     departmentName: topic.departmentName,
     ...existing,
     ...data,
+    selectionMonths,
+    executionMonths,
     id: existing?.id || generateId("ojt_plan"),
     trainingTopic: data.trainingTopic || existing?.trainingTopic || topic.trainingTopic,
     createdAt: existing?.createdAt || now,
@@ -667,7 +841,8 @@ export async function listOjtAssignments(
 
 export async function getOjtAssignment(id: string): Promise<OjtAssignment | null> {
   if (preferOjtLocal()) {
-    return readOjtStore().assignments.find((a) => a.id === id) || null;
+    const row = readOjtStore().assignments.find((a) => a.id === id);
+    return row ? cloneRow(row) : null;
   }
   const snap = await ojtGetDoc(doc(db, COLLECTIONS.ojtAssignments, id));
   return snap.exists() ? ({ id: snap.id, ...firestoreFields(snap) } as OjtAssignment) : null;
@@ -693,7 +868,7 @@ export async function createOjtAssignmentForEmployee(params: {
     employeeId: params.employee.id,
     topicId: params.plan.topicId,
     year: params.plan.year,
-  })).find((a) => a.status !== "cancelled" && a.status !== "completed" && a.status !== "failed");
+  })).find((a) => a.status !== "cancelled");
   if (existing) return existing;
 
   const topic = await getOjtTopic(params.plan.topicId);
@@ -725,13 +900,18 @@ export async function createOjtAssignmentForEmployee(params: {
     designation: params.employee.designation,
     sopId: sopSnap.sopId,
     sopNumber: sopSnap.sopNumber || params.plan.sopNumber,
+    sopTitle: sopSnap.sopTitle || params.plan.sopTitle || topic.sopTitle,
     sopVersionId: sopSnap.sopVersionId,
     sopVersionNumber: sopSnap.sopVersionNumber,
+    sopEffectiveDate: sopSnap.sopEffectiveDate || sopSnap.effectiveDate,
+    trainedSopVersionId: sopSnap.sopVersionId,
+    trainedSopVersionNumber: sopSnap.sopVersionNumber,
     referenceDocumentNumber:
       params.plan.referenceDocumentNumber || sopSnap.sopNumber || topic.referenceDocumentNumber || "NA",
     year: params.plan.year,
     selectionMonth: params.selectionMonth || months.selectionMonth,
     plannedExecutionMonth: params.plannedExecutionMonth || months.plannedExecutionMonth,
+    selectionDate: now,
     trainerId: params.trainerId || params.plan.trainerId,
     trainerName: params.trainerName || params.plan.trainerName,
     hodUserId,
@@ -799,6 +979,9 @@ export async function setPlanEmployeeApplicability(params: {
   const plan = await getOjtPlan(params.planId);
   if (!plan) throw new Error("OJT planner row not found");
 
+  const matrixForm = await getOjtFormDocument("matrix", plan.year, plan.departmentId);
+  assertFormUnlocked(matrixForm, "changing employee selection");
+
   if (
     params.employee.departmentId &&
     params.employee.departmentId !== plan.departmentId &&
@@ -808,6 +991,20 @@ export async function setPlanEmployeeApplicability(params: {
     throw new Error("Employee does not belong to the selected department");
   }
 
+  const existingAsg = (await listOjtAssignments({
+    employeeId: params.employee.id,
+    topicId: plan.topicId,
+    year: plan.year,
+  })).find((a) => a.status !== "cancelled");
+  if (
+    existingAsg &&
+    !["selected", "draft", "assigned"].includes(existingAsg.status) &&
+    params.applicability !== "selected"
+  ) {
+    throw new Error("This OJT record is already in progress. Open the record instead of changing the matrix cell.");
+  }
+
+  const now = nowISO();
   const selections = plan.employeeSelections.filter((s) => s.employeeId !== params.employee.id);
   if (params.applicability !== "not_set") {
     selections.push({
@@ -815,12 +1012,14 @@ export async function setPlanEmployeeApplicability(params: {
       employeeCode: params.employee.employeeCode,
       employeeName: `${params.employee.firstName} ${params.employee.lastName}`.trim(),
       applicability: params.applicability,
+      selectionDate: params.applicability === "selected" ? now : undefined,
     });
   }
 
   const nextPlan = await upsertOjtPlan(
     { ...plan, employeeSelections: selections, year: plan.year, departmentId: plan.departmentId, topicId: plan.topicId },
-    params.actor
+    params.actor,
+    { allowWhenLocked: true }
   );
 
   let assignment: OjtAssignment | null = null;
@@ -833,11 +1032,7 @@ export async function setPlanEmployeeApplicability(params: {
       trainerName: params.trainerName,
     });
   } else {
-    const open = (await listOjtAssignments({
-      employeeId: params.employee.id,
-      topicId: plan.topicId,
-      year: plan.year,
-    })).find((a) => ["selected", "draft", "assigned"].includes(a.status));
+    const open = existingAsg && ["selected", "draft", "assigned"].includes(existingAsg.status) ? existingAsg : null;
     if (open) {
       assignment = await cancelOjtAssignment(open.id, params.actor, "Marked not applicable on training matrix");
     }
@@ -864,6 +1059,7 @@ export async function scheduleOjtAssignment(
     trainerId: string;
     trainerName?: string;
     remarks?: string;
+    deviation?: Omit<OjtExecutionDeviation, "revisedExecutionDate" | "originalPlannedMonth" | "originalYear">;
   },
   actor: OjtActor
 ): Promise<OjtAssignment> {
@@ -871,8 +1067,35 @@ export async function scheduleOjtAssignment(
   if (!assignment) throw new Error("OJT assignment not found");
   if (!data.trainerId) throw new Error("Trainer is required before scheduling");
   const executionDate = calendarDateToIso(data.executionDate);
-  if (!dateFallsInPlannedMonth(executionDate, assignment.year, assignment.plannedExecutionMonth)) {
-    throw new Error("Execution date should fall in the planned execution month");
+  const inPlannedMonth = dateFallsInPlannedMonth(executionDate, assignment.year, assignment.plannedExecutionMonth);
+  const settings = await getOjtSettings();
+  let executionDeviation = assignment.executionDeviation;
+  if (!inPlannedMonth) {
+    if (!settings.requireExecutionDeviationApproval && actor.role === "super_admin") {
+      executionDeviation = {
+        reason: data.deviation?.reason || "Authorized exception (settings allow dates outside planned month)",
+        approvedBy: actor.uid,
+        approvedByName: actor.name,
+        approvalDate: nowISO(),
+        originalPlannedMonth: assignment.plannedExecutionMonth,
+        originalYear: assignment.year,
+        revisedExecutionDate: executionDate,
+      };
+    } else if (data.deviation?.reason && data.deviation.approvedBy) {
+      executionDeviation = {
+        reason: data.deviation.reason,
+        approvedBy: data.deviation.approvedBy,
+        approvedByName: data.deviation.approvedByName,
+        approvalDate: data.deviation.approvalDate || nowISO(),
+        originalPlannedMonth: assignment.plannedExecutionMonth,
+        originalYear: assignment.year,
+        revisedExecutionDate: executionDate,
+      };
+    } else {
+      throw new Error(
+        `Execution date must fall in the planned execution month (${assignment.plannedExecutionMonth}/${assignment.year}) unless an authorized deviation is recorded.`
+      );
+    }
   }
   if (assignment.sopId) {
     await resolveCurrentSopSnapshot(assignment.sopId);
@@ -888,6 +1111,7 @@ export async function scheduleOjtAssignment(
     trainerId: data.trainerId,
     trainerName: data.trainerName,
     remarks: data.remarks ?? assignment.remarks,
+    executionDeviation,
     status: nextStatus,
     updatedAt: nowISO(),
     updatedBy: actor.uid,
@@ -976,10 +1200,17 @@ export async function recordOjtExecution(
   }
   const next: OjtAssignment = {
     ...assignment,
-    ...data,
     actualExecutionDate: data.actualExecutionDate
       ? calendarDateToIso(data.actualExecutionDate)
       : assignment.actualExecutionDate,
+    startTime: data.startTime ?? assignment.startTime,
+    endTime: data.endTime ?? assignment.endTime,
+    location: data.location ?? assignment.location,
+    practicalActivity: data.practicalActivity ?? assignment.practicalActivity,
+    trainingDetails: data.trainingDetails ?? assignment.trainingDetails,
+    observations: data.observations ?? assignment.observations,
+    employeePerformance: data.employeePerformance ?? assignment.employeePerformance,
+    trainerRemarks: data.trainerRemarks ?? assignment.trainerRemarks,
     status: assignment.status === "scheduled" || assignment.status === "rescheduled" ? "in_progress" : assignment.status,
     updatedAt: nowISO(),
     updatedBy: actor.uid,
@@ -1005,7 +1236,7 @@ export async function submitOjtEvaluation(
   if (!assignment.actualExecutionDate) {
     throw new Error("Execution date is required before evaluation");
   }
-  const passed = evaluation.overallResult === "pass";
+  const passed = !evaluationDidFail(evaluation.criteria) && evaluation.overallResult !== "fail";
   const working: OjtAssignment = {
     ...assignment,
     status:
@@ -1030,10 +1261,19 @@ export async function submitOjtEvaluation(
     failureReason: passed ? undefined : evaluation.comments,
     remarks: evaluation.comments,
     createdAt: nowISO(),
+    sopVersionId: assignment.trainedSopVersionId || assignment.sopVersionId,
+    sopVersionNumber: assignment.trainedSopVersionNumber || assignment.sopVersionNumber,
   };
   const next: OjtAssignment = {
     ...working,
-    evaluation: { ...evaluation, evaluatedBy: actor.uid, evaluatedByName: actor.name, evaluatedAt: nowISO() },
+    evaluation: {
+      ...evaluation,
+      overallResult: passed ? "pass" : "fail",
+      overallRating: evaluationOverallRating(evaluation.criteria),
+      evaluatedBy: actor.uid,
+      evaluatedByName: actor.name,
+      evaluatedAt: nowISO(),
+    },
     overallCompetency: passed ? "competent" : "not_competent",
     status: nextStatus,
     failureReason: passed ? undefined : evaluation.comments || assignment.failureReason,
@@ -1176,6 +1416,9 @@ export async function verifyOjtByHod(
   if (assignment.status !== "verification_pending") {
     throw new Error("OJT is not pending HOD verification");
   }
+  if (decision === "rejected" && !comments.trim()) {
+    throw new Error("Comments are required when rejecting HOD verification");
+  }
   const nextStatus = statusAfterHodDecision(assignment, decision);
   assertTransition(assignment.status, nextStatus);
   const next: OjtAssignment = {
@@ -1194,6 +1437,9 @@ export async function verifyOjtByHod(
     hodUserName: actor.name,
     status: nextStatus,
     failureReason: decision === "rejected" ? comments : assignment.failureReason,
+    acknowledgement: decision === "rejected" ? undefined : assignment.acknowledgement,
+    evaluation: decision === "rejected" ? undefined : assignment.evaluation,
+    trainerSignoff: decision === "rejected" ? undefined : assignment.trainerSignoff,
     updatedAt: nowISO(),
     updatedBy: actor.uid,
   };
@@ -1233,7 +1479,10 @@ export async function approveOjtByQa(
   if (assignment.status !== "qa_pending") {
     throw new Error("OJT is not pending QA approval");
   }
-  const nextStatus = decision === "approved" ? "completed" : "failed";
+  if (decision === "rejected" && !comments.trim()) {
+    throw new Error("Comments are required when rejecting QA approval");
+  }
+  const nextStatus = statusAfterQaDecision(decision);
   assertTransition(assignment.status, nextStatus);
   const next: OjtAssignment = {
     ...assignment,
@@ -1250,8 +1499,9 @@ export async function approveOjtByQa(
     qaVerifierId: actor.uid,
     qaVerifierName: actor.name,
     status: nextStatus,
-    overallCompetency: decision === "approved" ? "competent" : "not_competent",
+    overallCompetency: decision === "approved" ? "competent" : assignment.overallCompetency,
     failureReason: decision === "rejected" ? comments : assignment.failureReason,
+    hodVerification: decision === "rejected" ? undefined : assignment.hodVerification,
     updatedAt: nowISO(),
     updatedBy: actor.uid,
   };
@@ -1320,35 +1570,55 @@ export async function rescheduleRetraining(
     trainerId?: string;
     trainerName?: string;
     remarks?: string;
+    sopVersionChangeJustification?: string;
   },
   actor: OjtActor
 ): Promise<OjtAssignment> {
   const assignment = await getOjtAssignment(id);
   if (!assignment) throw new Error("OJT assignment not found");
-  if (assignment.status === "failed") {
-    assertTransition(assignment.status, "retraining_required");
-    assignment.status = "retraining_required";
+  const working: OjtAssignment = { ...assignment };
+  if (working.status === "failed") {
+    assertTransition(working.status, "retraining_required");
+    working.status = "retraining_required";
   }
-  assertTransition(assignment.status, "rescheduled");
+  assertTransition(working.status, "rescheduled");
   const retrainingDate = calendarDateToIso(data.retrainingDate);
   const dateParts = parseCalendarDateParts(retrainingDate);
-  if (assignment.sopId) {
-    const snap = await resolveCurrentSopSnapshot(assignment.sopId);
-    assignment.sopVersionId = snap.sopVersionId;
-    assignment.sopVersionNumber = snap.sopVersionNumber;
+  let sopVersionChangeJustification = working.sopVersionChangeJustification;
+  let trainedSopVersionId = working.trainedSopVersionId;
+  let trainedSopVersionNumber = working.trainedSopVersionNumber;
+  if (working.sopId) {
+    const snap = await resolveCurrentSopSnapshot(working.sopId);
+    if (
+      working.sopVersionId &&
+      snap.sopVersionId !== working.sopVersionId &&
+      !data.sopVersionChangeJustification
+    ) {
+      throw new Error(
+        `Current SOP version is ${snap.sopVersionNumber} (planned ${working.sopVersionNumber}). Record a controlled justification before retraining against the new version.`
+      );
+    }
+    if (data.sopVersionChangeJustification) {
+      sopVersionChangeJustification = data.sopVersionChangeJustification;
+    }
+    trainedSopVersionId = snap.sopVersionId;
+    trainedSopVersionNumber = snap.sopVersionNumber;
   }
   const next: OjtAssignment = {
-    ...assignment,
+    ...working,
     status: "rescheduled",
     isRetraining: true,
-    attemptNumber: (assignment.attemptNumber || 1) + 1,
+    attemptNumber: (working.attemptNumber || 1) + 1,
     retrainingDate,
     actualExecutionDate: retrainingDate,
-    plannedExecutionMonth: dateParts?.month || assignment.plannedExecutionMonth,
-    year: dateParts?.year || assignment.year,
-    trainerId: data.trainerId || assignment.trainerId,
-    trainerName: data.trainerName || assignment.trainerName,
-    remarks: data.remarks || assignment.remarks,
+    plannedExecutionMonth: dateParts?.month || working.plannedExecutionMonth,
+    year: dateParts?.year || working.year,
+    trainerId: data.trainerId || working.trainerId,
+    trainerName: data.trainerName || working.trainerName,
+    remarks: data.remarks || working.remarks,
+    sopVersionChangeJustification,
+    trainedSopVersionId,
+    trainedSopVersionNumber,
     acknowledgement: undefined,
     trainerSignoff: undefined,
     hodVerification: undefined,
@@ -1402,6 +1672,105 @@ export async function cancelOjtAssignment(
     after: { reason },
   });
   return next;
+}
+
+/** Super Admin only — edit assignment metadata outside the workflow. */
+export async function updateOjtAssignmentAdmin(
+  id: string,
+  patch: {
+    trainingTopic?: string;
+    plannedExecutionMonth?: number;
+    selectionMonth?: number;
+    trainerId?: string;
+    trainerName?: string;
+    remarks?: string;
+    location?: string;
+  },
+  actor: OjtActor
+): Promise<OjtAssignment> {
+  assertOjtSuperAdmin(actor);
+  const assignment = await getOjtAssignment(id);
+  if (!assignment) throw new Error("OJT assignment not found");
+  const next: OjtAssignment = {
+    ...assignment,
+    ...patch,
+    updatedAt: nowISO(),
+    updatedBy: actor.uid,
+  };
+  if (Object.prototype.hasOwnProperty.call(patch, "trainerId") && !patch.trainerId) {
+    delete next.trainerId;
+    delete next.trainerName;
+  }
+  await saveAssignment(next);
+  await audit({
+    action: "update",
+    resourceType: "ojt_assignment",
+    resourceId: id,
+    description: `Super Admin edited OJT for ${assignment.employeeName}`,
+    before: {
+      trainingTopic: assignment.trainingTopic,
+      trainerId: assignment.trainerId,
+      plannedExecutionMonth: assignment.plannedExecutionMonth,
+    },
+    after: {
+      trainingTopic: next.trainingTopic,
+      trainerId: next.trainerId,
+      plannedExecutionMonth: next.plannedExecutionMonth,
+    },
+  });
+  return next;
+}
+
+/** Super Admin only — permanently remove an OJT record. */
+export async function deleteOjtAssignment(id: string, actor: OjtActor): Promise<void> {
+  assertOjtSuperAdmin(actor);
+  const assignment = await getOjtAssignment(id);
+  if (!assignment) throw new Error("OJT assignment not found");
+
+  if (preferOjtLocal()) {
+    const store = readOjtStore();
+    store.assignments = store.assignments.filter((a) => a.id !== id);
+    if (assignment.planId) {
+      const plan = store.plans.find((p) => p.id === assignment.planId);
+      if (plan) {
+        plan.employeeSelections = plan.employeeSelections.filter(
+          (s) => s.employeeId !== assignment.employeeId
+        );
+      }
+    }
+    writeOjtStore(store);
+  } else {
+    await ojtDeleteDoc(doc(db, COLLECTIONS.ojtAssignments, id));
+    if (assignment.planId) {
+      const plan = await getOjtPlan(assignment.planId);
+      if (plan) {
+        await savePlan({
+          ...plan,
+          employeeSelections: plan.employeeSelections.filter(
+            (s) => s.employeeId !== assignment.employeeId
+          ),
+          updatedAt: nowISO(),
+          updatedBy: actor.uid,
+        });
+      } else {
+        notifyOjtUpdated();
+      }
+    } else {
+      notifyOjtUpdated();
+    }
+  }
+
+  await audit({
+    action: "delete",
+    resourceType: "ojt_assignment",
+    resourceId: id,
+    description: `Deleted OJT record ${assignment.trainingTopic} for ${assignment.employeeName}`,
+    before: {
+      employeeId: assignment.employeeId,
+      trainingTopic: assignment.trainingTopic,
+      status: assignment.status,
+    },
+  });
 }
 
 export async function assignOjtTrainer(
@@ -1570,12 +1939,228 @@ export async function buildOjtDashboardStats(
 export async function listOjtStaffOptions(): Promise<
   { uid: string; displayName: string; role: OjtActor["role"] }[]
 > {
-  const users = await listUsersByRoles(["trainer", "department_head", "qa", "hr"]).catch(() => []);
+  const users = await listUsersByRoles(["trainer", "department_head", "qa", "hr", "super_admin"]).catch(() => []);
   return users.map((u) => ({
     uid: u.uid,
     displayName: u.displayName,
     role: u.role,
   }));
+}
+
+export async function getOjtFormDocument(
+  kind: OjtFormKind,
+  year: number,
+  departmentId: string
+): Promise<OjtFormDocument | null> {
+  const id = formDocumentId(kind, year, departmentId);
+  if (preferOjtLocal()) {
+    const row = readOjtStore().formDocuments.find((d) => d.id === id);
+    return row ? cloneRow(row) : null;
+  }
+  try {
+    const snap = await getDoc(doc(db, COLLECTIONS.ojtFormDocuments, id));
+    return snap.exists() ? ({ id: snap.id, ...firestoreFields(snap) } as OjtFormDocument) : null;
+  } catch (err) {
+    if (!isPermissionDenied(err)) throw err;
+    const row = readOjtStore().formDocuments.find((d) => d.id === id);
+    return row ? cloneRow(row) : null;
+  }
+}
+
+export async function listOjtFormDocuments(filters?: {
+  year?: number;
+  kind?: OjtFormKind;
+  departmentId?: string;
+}): Promise<OjtFormDocument[]> {
+  const apply = (rows: OjtFormDocument[]) =>
+    rows.filter((d) => {
+      if (filters?.year && d.year !== filters.year) return false;
+      if (filters?.kind && d.kind !== filters.kind) return false;
+      if (filters?.departmentId && d.departmentId !== filters.departmentId) return false;
+      return true;
+    });
+
+  if (preferOjtLocal()) {
+    return apply(readOjtStore().formDocuments);
+  }
+  try {
+    const snap = await getDocs(collection(db, COLLECTIONS.ojtFormDocuments));
+    return apply(snap.docs.map((d) => ({ id: d.id, ...firestoreFields(d) } as OjtFormDocument)));
+  } catch (err) {
+    if (!isPermissionDenied(err)) throw err;
+    return apply(readOjtStore().formDocuments);
+  }
+}
+
+export async function ensureOjtFormDocument(params: {
+  kind: OjtFormKind;
+  year: number;
+  departmentId: string;
+  departmentName?: string;
+  actor: OjtActor;
+}): Promise<OjtFormDocument> {
+  const existing = await getOjtFormDocument(params.kind, params.year, params.departmentId);
+  if (existing) return existing;
+  const settings = await getOjtSettings();
+  const created = emptyFormDocument({
+    kind: params.kind,
+    year: params.year,
+    departmentId: params.departmentId,
+    departmentName: params.departmentName,
+    settings,
+    actorId: params.actor.uid,
+  });
+  await saveFormDocument(created);
+  await audit({
+    action: "create",
+    resourceType: `ojt_${params.kind}`,
+    resourceId: created.id,
+    description: `Created ${params.kind} document ${params.departmentName || params.departmentId} ${params.year} Rev. ${created.revisionNumber}`,
+  });
+  return created;
+}
+
+export async function updateOjtFormDocumentMeta(
+  kind: OjtFormKind,
+  year: number,
+  departmentId: string,
+  patch: {
+    effectiveDate?: string;
+    trainingCoordinatorUserId?: string;
+    trainingCoordinatorName?: string;
+    departmentName?: string;
+  },
+  actor: OjtActor
+): Promise<OjtFormDocument> {
+  const row = await ensureOjtFormDocument({ kind, year, departmentId, actor, departmentName: patch.departmentName });
+  assertFormUnlocked(row, "updating header metadata");
+  const next: OjtFormDocument = {
+    ...row,
+    ...patch,
+    updatedAt: nowISO(),
+    updatedBy: actor.uid,
+  };
+  await saveFormDocument(next);
+  await audit({
+    action: "update",
+    resourceType: `ojt_${kind}`,
+    resourceId: next.id,
+    description: `Updated ${kind} header ${departmentId} ${year}`,
+    before: { effectiveDate: row.effectiveDate, revisionNumber: row.revisionNumber },
+    after: { effectiveDate: next.effectiveDate, revisionNumber: next.revisionNumber },
+  });
+  return next;
+}
+
+export async function signOjtFormDocument(params: {
+  kind: OjtFormKind;
+  year: number;
+  departmentId: string;
+  departmentName?: string;
+  role: OjtFormSignoffRole;
+  action: "prepared" | "checked" | "verified" | "approved" | "rejected";
+  comment?: string;
+  actor: OjtActor;
+}): Promise<OjtFormDocument> {
+  const settings = await getOjtSettings();
+  const row = await ensureOjtFormDocument({
+    kind: params.kind,
+    year: params.year,
+    departmentId: params.departmentId,
+    departmentName: params.departmentName,
+    actor: params.actor,
+  });
+  if (row.locked && params.action !== "rejected") {
+    throw new Error("This controlled form is already approved. Create a revision to change it.");
+  }
+  const config = formApprovalsFor(params.kind, settings);
+  if (params.action === "approved" && params.role === "approved_by_qa" && !canApproveForm(row, config)) {
+    throw new Error("Required preparation/checking/verification sign-offs are incomplete");
+  }
+  if (params.action === "rejected" && !params.comment?.trim()) {
+    throw new Error("A comment is required when rejecting a controlled form");
+  }
+  const rejected = params.action === "rejected";
+  const nextStatus = statusAfterFormSignoff(row.status, params.role, rejected);
+  const next: OjtFormDocument = {
+    ...row,
+    status: nextStatus,
+    locked: nextStatus === "approved",
+    signoffs: [
+      ...row.signoffs,
+      {
+        role: params.role,
+        action: params.action,
+        userId: params.actor.uid,
+        userName: params.actor.name,
+        userRole: params.actor.role,
+        timestamp: nowISO(),
+        comment: params.comment,
+        signatureDataUrl: params.actor.digitalSignatureUrl,
+      },
+    ],
+    updatedAt: nowISO(),
+    updatedBy: params.actor.uid,
+  };
+  await saveFormDocument(next);
+  await audit({
+    action: rejected ? "reject" : "approve",
+    resourceType: `ojt_${params.kind}`,
+    resourceId: next.id,
+    description: `${params.role} ${params.action} ${params.kind} ${params.departmentId} ${params.year}`,
+    after: { status: next.status, locked: next.locked },
+  });
+  return next;
+}
+
+export async function createOjtFormRevision(params: {
+  kind: OjtFormKind;
+  year: number;
+  departmentId: string;
+  reason: string;
+  actor: OjtActor;
+  snapshot?: Record<string, unknown>;
+}): Promise<OjtFormDocument> {
+  if (!params.reason.trim()) throw new Error("A reason is required to create a revision");
+  const row = await getOjtFormDocument(params.kind, params.year, params.departmentId);
+  if (!row) throw new Error("No approved form exists to revise");
+  const nextRev = nextRevisionNumber(row.revisionNumber);
+  const next: OjtFormDocument = {
+    ...row,
+    revisionNumber: nextRev,
+    effectiveDate: nowISO().slice(0, 10),
+    status: "draft",
+    locked: false,
+    signoffs: [],
+    revisions: [
+      ...row.revisions,
+      {
+        revisionNumber: formatRevisionNumber(row.revisionNumber),
+        effectiveDate: row.effectiveDate,
+        createdAt: nowISO(),
+        createdBy: params.actor.uid,
+        createdByName: params.actor.name,
+        reason: params.reason.trim(),
+        snapshot: params.snapshot || {
+          status: row.status,
+          signoffs: row.signoffs,
+          effectiveDate: row.effectiveDate,
+        },
+      },
+    ],
+    updatedAt: nowISO(),
+    updatedBy: params.actor.uid,
+  };
+  await saveFormDocument(next);
+  await audit({
+    action: "create",
+    resourceType: `ojt_${params.kind}`,
+    resourceId: next.id,
+    description: `Created ${params.kind} revision ${nextRev} for ${params.departmentId} ${params.year}`,
+    before: { revisionNumber: row.revisionNumber, locked: row.locked },
+    after: { revisionNumber: next.revisionNumber, reason: params.reason },
+  });
+  return next;
 }
 
 export { currentCalendarYear, currentCalendarMonth };

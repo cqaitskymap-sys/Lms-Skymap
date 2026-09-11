@@ -9,11 +9,12 @@ import { hasPermission } from "@/lib/rbac/permissions";
 import { listOjtAssignments, listOjtStaffOptions, scheduleOjtAssignment } from "@/lib/services/ojt";
 import { toOjtActor } from "@/lib/ojt/actor";
 import { OJT_UPDATED_EVENT } from "@/lib/ojt/demo-store";
-import { calendarDateToIso, monthName } from "@/lib/ojt/constants";
+import { calendarDateToIso, dateFallsInMonth, monthName } from "@/lib/ojt/constants";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
@@ -39,6 +40,7 @@ export default function OjtSchedulePage() {
   const [location, setLocation] = useState("");
   const [trainerId, setTrainerId] = useState("");
   const [busy, setBusy] = useState(false);
+  const [deviationReason, setDeviationReason] = useState("");
 
   const refresh = useCallback(async (opts?: { silent?: boolean }) => {
     if (!opts?.silent) setLoading(true);
@@ -81,15 +83,32 @@ export default function OjtSchedulePage() {
     setBusy(true);
     try {
       const trainer = trainers.find((t) => t.uid === trainerId);
+      const outside =
+        selected && date
+          ? !dateFallsInMonth(calendarDateToIso(date), selected.year, selected.plannedExecutionMonth)
+          : false;
+      if (outside && !deviationReason.trim()) {
+        toast.error("Date is outside the planned execution month. Record an authorized deviation reason.");
+        setBusy(false);
+        return;
+      }
       await scheduleOjtAssignment(
         selected.id,
         {
-          executionDate: calendarDateToIso(date),
+          executionDate: date,
           startTime,
           endTime,
           location,
           trainerId,
           trainerName: trainer?.displayName,
+          deviation: outside
+            ? {
+                reason: deviationReason.trim(),
+                approvedBy: profile.uid,
+                approvedByName: profile.displayName,
+                approvalDate: new Date().toISOString(),
+              }
+            : undefined,
         },
         toOjtActor(profile)
       );
@@ -198,6 +217,19 @@ export default function OjtSchedulePage() {
               <Label>Location</Label>
               <Input value={location} onChange={(e) => setLocation(e.target.value)} placeholder="e.g. Dispensing room / Line 2" />
             </div>
+            {selected && date && !dateFallsInMonth(calendarDateToIso(date), selected.year, selected.plannedExecutionMonth) && (
+              <div className="space-y-1 rounded-lg border border-amber-300/60 p-3">
+                <Label>Authorized deviation reason</Label>
+                <Textarea
+                  value={deviationReason}
+                  onChange={(e) => setDeviationReason(e.target.value)}
+                  placeholder="Why is training outside the planned execution month? Original planned month is kept."
+                />
+                <p className="text-xs text-muted-foreground">
+                  Original planned month ({monthName(selected.plannedExecutionMonth)} {selected.year}) is not overwritten.
+                </p>
+              </div>
+            )}
             <Button disabled={!canSchedule || busy || !selected} onClick={() => void handleSave()}>
               Book this session
             </Button>

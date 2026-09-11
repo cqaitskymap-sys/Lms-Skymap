@@ -49,7 +49,8 @@ async function notify(userId: string, type: string, title: string, message: stri
 }
 
 /**
- * When an SOP version is approved, reassign training to all previously trained employees.
+ * When an SOP version is approved, reassign training to previously trained employees.
+ * Idempotent with the client approve path: skip employees who already have the new version.
  */
 export const onSopVersionApproved = onDocumentUpdated(
   "sop_versions/{versionId}",
@@ -61,50 +62,114 @@ export const onSopVersionApproved = onDocumentUpdated(
 
     const sopId = after.sopId as string;
     const versionId = event.params.versionId;
-
-    const prev = await db
-      .collection("training_assignments")
-      .where("sopId", "==", sopId)
-      .where("status", "in", ["passed", "training_completed", "assessment_pending"])
-      .get();
-
-    const batch = db.batch();
     const now = new Date().toISOString();
-    let count = 0;
-    const assignedEmployees = new Set<string>();
+    const OPEN = new Set([
+      "assigned",
+      "in_progress",
+      "training_scheduled",
+      "retraining",
+      "assessment_pending",
+      "failed",
+    ]);
+    const COMPLETED = new Set(["passed", "training_completed"]);
 
-    for (const doc of prev.docs) {
-      const prevData = doc.data();
-      const employeeId = prevData.employeeId as string;
-      if (assignedEmployees.has(employeeId)) continue;
-      assignedEmployees.add(employeeId);
-      const newId = id("ta");
-      const ref = db.collection("training_assignments").doc(newId);
-      batch.set(ref, {
-        id: newId,
-        employeeId: prevData.employeeId,
-        sopId,
-        sopVersionId: versionId,
-        trainerId: prevData.trainerId || null,
-        assignedBy: "system",
-        departmentId: prevData.departmentId,
-        status: "assigned",
-        attemptCount: 0,
-        isRetraining: true,
-        previousAssignmentId: doc.id,
-        triggeredBySopRevision: true,
-        createdAt: now,
-        updatedAt: now,
-        createdBy: "system",
-      });
-      count++;
+    const prev = await db.collection("training_assignments").where("sopId", "==", sopId).get();
+
+    const byEmployee = new Map<string, typeof prev.docs>();
+    for (const docSnap of prev.docs) {
+      const employeeId = docSnap.data().employeeId as string;
+      if (!employeeId) continue;
+      const list = byEmployee.get(employeeId) || [];
+      list.push(docSnap);
+      byEmployee.set(employeeId, list);
     }
 
-    await batch.commit();
+    const ops: Array<{
+      type: "update" | "set";
+      ref: admin.firestore.DocumentReference;
+      data: Record<string, unknown>;
+    }> = [];
+    const affectedEmployees: string[] = [];
 
-    // Notify employees (best-effort sequential for demo scale)
-    for (const doc of prev.docs) {
-      const empId = doc.data().employeeId as string;
+    for (const [employeeId, docs] of byEmployee) {
+      const alreadyOnNew = docs.some((d) => {
+        const data = d.data();
+        return data.sopVersionId === versionId && data.status !== "expired";
+      });
+      const openOld = docs.filter((d) => {
+        const data = d.data();
+        return OPEN.has(data.status as string) && data.sopVersionId !== versionId;
+      });
+
+      if (openOld.length) {
+        for (const docSnap of openOld) {
+          ops.push({
+            type: "update",
+            ref: docSnap.ref,
+            data: {
+              sopVersionId: versionId,
+              isRetraining: true,
+              triggeredBySopRevision: true,
+              updatedAt: now,
+              updatedBy: "system",
+            },
+          });
+        }
+        affectedEmployees.push(employeeId);
+        continue;
+      }
+      if (alreadyOnNew) continue;
+
+      const completed = docs
+        .filter((d) => COMPLETED.has(d.data().status as string))
+        .sort((a, b) =>
+          String(b.data().updatedAt || "").localeCompare(String(a.data().updatedAt || ""))
+        );
+      const source = completed[0];
+      if (!source) continue;
+      const newId = id("ta");
+      ops.push({
+        type: "set",
+        ref: db.collection("training_assignments").doc(newId),
+        data: {
+          id: newId,
+          employeeId,
+          sopId,
+          sopVersionId: versionId,
+          trainerId: source.data().trainerId || null,
+          assignedBy: "system",
+          departmentId: source.data().departmentId,
+          status: "assigned",
+          attemptCount: 0,
+          isRetraining: true,
+          previousAssignmentId: source.id,
+          triggeredBySopRevision: true,
+          createdAt: now,
+          updatedAt: now,
+          createdBy: "system",
+        },
+      });
+      affectedEmployees.push(employeeId);
+    }
+
+    let batch = db.batch();
+    let writes = 0;
+    for (const op of ops) {
+      if (op.type === "update") batch.update(op.ref, op.data);
+      else batch.set(op.ref, op.data);
+      writes++;
+      if (writes >= 400) {
+        await batch.commit();
+        batch = db.batch();
+        writes = 0;
+      }
+    }
+    if (writes > 0) {
+      await batch.commit();
+    }
+
+    const uniqueEmployees = Array.from(new Set(affectedEmployees));
+    for (const empId of uniqueEmployees) {
       const empSnap = await db.collection("employees").doc(empId).get();
       const userId = empSnap.data()?.userId as string | undefined;
       if (userId) {
@@ -125,8 +190,8 @@ export const onSopVersionApproved = onDocumentUpdated(
       action: "reassign",
       resourceType: "sop",
       resourceId: sopId,
-      description: `Auto-reassigned training to ${count} employees after SOP revision ${versionId}`,
-      after: { count, versionId },
+      description: `Auto-reassigned training to ${uniqueEmployees.length} employees after SOP revision ${versionId}`,
+      after: { count: uniqueEmployees.length, versionId },
     });
   }
 );
@@ -309,9 +374,10 @@ export const verifyCertificate = onCall(async (request) => {
   const { certificateNumber } = request.data as { certificateNumber: string };
   if (!certificateNumber) throw new HttpsError("invalid-argument", "certificateNumber required");
 
+  const number = String(certificateNumber).trim().toUpperCase();
   const snap = await db
     .collection("certificates")
-    .where("certificateNumber", "==", certificateNumber)
+    .where("certificateNumber", "==", number)
     .limit(1)
     .get();
 
@@ -351,7 +417,7 @@ export const overdueTrainingReminders = onSchedule("every day 09:00", async () =
         "reminder",
         "Overdue Training",
         "You have an overdue training assignment. Please complete it promptly.",
-        `/dashboard/training/${doc.id}`
+        `/dashboard/training`
       );
     }
   }

@@ -15,15 +15,15 @@ import { COLLECTIONS } from "@/lib/firebase/client";
 import { adminDb } from "@/lib/firebase/admin";
 
 function cookieOptions(rememberMe = true) {
-  const base = {
+  const expiresIn = rememberMe ? SESSION_MAX_AGE_MS : SESSION_TEMPORARY_MAX_AGE_MS;
+  return {
     name: AUTH_COOKIE_NAME,
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
     sameSite: "lax" as const,
     path: "/",
+    maxAge: expiresIn / 1000,
   };
-  if (!rememberMe) return base;
-  return { ...base, maxAge: SESSION_MAX_AGE_MS / 1000 };
 }
 
 /**
@@ -51,7 +51,12 @@ export async function POST(request: NextRequest) {
     const expiresIn = rememberMe ? SESSION_MAX_AGE_MS : SESSION_TEMPORARY_MAX_AGE_MS;
 
     if (!isAdminConfigured()) {
-      // Demo / local without Admin SDK — acknowledge login side-effects best-effort
+      if (process.env.AUTH_ENFORCE_SESSION_COOKIE === "true") {
+        return NextResponse.json(
+          { success: false, session: false, error: "Session service is unavailable" },
+          { status: 503 }
+        );
+      }
       return NextResponse.json({
         success: true,
         session: false,

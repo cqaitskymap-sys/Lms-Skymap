@@ -13,6 +13,7 @@ import {
   recordAuditEvent,
 } from "@/lib/services/audit-logs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { isoInLocalDateRange } from "@/lib/utils";
 import {
   Table,
   TableBody,
@@ -52,15 +53,7 @@ const ACTION_OPTIONS: Array<AuditAction | "all"> = [
 ];
 
 function inDateRange(iso: string, dateFrom?: string, dateTo?: string): boolean {
-  if (!dateFrom && !dateTo) return true;
-  const t = new Date(iso).getTime();
-  if (dateFrom && t < new Date(dateFrom).getTime()) return false;
-  if (dateTo) {
-    const to = new Date(dateTo);
-    to.setHours(23, 59, 59, 999);
-    if (t > to.getTime()) return false;
-  }
-  return true;
+  return isoInLocalDateRange(iso, dateFrom, dateTo);
 }
 
 export default function AuditPage() {

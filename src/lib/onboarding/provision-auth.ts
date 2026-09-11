@@ -38,11 +38,20 @@ export async function ensureEmployeeAuthAccount(
     uid = existing.uid;
 
     const profileSnap = await adminDb.collection(COLLECTIONS.users).doc(uid).get();
-    const linkedEmployeeId = profileSnap.data()?.employeeId as string | undefined;
-    if (linkedEmployeeId && linkedEmployeeId !== employee.id) {
-      throw new Error(
-        "An authentication account for this email is already linked to another employee"
-      );
+    if (profileSnap.exists) {
+      const existingProfile = profileSnap.data() as Partial<UserProfile> | undefined;
+      const linkedEmployeeId = existingProfile?.employeeId;
+      const existingRole = existingProfile?.role;
+      if (existingRole && existingRole !== "employee") {
+        throw new Error(
+          "An authentication account for this email is already used by a staff user"
+        );
+      }
+      if (linkedEmployeeId && linkedEmployeeId !== employee.id) {
+        throw new Error(
+          "An authentication account for this email is already linked to another employee"
+        );
+      }
     }
 
     await adminAuth.updateUser(uid, {
@@ -81,7 +90,7 @@ export async function ensureEmployeeAuthAccount(
     departmentId: employee.departmentId,
     phone: employee.mobile || employee.phone,
     isActive: true,
-    mustChangePassword: false,
+    mustChangePassword: true,
     mustUpdateProfile: true,
     mustAcceptPolicies: true,
     createdAt: now,

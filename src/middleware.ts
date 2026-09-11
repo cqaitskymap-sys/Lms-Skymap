@@ -3,8 +3,9 @@ import type { NextRequest } from "next/server";
 import { AUTH_COOKIE_NAME } from "@/constants/auth";
 
 /**
- * Edge middleware — gate /dashboard behind a session cookie when present.
- * Full RBAC is enforced in AuthGuard + server actions (Admin SDK).
+ * Edge middleware — when AUTH_ENFORCE_SESSION_COOKIE is true, require the
+ * session cookie to be present (not cryptographically verified here; Admin SDK
+ * verification happens in API routes / AuthGuard).
  *
  * When Admin SDK is not configured in production builds, cookie may be absent;
  * client AuthGuard remains the fallback so local/demo still works.

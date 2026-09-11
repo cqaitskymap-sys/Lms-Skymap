@@ -32,7 +32,7 @@ export async function getServerAuthFromBearer(
     const snap = await adminDb.collection(COLLECTIONS.users).doc(decoded.uid).get();
     if (!snap.exists) return null;
     const profile = { id: snap.id, ...snap.data() } as UserProfile;
-    if (!profile.isActive) return null;
+    if (profile.isActive === false) return null;
     return {
       uid: decoded.uid,
       email: decoded.email || profile.email,
@@ -54,7 +54,7 @@ export async function getServerAuthFromSession(): Promise<ServerAuthContext | nu
     const snap = await adminDb.collection(COLLECTIONS.users).doc(decoded.uid).get();
     if (!snap.exists) return null;
     const profile = { id: snap.id, ...snap.data() } as UserProfile;
-    if (!profile.isActive) return null;
+    if (profile.isActive === false) return null;
     return {
       uid: decoded.uid,
       email: decoded.email || profile.email,

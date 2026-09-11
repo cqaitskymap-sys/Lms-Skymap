@@ -17,13 +17,13 @@ const PLANNER_STEPS = [
   {
     n: "2",
     title: "Plan months",
-    body: "Mark S (select people this month) and E (train this month).",
+    body: "Mark S (select people) and E (train) on separate rows, then prepare / check / approve the yearly planner.",
     href: "/dashboard/ojt/planner",
   },
   {
     n: "3",
     title: "Select employees",
-    body: "On the matrix, click a cell: ✓ means this person needs that OJT.",
+    body: "On the matrix S row, click a cell: ✓ means this person needs that OJT. NA means not applicable.",
     href: "/dashboard/ojt/matrix",
   },
   {

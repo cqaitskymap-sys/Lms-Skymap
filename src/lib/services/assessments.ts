@@ -249,7 +249,24 @@ export async function startAssessment(params: {
   const exam = await loadExam(params.examId);
   if (!exam) throw new Error("Exam not found");
 
-  if (params.employeeId && params.actorId) {
+  if (exam.inductionModuleId && !params.inductionAssignmentId) {
+    throw new Error("Induction assignment is required for this exam");
+  }
+
+  if (params.inductionAssignmentId) {
+    const { getEmployeeInductionAssignments } = await import("@/lib/services/induction");
+    const rows = await getEmployeeInductionAssignments(params.employeeId);
+    const induction = rows.find((a) => a.id === params.inductionAssignmentId);
+    if (!induction) throw new Error("Induction assignment not found");
+    if (induction.status === "passed") {
+      throw new Error("Induction assignment is already completed");
+    }
+    if (induction.status !== "assessment_pending" && induction.status !== "failed") {
+      throw new Error(
+        `Complete induction study before the exam (status: ${induction.status || "not_started"})`
+      );
+    }
+  } else if (params.employeeId && params.actorId) {
     const { assertTniSopsReadForExam } = await import("@/lib/services/tni-learning");
     await assertTniSopsReadForExam({
       employeeId: params.employeeId,

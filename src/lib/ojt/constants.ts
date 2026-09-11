@@ -1,6 +1,9 @@
 import type {
   OjtApprovalConfig,
+  OjtCompetencyScoringModel,
   OjtEvaluationCriterion,
+  OjtFormApprovalConfig,
+  OjtFormSignoffRole,
   OjtMatrixCellValue,
   OjtPlannerMark,
   OjtSettings,
@@ -20,10 +23,41 @@ export const DEFAULT_OJT_APPROVAL_CONFIG: OjtApprovalConfig = {
   requireQaApproval: true,
 };
 
+export const DEFAULT_OJT_FORM_APPROVALS: OjtFormApprovalConfig = {
+  requirePreparedBy: true,
+  requireCheckedByCoordinator: true,
+  requireVerifiedByHod: true,
+  requireCheckedByHead: true,
+  requireApprovedByQa: true,
+};
+
+export const DEFAULT_PLANNER_FORM_NUMBER = "SOP/QA/002/F02-02";
+export const DEFAULT_MATRIX_FORM_NUMBER = "SOP/QA/002/F15-00";
+export const DEFAULT_OJT_COMPANY_NAME = "SKYMAP PHARMACEUTICALS PVT. LTD, ROORKEE";
+export const DEFAULT_OJT_DIVISION = "QUALITY ASSURANCE";
+export const DEFAULT_COMPETENCY_SCORING: OjtCompetencyScoringModel = "both";
+
+export const OJT_FORM_SIGNOFF_LABELS: Record<OjtFormSignoffRole, { title: string; subtitle: string }> = {
+  prepared_by: { title: "Prepared By", subtitle: "Officer/Executive" },
+  checked_by_coordinator: { title: "Checked By", subtitle: "Department Training Coordinator" },
+  verified_by_hod: { title: "Verified By", subtitle: "Department HOD/Designee" },
+  checked_by_head: { title: "Checked By", subtitle: "Department Head" },
+  approved_by_qa: { title: "Approved By", subtitle: "Head QA" },
+};
+
 export const DEFAULT_OJT_SETTINGS: Omit<OjtSettings, "createdAt" | "updatedAt" | "createdBy"> = {
   id: "global",
   ...DEFAULT_OJT_APPROVAL_CONFIG,
   overdueGraceDays: 0,
+  allowExecutionBeforeSelection: false,
+  requireExecutionDeviationApproval: true,
+  competencyScoringModel: DEFAULT_COMPETENCY_SCORING,
+  plannerFormNumber: DEFAULT_PLANNER_FORM_NUMBER,
+  matrixFormNumber: DEFAULT_MATRIX_FORM_NUMBER,
+  companyName: DEFAULT_OJT_COMPANY_NAME,
+  companyDivision: DEFAULT_OJT_DIVISION,
+  plannerApprovals: { ...DEFAULT_OJT_FORM_APPROVALS },
+  matrixApprovals: { ...DEFAULT_OJT_FORM_APPROVALS },
 };
 
 export const TERMINAL_OJT_STATUSES: readonly OjtStatus[] = [
@@ -222,7 +256,55 @@ export function dateFallsInMonth(isoDate: string, year: number, month: number): 
   return d.getFullYear() === year && d.getMonth() + 1 === month;
 }
 
-/** blank → S → S/E → E → blank */
+export function toggleMonthList(months: number[], month: number): number[] {
+  return months.includes(month)
+    ? months.filter((m) => m !== month)
+    : [...months, month].sort((a, b) => a - b);
+}
+
+/**
+ * Official PDF rule: execution month should not be earlier than selection month.
+ * Exceptions are allowed only when the organisation enables them in settings.
+ */
+export function assertExecutionNotBeforeSelection(
+  selectionMonths: number[],
+  executionMonths: number[],
+  allowBefore: boolean
+): void {
+  if (allowBefore) return;
+  if (!selectionMonths.length || !executionMonths.length) return;
+  const minS = Math.min(...selectionMonths);
+  const minE = Math.min(...executionMonths);
+  if (minE < minS) {
+    throw new Error(
+      "Execution month cannot be earlier than selection month. Enable exceptions in OJT settings if a deviation is authorized."
+    );
+  }
+}
+
+export function nextRevisionNumber(current: string | undefined): string {
+  const n = Number.parseInt(current || "0", 10);
+  const next = Number.isFinite(n) ? n + 1 : 1;
+  return String(next).padStart(2, "0");
+}
+
+export function formatRevisionNumber(value: string | number | undefined): string {
+  const n = Number.parseInt(String(value ?? "0"), 10);
+  return String(Number.isFinite(n) ? n : 0).padStart(2, "0");
+}
+
+export function formatOfficialDate(iso?: string): string {
+  if (!iso) return "";
+  const parts = parseCalendarDateParts(iso);
+  if (parts) {
+    return `${String(parts.day).padStart(2, "0")}/${String(parts.month).padStart(2, "0")}/${parts.year}`;
+  }
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()}`;
+}
+
+/** blank → S → S/E → E → blank (legacy combined-cell helper; planner UI uses separate S/E rows). */
 export function cyclePlannerMonth(
   selection: number[],
   execution: number[],

@@ -92,11 +92,12 @@ export function ojtWorkflowSteps(assignment: OjtAssignment): OjtProgressStep[] {
 
 export function ojtNextAction(
   assignment: OjtAssignment,
-  role?: UserRole | null
+  role?: UserRole | null,
+  graceDays = 0
 ): OjtNextAction {
   const href = `/dashboard/ojt/assignments/${assignment.id}`;
   const r = role ?? undefined;
-  const overdue = isOjtOverdue(assignment);
+  const overdue = isOjtOverdue(assignment, new Date(), graceDays);
 
   if (assignment.status === "completed") {
     return {
@@ -271,11 +272,12 @@ function monthHint(assignment: OjtAssignment): string {
 export function actionableOjtQueue(
   assignments: OjtAssignment[],
   role?: UserRole | null,
-  limit = 6
+  limit = 6,
+  graceDays = 0
 ): { assignment: OjtAssignment; action: OjtNextAction }[] {
   return assignments
     .filter((a) => a.status !== "completed" && a.status !== "cancelled")
-    .map((assignment) => ({ assignment, action: ojtNextAction(assignment, role) }))
+    .map((assignment) => ({ assignment, action: ojtNextAction(assignment, role, graceDays) }))
     .filter((row) => row.action.canAct)
     .sort((a, b) => {
       const rankA = RANK[a.assignment.status] ?? 99;
@@ -290,11 +292,54 @@ export function actionableOjtQueue(
 export function waitingOjtQueue(
   assignments: OjtAssignment[],
   role?: UserRole | null,
-  limit = 6
+  limit = 6,
+  graceDays = 0
 ): { assignment: OjtAssignment; action: OjtNextAction }[] {
   return assignments
     .filter((a) => a.status !== "completed" && a.status !== "cancelled")
-    .map((assignment) => ({ assignment, action: ojtNextAction(assignment, role) }))
+    .map((assignment) => ({ assignment, action: ojtNextAction(assignment, role, graceDays) }))
     .filter((row) => !row.action.canAct)
     .slice(0, limit);
+}
+
+export function ojtFormPendingActions(
+  forms: { kind: "planner" | "matrix"; status: string; departmentName?: string; year: number; locked?: boolean }[],
+  role?: UserRole | null
+): OjtNextAction[] {
+  const r = role ?? undefined;
+  const actions: OjtNextAction[] = [];
+  for (const form of forms) {
+    if (form.locked || form.status === "approved") continue;
+    const href = form.kind === "planner" ? "/dashboard/ojt/planner" : "/dashboard/ojt/matrix";
+    const name = form.kind === "planner" ? "Yearly planner" : "Employee training matrix";
+    if (form.status === "draft" && can(r, "ojt:write")) {
+      actions.push({
+        title: `${name} pending preparation`,
+        hint: `${form.departmentName || "Department"} ${form.year} is still draft.`,
+        waitingOn: "Officer/Executive",
+        href,
+        canAct: true,
+        tone: "warning",
+      });
+    } else if (form.status === "prepared" && (can(r, "ojt:verify") || can(r, "ojt:write"))) {
+      actions.push({
+        title: `${name} pending check / HOD verification`,
+        hint: "Department Training Coordinator / HOD sign-off is outstanding.",
+        waitingOn: "Department head",
+        href,
+        canAct: can(r, "ojt:verify") || r === "department_head" || r === "qa" || r === "super_admin",
+        tone: "warning",
+      });
+    } else if (form.status === "checked" && can(r, "ojt:approve")) {
+      actions.push({
+        title: `${name} pending QA approval`,
+        hint: "Head QA approval is required before this controlled form is active.",
+        waitingOn: "QA",
+        href,
+        canAct: true,
+        tone: "warning",
+      });
+    }
+  }
+  return actions;
 }

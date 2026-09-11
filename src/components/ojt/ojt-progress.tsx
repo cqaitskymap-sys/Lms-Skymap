@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import type { UserRole } from "@/types";
 import type { OjtAssignment } from "@/types/ojt";
@@ -50,8 +51,9 @@ export function OjtNextStepBanner({
   assignment: OjtAssignment;
   role?: UserRole | null;
 }) {
+  const pathname = usePathname();
   const action = ojtNextAction(assignment, role);
-  const target = action.formId ? `#${action.formId}` : action.href;
+  const target = action.formId ? `${pathname}#${action.formId}` : action.href;
 
   return (
     <div className={cn("flex flex-wrap items-start justify-between gap-3 rounded-xl border p-4", toneClass[action.tone])}>

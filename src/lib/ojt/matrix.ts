@@ -1,5 +1,11 @@
 import type { Employee } from "@/types";
-import type { OjtAssignment, OjtMatrixCellValue, OjtPlan } from "@/types/ojt";
+import type {
+  OjtAssignment,
+  OjtMatrixCellValue,
+  OjtOfficialSelection,
+  OjtPlan,
+} from "@/types/ojt";
+import { formatOfficialDate } from "@/lib/ojt/constants";
 import { isOjtOverdue } from "@/lib/ojt/workflow";
 
 const EXCLUDED_EMPLOYEE_STATUSES = new Set<Employee["status"]>([
@@ -109,4 +115,44 @@ export function summarizeMatrix(values: OjtMatrixCellValue[]) {
     } else if (v === "in_progress") counts.pending += 1;
   }
   return counts;
+}
+
+export function employeeDisplayName(employee: Pick<Employee, "firstName" | "lastName">): string {
+  return `${employee.firstName} ${employee.lastName}`.trim();
+}
+
+/** Official PDF S-row value: ✓ / NA / blank. Digital workflow states stay off this cell. */
+export function officialSelectionValue(
+  plan: OjtPlan | undefined,
+  employeeId: string
+): OjtOfficialSelection {
+  const applicability = plan?.employeeSelections.find((s) => s.employeeId === employeeId)?.applicability;
+  if (applicability === "not_applicable") return "not_applicable";
+  if (applicability === "selected") return "selected";
+  return "empty";
+}
+
+export function officialSelectionLabel(value: OjtOfficialSelection): string {
+  if (value === "selected") return "✓";
+  if (value === "not_applicable") return "NA";
+  return "";
+}
+
+/** Official PDF E-row value: execution date, else blank. NA employees stay blank (not overdue). */
+export function officialExecutionLabel(
+  plan: OjtPlan | undefined,
+  assignment: OjtAssignment | undefined,
+  employeeId: string
+): string {
+  const selection = officialSelectionValue(plan, employeeId);
+  if (selection === "not_applicable") return "";
+  if (assignment?.actualExecutionDate && assignment.status !== "cancelled") {
+    return formatOfficialDate(assignment.actualExecutionDate);
+  }
+  return "";
+}
+
+export function matrixCellIsLocked(assignment: OjtAssignment | undefined): boolean {
+  if (!assignment || assignment.status === "cancelled") return false;
+  return !["selected", "draft", "assigned"].includes(assignment.status);
 }

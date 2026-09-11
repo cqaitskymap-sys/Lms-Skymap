@@ -10,6 +10,7 @@ import { useDepartments } from "@/hooks/use-departments";
 import { listSopsDetailed } from "@/lib/services/sops";
 import {
   createOjtTopic,
+  deleteOjtTopic,
   ensureQaOjtTopicCatalog,
   getOjtSettings,
   listOjtEvaluationCriteria,
@@ -17,6 +18,9 @@ import {
   updateOjtSettings,
   updateOjtTopic,
 } from "@/lib/services/ojt";
+import { AdminDeleteButton } from "@/components/auth/admin-delete-button";
+import { AdminEditButton } from "@/components/auth/admin-edit-button";
+import { OjtTopicEditDialog } from "@/components/ojt/ojt-admin-dialogs";
 import { toOjtActor } from "@/lib/ojt/actor";
 import { OJT_UPDATED_EVENT } from "@/lib/ojt/demo-store";
 import { Button } from "@/components/ui/button";
@@ -42,6 +46,7 @@ import {
 import { StatusBadge } from "@/components/shared/status-badge";
 import { Switch } from "@/components/ui/switch";
 import { OjtEmptyState } from "@/components/ojt/ojt-empty-state";
+import { formatDate } from "@/lib/utils";
 import type { OjtEvaluationCriterion, OjtSettings, OjtTopic } from "@/types/ojt";
 import type { SopDocument } from "@/types";
 
@@ -50,6 +55,7 @@ export default function OjtTopicsPage() {
   const { activeDepartments } = useDepartments();
   const canWrite = profile?.role ? hasPermission(profile.role, "ojt:write") : false;
   const canAdmin = profile?.role ? hasPermission(profile.role, "ojt:admin") : false;
+  const isSuperAdmin = profile?.role === "super_admin";
   const [topics, setTopics] = useState<OjtTopic[]>([]);
   const [criteria, setCriteria] = useState<OjtEvaluationCriterion[]>([]);
   const [settings, setSettings] = useState<OjtSettings | null>(null);
@@ -61,6 +67,7 @@ export default function OjtTopicsPage() {
   const [reference, setReference] = useState("");
   const [sopId, setSopId] = useState("none");
   const [description, setDescription] = useState("");
+  const [editingTopic, setEditingTopic] = useState<OjtTopic | null>(null);
 
   const refresh = useCallback(async (opts?: { silent?: boolean }) => {
     if (!opts?.silent) setLoading(true);
@@ -245,9 +252,13 @@ export default function OjtTopicsPage() {
                 <TableRow>
                   <TableHead>Training topic</TableHead>
                   <TableHead>SOP / Reference</TableHead>
+                  <TableHead>SOP title</TableHead>
                   <TableHead>Version</TableHead>
+                  <TableHead>SOP effective</TableHead>
                   <TableHead>Department</TableHead>
                   <TableHead>Active</TableHead>
+                  <TableHead>Created</TableHead>
+                  {isSuperAdmin && <TableHead className="text-right">Actions</TableHead>}
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -257,7 +268,9 @@ export default function OjtTopicsPage() {
                     <TableCell className="font-mono text-xs">
                       {t.referenceDocumentNumber || t.sopNumber || "NA"}
                     </TableCell>
+                    <TableCell className="max-w-[180px] truncate text-sm">{t.sopTitle || "—"}</TableCell>
                     <TableCell>{t.sopVersionNumber || "—"}</TableCell>
+                    <TableCell className="text-xs">{formatDate(t.sopEffectiveDate || t.effectiveDate)}</TableCell>
                     <TableCell>{t.departmentName || t.departmentId}</TableCell>
                     <TableCell>
                       {canWrite ? (
@@ -274,6 +287,27 @@ export default function OjtTopicsPage() {
                         <StatusBadge status={t.isActive ? "active" : "inactive"} />
                       )}
                     </TableCell>
+                    <TableCell className="text-xs text-muted-foreground">
+                      {formatDate(t.createdAt)}
+                      {t.createdByName ? ` · ${t.createdByName}` : ""}
+                    </TableCell>
+                    {isSuperAdmin && (
+                    <TableCell>
+                      <div className="flex items-center justify-end gap-1">
+                        <AdminEditButton onClick={() => setEditingTopic(t)} />
+                        <AdminDeleteButton
+                          confirmTitle={`Delete ${t.trainingTopic}?`}
+                          confirmDescription="This topic, related yearly plan rows, and OJT records will be removed permanently. Only Super Admin can delete."
+                          successMessage="OJT topic deleted"
+                          onDelete={async () => {
+                            if (!profile) throw new Error("Not signed in");
+                            await deleteOjtTopic(t.id, toOjtActor(profile));
+                            await refresh({ silent: true });
+                          }}
+                        />
+                      </div>
+                    </TableCell>
+                    )}
                   </TableRow>
                 ))}
               </TableBody>
@@ -281,6 +315,17 @@ export default function OjtTopicsPage() {
           )}
         </CardContent>
       </Card>
+
+      <OjtTopicEditDialog
+        topic={editingTopic}
+        departments={activeDepartments}
+        sops={sops}
+        open={!!editingTopic}
+        onOpenChange={(v) => {
+          if (!v) setEditingTopic(null);
+        }}
+        onSaved={() => refresh({ silent: true })}
+      />
 
       {canAdmin && settings && (
         <Card>
@@ -297,12 +342,14 @@ export default function OjtTopicsPage() {
                 ["requireTrainerSignoff", "Trainer sign-off"],
                 ["requireHodVerification", "HOD / Designee verification"],
                 ["requireQaApproval", "QA approval"],
+                ["allowExecutionBeforeSelection", "Allow execution month before selection month"],
+                ["requireExecutionDeviationApproval", "Require authorized deviation for dates outside planned month"],
               ] as const
             ).map(([key, label]) => (
               <label key={key} className="flex items-center justify-between rounded-lg border p-3 text-sm">
                 {label}
                 <Switch
-                  checked={settings[key]}
+                  checked={Boolean(settings[key])}
                   onCheckedChange={(v) => {
                     if (!profile) return;
                     void updateOjtSettings({ [key]: v }, toOjtActor(profile))
@@ -312,6 +359,56 @@ export default function OjtTopicsPage() {
                 />
               </label>
             ))}
+            <div className="space-y-1">
+              <Label>Competency scoring model</Label>
+              <Select
+                value={settings.competencyScoringModel || "both"}
+                onValueChange={(v) => {
+                  if (!profile) return;
+                  void updateOjtSettings(
+                    { competencyScoringModel: v as OjtSettings["competencyScoringModel"] },
+                    toOjtActor(profile)
+                  )
+                    .then(setSettings)
+                    .catch((err) => toast.error(err instanceof Error ? err.message : "Save failed"));
+                }}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="pass_fail">Pass / Fail only (official PDFs do not define 1–5)</SelectItem>
+                  <SelectItem value="rating_1_5">1–5 rating (system enhancement)</SelectItem>
+                  <SelectItem value="both">Pass/Fail + optional 1–5</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <Label>Planner format no.</Label>
+              <Input
+                value={settings.plannerFormNumber}
+                onBlur={() => {
+                  if (!profile) return;
+                  void updateOjtSettings({ plannerFormNumber: settings.plannerFormNumber }, toOjtActor(profile)).catch(
+                    (err) => toast.error(err instanceof Error ? err.message : "Save failed")
+                  );
+                }}
+                onChange={(e) => setSettings({ ...settings, plannerFormNumber: e.target.value })}
+              />
+            </div>
+            <div className="space-y-1 sm:col-span-2">
+              <Label>Matrix format no.</Label>
+              <Input
+                value={settings.matrixFormNumber}
+                onBlur={() => {
+                  if (!profile) return;
+                  void updateOjtSettings({ matrixFormNumber: settings.matrixFormNumber }, toOjtActor(profile)).catch(
+                    (err) => toast.error(err instanceof Error ? err.message : "Save failed")
+                  );
+                }}
+                onChange={(e) => setSettings({ ...settings, matrixFormNumber: e.target.value })}
+              />
+            </div>
             <div className="sm:col-span-2">
               <p className="mb-2 text-sm font-medium">Evaluation criteria</p>
               <ul className="list-disc space-y-1 pl-5 text-sm text-muted-foreground">

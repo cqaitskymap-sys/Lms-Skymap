@@ -5,6 +5,7 @@
 import { collection, getDocs, orderBy, query, limit } from "firebase/firestore/lite";
 import { db, COLLECTIONS, auth } from "@/lib/firebase/client";
 import type { AuditAction, AuditLog, UserRole } from "@/types";
+import { isoInLocalDateRange } from "@/lib/utils";
 import { isDemoMode } from "@/lib/demo/data";
 import { readLifecycleStore } from "@/lib/lifecycle/demo-store";
 import type { LifecycleEvent } from "@/types";
@@ -69,18 +70,7 @@ async function fetchRemoteAuditLogs(max: number): Promise<AuditLog[]> {
 }
 
 function inDateRange(iso: string, dateFrom?: string, dateTo?: string): boolean {
-  if (!dateFrom && !dateTo) return true;
-  const t = new Date(iso).getTime();
-  if (dateFrom) {
-    const from = new Date(dateFrom).getTime();
-    if (t < from) return false;
-  }
-  if (dateTo) {
-    const to = new Date(dateTo);
-    to.setHours(23, 59, 59, 999);
-    if (t > to.getTime()) return false;
-  }
-  return true;
+  return isoInLocalDateRange(iso, dateFrom, dateTo);
 }
 
 function applyFilters(rows: AuditLog[], filters?: AuditListFilters): AuditLog[] {

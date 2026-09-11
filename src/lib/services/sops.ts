@@ -798,6 +798,86 @@ export async function approveSopVersionFull(
   return { retrainCount };
 }
 
+const SOP_REVISION_OPEN_STATUSES = new Set<TrainingAssignment["status"]>([
+  "assigned",
+  "in_progress",
+  "training_scheduled",
+  "retraining",
+  "assessment_pending",
+  "failed",
+]);
+
+const SOP_REVISION_COMPLETED_STATUSES = new Set<TrainingAssignment["status"]>([
+  "passed",
+  "training_completed",
+]);
+
+function planSopRevisionRetrain(
+  rows: TrainingAssignment[],
+  sopId: string,
+  newVersionId: string,
+  actorId: string
+): { toUpdate: TrainingAssignment[]; toCreate: TrainingAssignment[] } {
+  const now = nowISO();
+  const byEmployee = new Map<string, TrainingAssignment[]>();
+  for (const row of rows) {
+    if (row.sopId !== sopId) continue;
+    const list = byEmployee.get(row.employeeId) || [];
+    list.push(row);
+    byEmployee.set(row.employeeId, list);
+  }
+
+  const toUpdate: TrainingAssignment[] = [];
+  const toCreate: TrainingAssignment[] = [];
+
+  for (const list of byEmployee.values()) {
+    const alreadyOnNew = list.some(
+      (a) => a.sopVersionId === newVersionId && a.status !== "expired"
+    );
+    const openOld = list.filter(
+      (a) => SOP_REVISION_OPEN_STATUSES.has(a.status) && a.sopVersionId !== newVersionId
+    );
+    if (openOld.length) {
+      for (const prev of openOld) {
+        toUpdate.push({
+          ...prev,
+          sopVersionId: newVersionId,
+          isRetraining: true,
+          triggeredBySopRevision: true,
+          updatedAt: now,
+          updatedBy: actorId,
+        });
+      }
+      continue;
+    }
+    if (alreadyOnNew) continue;
+    const completed = list
+      .filter((a) => SOP_REVISION_COMPLETED_STATUSES.has(a.status))
+      .sort((a, b) => (b.updatedAt || "").localeCompare(a.updatedAt || ""));
+    const prev = completed[0];
+    if (!prev) continue;
+    toCreate.push({
+      id: generateId("ta"),
+      employeeId: prev.employeeId,
+      sopId,
+      sopVersionId: newVersionId,
+      trainerId: prev.trainerId,
+      assignedBy: actorId,
+      departmentId: prev.departmentId,
+      status: "assigned",
+      attemptCount: 0,
+      isRetraining: true,
+      previousAssignmentId: prev.id,
+      triggeredBySopRevision: true,
+      createdAt: now,
+      updatedAt: now,
+      createdBy: actorId,
+    });
+  }
+
+  return { toUpdate, toCreate };
+}
+
 function autoRetrainDemo(
   store: ReturnType<typeof readSopStore>,
   sopId: string,
@@ -805,39 +885,19 @@ function autoRetrainDemo(
   actorId: string
 ): number {
   const trainingStore = readTrainingStore();
-  const prev = trainingStore.assignments.filter(
-    (a) =>
-      a.sopId === sopId &&
-      ["passed", "training_completed", "assessment_pending"].includes(a.status)
+  const { toUpdate, toCreate } = planSopRevisionRetrain(
+    trainingStore.assignments,
+    sopId,
+    newVersionId,
+    actorId
   );
-  const now = nowISO();
-  let count = 0;
-  const assignedEmployees = new Set<string>();
-  for (const p of prev) {
-    if (assignedEmployees.has(p.employeeId)) continue;
-    assignedEmployees.add(p.employeeId);
-    const id = generateId("ta");
-    const assignment: TrainingAssignment = {
-      id,
-      employeeId: p.employeeId,
-      sopId,
-      sopVersionId: newVersionId,
-      trainerId: p.trainerId,
-      assignedBy: actorId,
-      departmentId: p.departmentId,
-      status: "assigned",
-      attemptCount: 0,
-      isRetraining: true,
-      previousAssignmentId: p.id,
-      triggeredBySopRevision: true,
-      createdAt: now,
-      updatedAt: now,
-      createdBy: actorId,
-    };
-    trainingStore.assignments.unshift(assignment);
-    count++;
-  }
+  const updatedById = new Map(toUpdate.map((a) => [a.id, a]));
+  trainingStore.assignments = [
+    ...toCreate,
+    ...trainingStore.assignments.map((a) => updatedById.get(a.id) || a),
+  ];
   writeTrainingStore(trainingStore);
+  const count = new Set([...toUpdate, ...toCreate].map((a) => a.employeeId)).size;
   store.versions = store.versions.map((v) =>
     v.id === newVersionId ? { ...v, retrainAssignedCount: count } : v
   );
@@ -858,44 +918,36 @@ export async function reassignTrainingOnRevision(
 
   const q = query(
     collection(db, COLLECTIONS.trainingAssignments),
-    where("sopId", "==", sopId),
-    where("status", "in", ["passed", "training_completed", "assessment_pending"])
+    where("sopId", "==", sopId)
   );
   const snap = await getDocs(q);
+  const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }) as TrainingAssignment);
+  const { toUpdate, toCreate } = planSopRevisionRetrain(rows, sopId, newVersionId, actorId);
   const now = nowISO();
-  let count = 0;
-  const assignedEmployees = new Set<string>();
 
-  for (const d of snap.docs) {
-    const prev = d.data() as TrainingAssignment;
-    if (assignedEmployees.has(prev.employeeId)) continue;
-    assignedEmployees.add(prev.employeeId);
-    const id = generateId("ta");
-    const assignment: TrainingAssignment = {
-      id,
-      employeeId: prev.employeeId,
-      sopId,
+  for (const row of toUpdate) {
+    await updateDoc(doc(db, COLLECTIONS.trainingAssignments, row.id), {
       sopVersionId: newVersionId,
-      assignedBy: actorId,
-      departmentId: prev.departmentId,
-      trainerId: prev.trainerId,
-      status: "assigned",
-      attemptCount: 0,
       isRetraining: true,
-      previousAssignmentId: prev.id,
       triggeredBySopRevision: true,
-      createdAt: now,
       updatedAt: now,
-      createdBy: actorId,
-    };
-    await setDoc(doc(db, COLLECTIONS.trainingAssignments, id), stripUndefined(assignment));
+      updatedBy: actorId,
+    });
+  }
 
-    // Notify via notifications collection if user linked
+  for (const assignment of toCreate) {
+    await setDoc(doc(db, COLLECTIONS.trainingAssignments, assignment.id), stripUndefined(assignment));
+  }
+
+  const employeeIds = Array.from(
+    new Set([...toUpdate, ...toCreate].map((a) => a.employeeId))
+  );
+  const { createNotification } = await import("@/lib/services/notifications");
+  for (const employeeId of employeeIds) {
     try {
-      const empSnap = await getDoc(doc(db, COLLECTIONS.employees, prev.employeeId));
+      const empSnap = await getDoc(doc(db, COLLECTIONS.employees, employeeId));
       const userId = empSnap.data()?.userId as string | undefined;
       if (userId) {
-        const { createNotification } = await import("@/lib/services/notifications");
         await createNotification({
           userId,
           type: "sop_revision",
@@ -908,10 +960,9 @@ export async function reassignTrainingOnRevision(
     } catch {
       /* ignore */
     }
-    count++;
   }
 
-  return count;
+  return employeeIds.length;
 }
 
 export async function archiveSopVersion(

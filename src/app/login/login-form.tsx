@@ -31,13 +31,6 @@ function LoginForm() {
   const [showPassword, setShowPassword] = useState(false);
   const [rememberPassword, setRememberPassword] = useState(false);
 
-  useEffect(() => {
-    if (!loading && user) {
-      const redirect = safeInternalPath(searchParams.get("redirect"), "/dashboard");
-      router.replace(redirect);
-    }
-  }, [loading, user, router, searchParams]);
-
   const {
     register,
     handleSubmit,
@@ -52,6 +45,13 @@ function LoginForm() {
   });
 
   useEffect(() => {
+    if (!loading && user && !isSubmitting) {
+      const redirect = safeInternalPath(searchParams.get("redirect"), "/dashboard");
+      router.replace(redirect);
+    }
+  }, [loading, user, router, searchParams, isSubmitting]);
+
+  useEffect(() => {
     const saved = loadRememberedLogin();
     if (!saved) return;
     setRememberPassword(true);
@@ -63,7 +63,7 @@ function LoginForm() {
   const onSubmit = async (data: LoginInput) => {
     try {
       const email = await resolveLoginIdentifier(data.email);
-      const profile = await signIn(email, data.password, rememberPassword);
+      const profile = await signIn(email, data.password, true);
       if (rememberPassword) {
         saveRememberedLogin(data.email.trim());
       } else {

@@ -12,6 +12,7 @@ import {
   query,
 } from "firebase/firestore/lite";
 import { db, COLLECTIONS } from "@/lib/firebase/client";
+import { isoInLocalDateRange } from "@/lib/utils";
 import { listAuditLogs } from "@/lib/services/audit-logs";
 import { listCertificates } from "@/lib/services/certificates";
 import { listDepartments } from "@/lib/services/departments";
@@ -279,18 +280,7 @@ function trainerName(id?: string) {
 }
 
 function inDateRange(iso: string | undefined, filters: ReportFilters): boolean {
-  if (!iso) return true;
-  const t = new Date(iso).getTime();
-  if (filters.dateFrom) {
-    const from = new Date(filters.dateFrom).getTime();
-    if (t < from) return false;
-  }
-  if (filters.dateTo) {
-    const to = new Date(filters.dateTo);
-    to.setHours(23, 59, 59, 999);
-    if (t > to.getTime()) return false;
-  }
-  return true;
+  return isoInLocalDateRange(iso, filters.dateFrom, filters.dateTo);
 }
 
 function matchesSearch(haystack: string, search: string) {

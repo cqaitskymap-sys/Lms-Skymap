@@ -80,6 +80,7 @@ export const COLLECTIONS = {
   ojtAssignments: "ojt_assignments",
   ojtEvaluationCriteria: "ojt_evaluation_criteria",
   ojtSettings: "ojt_settings",
+  ojtFormDocuments: "ojt_form_documents",
   questionBanks: "question_banks",
   questions: "questions",
   exams: "exams",

@@ -1,4 +1,4 @@
-import type { OjtApprovalConfig, OjtAssignment, OjtStatus } from "@/types/ojt";
+import type { OjtApprovalConfig, OjtAssignment, OjtCriterionScore, OjtStatus } from "@/types/ojt";
 import { lastDayOfMonthIso, OPEN_OJT_STATUSES, TERMINAL_OJT_STATUSES } from "@/lib/ojt/constants";
 
 const TRANSITIONS: Record<OjtStatus, readonly OjtStatus[]> = {
@@ -6,7 +6,15 @@ const TRANSITIONS: Record<OjtStatus, readonly OjtStatus[]> = {
   selected: ["assigned", "scheduled", "cancelled"],
   assigned: ["scheduled", "cancelled"],
   scheduled: ["in_progress", "cancelled", "rescheduled"],
-  in_progress: ["trainer_completed", "failed", "cancelled"],
+  // Employee ack can be disabled in settings — evaluation then jumps to HOD / QA / completed.
+  in_progress: [
+    "trainer_completed",
+    "failed",
+    "cancelled",
+    "verification_pending",
+    "qa_pending",
+    "completed",
+  ],
   trainer_completed: [
     "employee_acknowledged",
     "verification_pending",
@@ -16,8 +24,8 @@ const TRANSITIONS: Record<OjtStatus, readonly OjtStatus[]> = {
     "cancelled",
   ],
   employee_acknowledged: ["verification_pending", "qa_pending", "completed", "cancelled"],
-  verification_pending: ["qa_pending", "completed", "failed", "retraining_required", "cancelled"],
-  qa_pending: ["completed", "failed", "retraining_required", "cancelled"],
+  verification_pending: ["qa_pending", "completed", "failed", "retraining_required", "in_progress", "trainer_completed", "cancelled"],
+  qa_pending: ["completed", "failed", "retraining_required", "verification_pending", "cancelled"],
   completed: [],
   failed: ["retraining_required", "cancelled"],
   retraining_required: ["rescheduled", "cancelled"],
@@ -44,6 +52,24 @@ export function isOpenOjtStatus(status: OjtStatus): boolean {
   return (OPEN_OJT_STATUSES as readonly string[]).includes(status);
 }
 
+/** 1–5 scores below 3, or any explicit Fail, mean not competent. */
+export function criterionIsFail(score: Pick<OjtCriterionScore, "result" | "rating">): boolean {
+  if (score.result === "fail") return true;
+  return typeof score.rating === "number" && score.rating < 3;
+}
+
+export function evaluationDidFail(criteria: OjtCriterionScore[]): boolean {
+  return criteria.some(criterionIsFail);
+}
+
+export function evaluationOverallRating(criteria: OjtCriterionScore[]): number | undefined {
+  const ratings = criteria
+    .map((s) => s.rating)
+    .filter((n): n is number => typeof n === "number" && Number.isFinite(n));
+  if (!ratings.length) return undefined;
+  return Math.round((ratings.reduce((sum, n) => sum + n, 0) / ratings.length) * 10) / 10;
+}
+
 /**
  * Next status after trainer evaluation + sign-off, based on configurable approvals.
  */
@@ -65,8 +91,13 @@ export function statusAfterHodDecision(
   config: OjtApprovalConfig,
   decision: "approved" | "rejected"
 ): OjtStatus {
-  if (decision === "rejected") return "failed";
+  if (decision === "rejected") return "in_progress";
   if (config.requireQaApproval) return "qa_pending";
+  return "completed";
+}
+
+export function statusAfterQaDecision(decision: "approved" | "rejected"): OjtStatus {
+  if (decision === "rejected") return "verification_pending";
   return "completed";
 }
 

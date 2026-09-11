@@ -109,8 +109,12 @@ export async function PATCH(
     );
   }
 
+  let nextDept =
+    input.departmentId !== undefined
+      ? input.departmentId || undefined
+      : before.departmentId;
+
   // Drop department when role no longer needs it (hr/qa).
-  let clearDepartment = false;
   if (
     input.role !== undefined &&
     input.role !== "department_head" &&
@@ -118,7 +122,14 @@ export async function PATCH(
     input.departmentId === undefined
   ) {
     updates.departmentId = FieldValue.delete();
-    clearDepartment = true;
+    nextDept = undefined;
+  }
+
+  if ((nextRole === "department_head" || nextRole === "trainer") && !nextDept) {
+    return NextResponse.json(
+      { success: false, error: "Department is required for this role" },
+      { status: 400 }
+    );
   }
 
   try {
@@ -130,12 +141,6 @@ export async function PATCH(
     if (Object.keys(authUpdates).length > 0) {
       await adminAuth.updateUser(id, authUpdates);
     }
-
-    const nextDept = clearDepartment
-      ? undefined
-      : input.departmentId !== undefined
-        ? input.departmentId || undefined
-        : before.departmentId;
 
     const claims: Record<string, string> = { role: nextRole };
     if (nextDept) claims.departmentId = nextDept;
@@ -232,11 +237,10 @@ export async function PATCH(
       if (input.phone) after.phone = input.phone;
       else delete after.phone;
     }
-    if (clearDepartment) {
+    if (!nextDept) {
       delete after.departmentId;
     } else if (input.departmentId !== undefined) {
-      if (input.departmentId) after.departmentId = input.departmentId;
-      else delete after.departmentId;
+      after.departmentId = nextDept;
     }
 
     await writeAuditLog({

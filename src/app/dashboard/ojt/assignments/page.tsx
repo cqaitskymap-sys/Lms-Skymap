@@ -6,7 +6,8 @@ import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
 import { hasPermission } from "@/lib/rbac/permissions";
-import { listOjtAssignments, type OjtAssignmentFilters } from "@/lib/services/ojt";
+import { listOjtAssignments, listOjtStaffOptions, deleteOjtAssignment, type OjtAssignmentFilters } from "@/lib/services/ojt";
+import { toOjtActor } from "@/lib/ojt/actor";
 import { OJT_UPDATED_EVENT } from "@/lib/ojt/demo-store";
 import { OJT_STATUS_LABELS, currentCalendarYear, monthName } from "@/lib/ojt/constants";
 import { displayOjtStatus } from "@/lib/ojt/workflow";
@@ -31,6 +32,9 @@ import {
 } from "@/components/ui/table";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { OjtEmptyState } from "@/components/ojt/ojt-empty-state";
+import { AdminDeleteButton } from "@/components/auth/admin-delete-button";
+import { AdminEditButton } from "@/components/auth/admin-edit-button";
+import { OjtAssignmentEditDialog } from "@/components/ojt/ojt-admin-dialogs";
 import type { OjtAssignment, OjtStatus } from "@/types/ojt";
 
 const STATUSES: Array<OjtStatus | "all"> = [
@@ -57,6 +61,8 @@ export default function OjtAssignmentsPage() {
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<OjtStatus | "all">("all");
   const [year, setYear] = useState(String(currentCalendarYear()));
+  const [editing, setEditing] = useState<OjtAssignment | null>(null);
+  const [trainers, setTrainers] = useState<{ uid: string; displayName: string }[]>([]);
 
   const filters = useMemo((): OjtAssignmentFilters => {
     const base: OjtAssignmentFilters = { year: Number(year) };
@@ -76,7 +82,12 @@ export default function OjtAssignmentsPage() {
         setRows([]);
         return;
       }
-      setRows(await listOjtAssignments(filters));
+      const [asg, staff] = await Promise.all([
+        listOjtAssignments(filters),
+        listOjtStaffOptions().catch(() => []),
+      ]);
+      setRows(asg);
+      setTrainers(staff.filter((u) => u.role === "trainer" || u.role === "department_head" || u.role === "super_admin"));
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to load assignments");
     } finally {
@@ -172,7 +183,7 @@ export default function OjtAssignmentsPage() {
                   <TableHead>Trainer</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Next step</TableHead>
-                  <TableHead />
+                  <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -202,11 +213,24 @@ export default function OjtAssignmentsPage() {
                       {next.title}
                     </TableCell>
                     <TableCell>
-                      <Button size="sm" variant={next.canAct ? "default" : "outline"} asChild>
-                        <Link href={`/dashboard/ojt/assignments/${a.id}`}>
-                          {next.canAct ? "Continue" : "Open"}
-                        </Link>
-                      </Button>
+                      <div className="flex items-center justify-end gap-1">
+                        <AdminEditButton onClick={() => setEditing(a)} />
+                        <Button size="sm" variant={next.canAct ? "default" : "outline"} asChild>
+                          <Link href={`/dashboard/ojt/assignments/${a.id}`}>
+                            {next.canAct ? "Continue" : "Open"}
+                          </Link>
+                        </Button>
+                        <AdminDeleteButton
+                          confirmTitle={`Delete OJT for ${a.employeeName}?`}
+                          confirmDescription="This OJT record will be removed permanently. Only Super Admin can delete."
+                          successMessage="OJT record deleted"
+                          onDelete={async () => {
+                            if (!profile) throw new Error("Not signed in");
+                            await deleteOjtAssignment(a.id, toOjtActor(profile));
+                            await refresh({ silent: true });
+                          }}
+                        />
+                      </div>
                     </TableCell>
                   </TableRow>
                   );
@@ -216,6 +240,15 @@ export default function OjtAssignmentsPage() {
           )}
         </CardContent>
       </Card>
+      <OjtAssignmentEditDialog
+        assignment={editing}
+        trainers={trainers}
+        open={!!editing}
+        onOpenChange={(v) => {
+          if (!v) setEditing(null);
+        }}
+        onSaved={() => refresh({ silent: true })}
+      />
     </div>
   );
 }

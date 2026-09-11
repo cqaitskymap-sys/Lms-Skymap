@@ -15,21 +15,24 @@ import { hasPermission } from "@/lib/rbac/permissions";
 import { useDepartments } from "@/hooks/use-departments";
 import {
   buildOjtDashboardStats,
+  getOjtFormDocument,
+  getOjtSettings,
   listOjtAssignments,
+  listOjtFormDocuments,
   listOjtTopics,
   type OjtAssignmentFilters,
 } from "@/lib/services/ojt";
 import { OJT_UPDATED_EVENT } from "@/lib/ojt/demo-store";
 import { currentCalendarMonth, currentCalendarYear, monthShort } from "@/lib/ojt/constants";
 import { isOjtOverdue } from "@/lib/ojt/workflow";
-import { actionableOjtQueue, ojtStatusLabel, waitingOjtQueue } from "@/lib/ojt/next-action";
+import { actionableOjtQueue, ojtFormPendingActions, ojtStatusLabel, waitingOjtQueue } from "@/lib/ojt/next-action";
 import { GlassStatCard } from "@/components/dashboard/glass-stat-card";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { OjtGuide } from "@/components/ojt/ojt-guide";
 import { OjtEmptyState } from "@/components/ojt/ojt-empty-state";
-import type { OjtAssignment, OjtDashboardStats, OjtTopic } from "@/types/ojt";
+import type { OjtAssignment, OjtDashboardStats, OjtFormDocument, OjtTopic } from "@/types/ojt";
 import {
   Bar,
   BarChart,
@@ -45,7 +48,9 @@ export default function OjtDashboardPage() {
   const { activeDepartments } = useDepartments();
   const [assignments, setAssignments] = useState<OjtAssignment[]>([]);
   const [topics, setTopics] = useState<OjtTopic[]>([]);
+  const [formDocs, setFormDocs] = useState<OjtFormDocument[]>([]);
   const [stats, setStats] = useState<OjtDashboardStats | null>(null);
+  const [graceDays, setGraceDays] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -73,13 +78,37 @@ export default function OjtDashboardPage() {
       }
       const deptId =
         profile?.role === "department_head" ? profile.departmentId : undefined;
-      const [asg, tops] = await Promise.all([
+      const year = currentCalendarYear();
+      const [asg, tops, cfg] = await Promise.all([
         listOjtAssignments(filters),
         listOjtTopics(deptId),
+        getOjtSettings().catch(() => null),
       ]);
+      const grace = cfg?.overdueGraceDays ?? 0;
+      setGraceDays(grace);
       setAssignments(asg);
       setTopics(tops);
-      setStats(await buildOjtDashboardStats(asg, tops));
+      const yearRows = asg.filter((a) => a.year === year);
+      const yearStats = await buildOjtDashboardStats(yearRows, tops, grace);
+      setStats({
+        ...yearStats,
+        overdue: asg.filter((a) => isOjtOverdue(a, new Date(), grace)).length,
+      });
+      try {
+        if (deptId) {
+          const [planner, matrix] = await Promise.all([
+            getOjtFormDocument("planner", year, deptId),
+            getOjtFormDocument("matrix", year, deptId),
+          ]);
+          setFormDocs([planner, matrix].filter((d): d is OjtFormDocument => Boolean(d)));
+        } else if (profile?.role === "qa" || profile?.role === "super_admin") {
+          setFormDocs(await listOjtFormDocuments({ year: currentCalendarYear() }));
+        } else {
+          setFormDocs([]);
+        }
+      } catch {
+        setFormDocs([]);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load OJT dashboard");
     } finally {
@@ -105,14 +134,16 @@ export default function OjtDashboardPage() {
         month: monthShort(month),
         planned: rows.length,
         completed: rows.filter((a) => a.status === "completed").length,
-        overdue: rows.filter((a) => isOjtOverdue(a)).length,
+        overdue: rows.filter((a) => isOjtOverdue(a, new Date(), graceDays)).length,
       };
     });
-  }, [assignments]);
+  }, [assignments, graceDays]);
 
   const deptBars = useMemo(() => {
+    const year = currentCalendarYear();
     const map = new Map<string, { name: string; total: number; completed: number }>();
     for (const a of assignments) {
+      if (a.year !== year) continue;
       const key = a.departmentId;
       const name =
         a.departmentName ||
@@ -127,15 +158,19 @@ export default function OjtDashboardPage() {
   }, [assignments, activeDepartments]);
 
   const canWrite = profile?.role ? hasPermission(profile.role, "ojt:write") : false;
+  const formActions = useMemo(
+    () => ojtFormPendingActions(formDocs, profile?.role),
+    [formDocs, profile?.role]
+  );
   const myActions = useMemo(
-    () => actionableOjtQueue(assignments, profile?.role),
-    [assignments, profile?.role]
+    () => actionableOjtQueue(assignments, profile?.role, 6, graceDays),
+    [assignments, profile?.role, graceDays]
   );
   const waiting = useMemo(
-    () => waitingOjtQueue(assignments, profile?.role, 4),
-    [assignments, profile?.role]
+    () => waitingOjtQueue(assignments, profile?.role, 4, graceDays),
+    [assignments, profile?.role, graceDays]
   );
-  const overdueRows = assignments.filter((a) => isOjtOverdue(a)).slice(0, 8);
+  const overdueRows = assignments.filter((a) => isOjtOverdue(a, new Date(), graceDays)).slice(0, 8);
   const isPersonal = profile?.role === "employee" || profile?.role === "trainer";
 
   if (loading) {
@@ -211,13 +246,13 @@ export default function OjtDashboardPage() {
           <CardHeader>
             <CardTitle>Your next actions</CardTitle>
             <CardDescription>
-              {myActions.length
+              {formActions.length + myActions.length
                 ? "These records are waiting on you."
                 : "Nothing needs your action right now."}
             </CardDescription>
           </CardHeader>
           <CardContent>
-            {myActions.length === 0 ? (
+            {formActions.length + myActions.length === 0 ? (
               <OjtEmptyState
                 title="You're all caught up"
                 description={
@@ -230,6 +265,17 @@ export default function OjtDashboardPage() {
               />
             ) : (
               <ul className="divide-y">
+                {formActions.map((action) => (
+                  <li key={`${action.href}-${action.title}`} className="flex flex-wrap items-center justify-between gap-2 py-2.5">
+                    <div className="min-w-0">
+                      <p className="font-medium">{action.title}</p>
+                      <p className="text-sm text-muted-foreground">{action.hint}</p>
+                    </div>
+                    <Button size="sm" asChild>
+                      <Link href={action.href}>Continue</Link>
+                    </Button>
+                  </li>
+                ))}
                 {myActions.map(({ assignment, action }) => (
                   <li key={assignment.id} className="flex flex-wrap items-center justify-between gap-2 py-2.5">
                     <div className="min-w-0">

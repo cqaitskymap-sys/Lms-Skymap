@@ -292,9 +292,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       const token = await cred.user.getIdToken(true);
       const sessionResult = await establishSession(token, rememberMe);
-      if (sessionResult.status === 403) {
+      if (!sessionResult.ok) {
         await firebaseSignOut(auth);
-        throw new Error(sessionResult.error || "Account is deactivated");
+        await clearSession().catch(() => undefined);
+        throw new Error(sessionResult.error || "Could not create a secure session. Please try again.");
       }
 
       const now = new Date().toISOString();
@@ -315,6 +316,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       return nextProfile;
     } catch (err) {
+      try {
+        await firebaseSignOut(auth);
+        await clearSession();
+      } catch {
+        /* already signed out */
+      }
       const code =
         err && typeof err === "object" && "code" in err
           ? String((err as { code?: string }).code)

@@ -5,7 +5,6 @@ import QRCode from "qrcode";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/auth-context";
-import { hasPermission } from "@/lib/rbac/permissions";
 import {
   deleteCertificate,
   listCertificates,
@@ -49,10 +48,21 @@ export default function CertificatesPage() {
         return;
       }
 
+      if (role === "department_head") {
+        if (!profile?.departmentId) {
+          setCerts([]);
+          setError("Your account is not linked to a department.");
+          return;
+        }
+      }
+
       const employeeOnly = role === "employee" ? profile?.employeeId : undefined;
       let rows = await listCertificates(
         employeeOnly ? { employeeId: employeeOnly } : undefined
       );
+      if (role === "department_head" && profile?.departmentId) {
+        rows = rows.filter((c) => c.departmentId === profile.departmentId);
+      }
 
       const hasProgramme = rows.some(
         (c) => !c.isRevoked && (c.kind === "programme" || c.sopNumber === "TRAINING")
@@ -115,9 +125,7 @@ export default function CertificatesPage() {
     });
   }, [cert]);
 
-  const canStore =
-    role &&
-    (hasPermission(role, "certificates:issue") || role === "super_admin" || role === "qa" || role === "hr");
+  const canStore = role === "super_admin" || role === "qa";
 
   return (
     <RequirePermission permission="certificates:read">
