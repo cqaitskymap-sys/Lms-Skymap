@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, Fragment } from "react";
-import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { Download, Loader2, Printer } from "lucide-react";
 import * as XLSX from "xlsx";
@@ -20,7 +21,7 @@ import {
 } from "@/lib/services/ojt";
 import { toOjtActor } from "@/lib/ojt/actor";
 import { OJT_UPDATED_EVENT } from "@/lib/ojt/demo-store";
-import { currentCalendarYear, formatRevisionNumber, OJT_MATRIX_LABELS } from "@/lib/ojt/constants";
+import { currentCalendarYear, OJT_MATRIX_LABELS } from "@/lib/ojt/constants";
 import { printOjtMatrixForm } from "@/lib/ojt/print";
 import {
   employeeDisplayName,
@@ -62,6 +63,7 @@ import {
 } from "@/components/ui/dialog";
 import { OjtEmptyState } from "@/components/ojt/ojt-empty-state";
 import { OjtMatrixLegend } from "@/components/ojt/ojt-legend";
+import { OjtPageHint } from "@/components/ojt/ojt-page-hint";
 import { OjtFormApprovalPanel } from "@/components/ojt/ojt-form-approvals";
 import { cn } from "@/lib/utils";
 import type { Employee } from "@/types";
@@ -72,9 +74,12 @@ export default function OjtMatrixPage() {
   const { profile } = useAuth();
   const { activeDepartments } = useDepartments();
   const canAssign = profile?.role ? hasPermission(profile.role, "ojt:assign") : false;
+  const searchParams = useSearchParams();
   const deptLocked = profile?.role === "department_head" ? profile.departmentId : undefined;
-  const [year, setYear] = useState(String(currentCalendarYear()));
-  const [departmentId, setDepartmentId] = useState(deptLocked || "");
+  const [year, setYear] = useState(() => searchParams.get("year") || String(currentCalendarYear()));
+  const [departmentId, setDepartmentId] = useState(
+    () => deptLocked || searchParams.get("departmentId") || ""
+  );
   const [search, setSearch] = useState("");
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [plans, setPlans] = useState<OjtPlan[]>([]);
@@ -114,6 +119,17 @@ export default function OjtMatrixPage() {
       setLoading(false);
     }
   }, [departmentId, deptLocked, year]);
+
+  useEffect(() => {
+    if (deptLocked) {
+      setDepartmentId(deptLocked);
+      return;
+    }
+    const fromUrl = searchParams.get("departmentId");
+    const yearFromUrl = searchParams.get("year");
+    if (fromUrl) setDepartmentId(fromUrl);
+    if (yearFromUrl) setYear(yearFromUrl);
+  }, [deptLocked, searchParams]);
 
   useEffect(() => {
     void refresh();
@@ -272,9 +288,9 @@ export default function OjtMatrixPage() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Who is trained</h1>
+          <h1 className="text-2xl font-bold tracking-tight">Step 3 — Select people</h1>
           <p className="text-muted-foreground">
-            Official employee training matrix: S row is ✓ / NA / blank. E row stores the execution date.
+            Click under a name to say who needs each topic. ✓ = needs training. NA = not needed.
           </p>
         </div>
         <div className="flex gap-2">
@@ -288,17 +304,17 @@ export default function OjtMatrixPage() {
           </Button>
         </div>
       </div>
+      <OjtPageHint title="How to use this grid">
+        First click under a name = ✓ (this person needs this training). Click again = NA (not needed).
+        After ✓, go to Book date to pick the day. The green E row later shows the training date.
+      </OjtPageHint>
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {[
-          ["Selected / pending", cells.pending],
-          ["Scheduled", cells.scheduled],
-          ["Completed", cells.completed],
-          ["Overdue", cells.overdue],
-          ["Failed", cells.failed],
-          ["Retraining", cells.retraining],
-          ["NA", cells.na],
-          ["Cells", cells.total],
+          ["Need training", cells.pending],
+          ["Date booked", cells.scheduled],
+          ["Finished", cells.completed],
+          ["Late", cells.overdue],
         ].map(([label, value]) => (
           <Card key={String(label)}>
             <CardHeader className="pb-2">
@@ -311,7 +327,8 @@ export default function OjtMatrixPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Find people</CardTitle>
+            <CardTitle>Find people</CardTitle>
+            <CardDescription>Choose year and department, then click cells in the table below.</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-wrap items-end gap-3">
           <div className="space-y-1">
@@ -342,9 +359,14 @@ export default function OjtMatrixPage() {
             <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Name or code" />
           </div>
           {canAssign && (
-            <Button variant="outline" onClick={() => void handleSeed()} disabled={locked}>
-              Load planner topics
-            </Button>
+            <>
+              <Button variant="outline" onClick={() => void handleSeed()} disabled={locked}>
+                Load planner topics
+              </Button>
+              <Button variant="ghost" asChild>
+                <Link href="/dashboard/ojt/schedule">Next: book a date →</Link>
+              </Button>
+            </>
           )}
         </CardContent>
       </Card>
@@ -352,12 +374,10 @@ export default function OjtMatrixPage() {
       <Card>
         <CardHeader>
           <CardTitle>
-            {department?.name || "Department"} employee training matrix · {year}
+            {department?.name || "Department"} · who needs training · {year}
           </CardTitle>
           <CardDescription>
-            Effective Date: {form?.effectiveDate || "—"} · Revision No.: {formatRevisionNumber(form?.revisionNumber || "00")}
-            {settings ? ` · Format No.: ${form?.formNumber || settings.matrixFormNumber}` : ""}
-            . Workflow status (scheduled / overdue) is shown as a tooltip — the official cell stays ✓, NA, or blank.
+            Click a name under a topic. ✓ = needs training. NA = not needed. The E row shows the date after you book it.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -369,9 +389,9 @@ export default function OjtMatrixPage() {
           ) : !plans.length ? (
             <OjtEmptyState
               title="No yearly plan for this department"
-              description="Load topics into the yearly plan first, then come back here to tick who needs each activity."
+              description="Go to Plan months first, load topics, then come back here to tick names."
               actionHref="/dashboard/ojt/planner"
-              actionLabel="Open yearly plan"
+              actionLabel="Open plan months"
             />
           ) : !matrixEmployees.length ? (
             <OjtEmptyState
@@ -386,7 +406,7 @@ export default function OjtMatrixPage() {
                     <TableHead className="sticky left-0 top-0 z-30 min-w-[56px] bg-background">S. No.</TableHead>
                     <TableHead className="sticky left-[56px] top-0 z-30 min-w-[220px] bg-background">Training Topic</TableHead>
                     <TableHead className="sticky top-0 z-20 min-w-[120px] bg-background">SOP / Reference</TableHead>
-                    <TableHead className="sticky top-0 z-20 w-12 bg-background text-center">S/E</TableHead>
+                    <TableHead className="sticky top-0 z-20 w-16 bg-background text-center">Row</TableHead>
                     {matrixEmployees.map((e) => (
                       <TableHead key={e.id} className="sticky top-0 z-20 min-w-[120px] bg-background text-center text-xs">
                         <div>{employeeDisplayName(e)}</div>
@@ -491,10 +511,10 @@ export default function OjtMatrixPage() {
       <Dialog open={!!confirm} onOpenChange={(open) => !open && setConfirm(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Assign this OJT topic?</DialogTitle>
+            <DialogTitle>Give this training to this person?</DialogTitle>
             <DialogDescription>
               {confirm
-                ? `Assign “${confirm.plan.trainingTopic}” to ${employeeDisplayName(confirm.employee)} (${confirm.employee.employeeCode})? This creates an OJT training record.`
+                ? `This will create a record: “${confirm.plan.trainingTopic}” for ${employeeDisplayName(confirm.employee)} (${confirm.employee.employeeCode}). Next you can book a date.`
                 : ""}
             </DialogDescription>
           </DialogHeader>
@@ -510,7 +530,7 @@ export default function OjtMatrixPage() {
                 void applySelection(plan, employee, "selected");
               }}
             >
-              Assign
+              Yes, assign
             </Button>
           </DialogFooter>
         </DialogContent>

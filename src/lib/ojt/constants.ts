@@ -81,19 +81,19 @@ export const OPEN_OJT_STATUSES: readonly OjtStatus[] = [
 ];
 
 export const OJT_STATUS_LABELS: Record<OjtStatus, string> = {
-  draft: "Draft",
-  selected: "Selected",
-  assigned: "Assigned",
-  scheduled: "Scheduled",
-  in_progress: "In Progress",
-  trainer_completed: "Trainer Completed",
-  employee_acknowledged: "Employee Acknowledged",
-  verification_pending: "HOD Verification Pending",
-  qa_pending: "QA Approval Pending",
-  completed: "Completed",
-  failed: "Failed",
-  retraining_required: "Retraining Required",
-  rescheduled: "Rescheduled",
+  draft: "Not started",
+  selected: "Needs trainer",
+  assigned: "Needs date",
+  scheduled: "Ready to train",
+  in_progress: "Training started",
+  trainer_completed: "Employee must confirm",
+  employee_acknowledged: "Waiting for HOD",
+  verification_pending: "HOD must check",
+  qa_pending: "QA must approve",
+  completed: "Done",
+  failed: "Did not pass",
+  retraining_required: "Needs retraining",
+  rescheduled: "Retraining booked",
   cancelled: "Cancelled",
 };
 

@@ -30,7 +30,7 @@ import { GlassStatCard } from "@/components/dashboard/glass-stat-card";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/shared/status-badge";
-import { OjtGuide } from "@/components/ojt/ojt-guide";
+import { OjtGuide, ojtRoleIntro } from "@/components/ojt/ojt-guide";
 import { OjtEmptyState } from "@/components/ojt/ojt-empty-state";
 import type { OjtAssignment, OjtDashboardStats, OjtFormDocument, OjtTopic } from "@/types/ojt";
 import {
@@ -172,6 +172,7 @@ export default function OjtDashboardPage() {
   );
   const overdueRows = assignments.filter((a) => isOjtOverdue(a, new Date(), graceDays)).slice(0, 8);
   const isPersonal = profile?.role === "employee" || profile?.role === "trainer";
+  const intro = ojtRoleIntro(profile?.role);
 
   if (loading) {
     return (
@@ -199,14 +200,8 @@ export default function OjtDashboardPage() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">On Job Training</h1>
-          <p className="text-muted-foreground">
-            {profile?.role === "employee"
-              ? "Your practical shop-floor training — acknowledge when the trainer has finished."
-              : profile?.role === "trainer"
-                ? "Sessions assigned to you: demonstrate, observe, then score competency."
-                : "Plan months, select people, conduct practical training, then sign off."}
-          </p>
+          <h1 className="text-2xl font-bold tracking-tight">{intro.title}</h1>
+          <p className="text-muted-foreground">{intro.body}</p>
         </div>
         <div className="flex gap-2">
           <Button variant="outline" size="sm" onClick={() => void refresh()}>
@@ -215,7 +210,17 @@ export default function OjtDashboardPage() {
           </Button>
           {canWrite && (
             <Button size="sm" asChild>
-              <Link href="/dashboard/ojt/planner">Open yearly plan</Link>
+              <Link href="/dashboard/ojt/topics">Start: add a topic</Link>
+            </Button>
+          )}
+          {profile?.role === "trainer" && (
+            <Button size="sm" asChild>
+              <Link href="/dashboard/ojt/execution">Open my sessions</Link>
+            </Button>
+          )}
+          {profile?.role === "employee" && (
+            <Button size="sm" asChild>
+              <Link href="/dashboard/ojt/assignments">Open my list</Link>
             </Button>
           )}
         </div>
@@ -223,32 +228,34 @@ export default function OjtDashboardPage() {
 
       <OjtGuide role={profile?.role} />
 
+      {!isPersonal ? (
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <GlassStatCard title="OJT topics" value={s?.totalTopics ?? 0} icon={ClipboardList} />
-        <GlassStatCard title="Assigned" value={s?.totalAssigned ?? 0} icon={CalendarCheck} />
+        <GlassStatCard title="Topics" value={s?.totalTopics ?? 0} icon={ClipboardList} />
+        <GlassStatCard title="People assigned" value={s?.totalAssigned ?? 0} icon={CalendarCheck} />
         <GlassStatCard
-          title="Completed"
+          title="Finished"
           value={s?.completed ?? 0}
-          description={`${s?.completionPercent ?? 0}% completion`}
+          description={`${s?.completionPercent ?? 0}% done`}
           icon={CheckCircle2}
           tone="success"
         />
         <GlassStatCard
-          title="Overdue"
+          title="Late"
           value={s?.overdue ?? 0}
           icon={AlertTriangle}
           tone={(s?.overdue ?? 0) > 0 ? "danger" : "default"}
         />
       </div>
+      ) : null}
 
       <div className="grid gap-4 lg:grid-cols-2">
         <Card>
           <CardHeader>
-            <CardTitle>Your next actions</CardTitle>
+            <CardTitle>Do this next</CardTitle>
             <CardDescription>
               {formActions.length + myActions.length
-                ? "These records are waiting on you."
-                : "Nothing needs your action right now."}
+                ? "Click Continue — only these items need you."
+                : "Nothing is waiting for you right now."}
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -257,16 +264,19 @@ export default function OjtDashboardPage() {
                 title="You're all caught up"
                 description={
                   canWrite
-                    ? "Add topics, plan months, then select employees on the matrix to start OJT."
-                    : "When someone assigns or schedules an OJT for you, it will appear here."
+                    ? "Start with topics, then plan months, then select people."
+                    : "When someone books training for you, it will appear here."
                 }
                 actionHref={canWrite ? "/dashboard/ojt/topics" : undefined}
                 actionLabel={canWrite ? "Add a topic" : undefined}
               />
             ) : (
               <ul className="divide-y">
-                {formActions.map((action) => (
-                  <li key={`${action.href}-${action.title}`} className="flex flex-wrap items-center justify-between gap-2 py-2.5">
+                {formActions.map((action, index) => (
+                  <li
+                    key={`form-${action.id ?? action.href}-${index}`}
+                    className="flex flex-wrap items-center justify-between gap-2 py-2.5"
+                  >
                     <div className="min-w-0">
                       <p className="font-medium">{action.title}</p>
                       <p className="text-sm text-muted-foreground">{action.hint}</p>
@@ -296,17 +306,17 @@ export default function OjtDashboardPage() {
 
         <Card>
           <CardHeader>
-            <CardTitle>{isPersonal ? "Waiting on others" : "Pipeline snapshot"}</CardTitle>
+            <CardTitle>{isPersonal ? "Waiting on someone else" : "This year at a glance"}</CardTitle>
             <CardDescription>
               {isPersonal
-                ? "OJT that is in progress but not yours to action."
-                : "Counts by stage this year"}
+                ? "Training that is open, but not your turn yet."
+                : "How many records are at each stage"}
             </CardDescription>
           </CardHeader>
           <CardContent>
             {isPersonal ? (
               waiting.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No other open OJT records.</p>
+                <p className="text-sm text-muted-foreground">No other open training.</p>
               ) : (
                 <ul className="divide-y">
                   {waiting.map(({ assignment, action }) => (
@@ -327,12 +337,12 @@ export default function OjtDashboardPage() {
               <div className="grid grid-cols-2 gap-3">
                 {[
                   ["This month", s?.thisMonth],
-                  ["Scheduled", s?.scheduled],
-                  ["In progress", s?.inProgress],
-                  ["Pending", s?.pending],
-                  ["Failed", s?.failed],
+                  ["Date booked", s?.scheduled],
+                  ["Training started", s?.inProgress],
+                  ["Waiting", s?.pending],
+                  ["Did not pass", s?.failed],
                   ["Retraining", s?.retrainingRequired],
-                  ["Planned / selected", s?.planned],
+                  ["People selected", s?.planned],
                   ["Cancelled", s?.cancelled],
                 ].map(([label, value]) => (
                   <div key={String(label)} className="rounded-lg border bg-muted/20 px-3 py-2">
@@ -347,12 +357,16 @@ export default function OjtDashboardPage() {
       </div>
 
       {!isPersonal ? (
-        <div className="grid gap-4 lg:grid-cols-2">
+        <details className="rounded-2xl border bg-card">
+          <summary className="cursor-pointer px-6 py-4 text-sm font-medium">
+            Charts (optional) — monthly and department view
+          </summary>
+          <div className="grid gap-4 border-t p-6 lg:grid-cols-2">
           <Card>
             <CardHeader>
-              <CardTitle>Monthly OJT trend</CardTitle>
+              <CardTitle>Month by month</CardTitle>
               <CardDescription>
-                Planned vs completed for {currentCalendarYear()} · current month{" "}
+                Planned vs finished in {currentCalendarYear()} · this month{" "}
                 {monthShort(currentCalendarMonth())}
               </CardDescription>
             </CardHeader>
@@ -371,8 +385,8 @@ export default function OjtDashboardPage() {
           </Card>
           <Card>
             <CardHeader>
-              <CardTitle>Department-wise OJT</CardTitle>
-              <CardDescription>Assigned vs completed</CardDescription>
+              <CardTitle>By department</CardTitle>
+              <CardDescription>Assigned vs finished</CardDescription>
             </CardHeader>
             <CardContent className="h-64">
               {deptBars.length === 0 ? (
@@ -392,17 +406,16 @@ export default function OjtDashboardPage() {
             </CardContent>
           </Card>
         </div>
+        </details>
       ) : null}
 
+      {overdueRows.length > 0 ? (
       <Card>
         <CardHeader>
-          <CardTitle>Overdue OJT</CardTitle>
-          <CardDescription>Planned execution month has passed and the record is still open</CardDescription>
+          <CardTitle>Late training</CardTitle>
+          <CardDescription>The planned training month has passed and this is still open</CardDescription>
         </CardHeader>
         <CardContent>
-          {overdueRows.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No overdue OJT records.</p>
-          ) : (
             <ul className="divide-y">
               {overdueRows.map((a) => (
                 <li key={a.id} className="flex flex-wrap items-center justify-between gap-2 py-2">
@@ -421,9 +434,9 @@ export default function OjtDashboardPage() {
                 </li>
               ))}
             </ul>
-          )}
         </CardContent>
       </Card>
+      ) : null}
     </div>
   );
 }

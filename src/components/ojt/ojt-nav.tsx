@@ -23,15 +23,16 @@ const LINKS: {
   icon: typeof LayoutGrid;
   exact?: boolean;
   permission?: Permission;
+  step?: string;
 }[] = [
-  { href: "/dashboard/ojt", label: "Overview", hint: "Status at a glance", icon: LayoutGrid, exact: true },
-  { href: "/dashboard/ojt/planner", label: "Yearly plan", hint: "S / E months", icon: Calendar, permission: "ojt:write" },
-  { href: "/dashboard/ojt/matrix", label: "Who is trained", hint: "Employee × topic", icon: ClipboardList, permission: "ojt:assign" },
-  { href: "/dashboard/ojt/assignments", label: "Records", hint: "Each person’s OJT", icon: ListChecks },
-  { href: "/dashboard/ojt/schedule", label: "Book date", hint: "When & where", icon: BookOpen, permission: "ojt:schedule" },
-  { href: "/dashboard/ojt/execution", label: "Conduct", hint: "Train & score", icon: PlayCircle, permission: "ojt:conduct" },
-  { href: "/dashboard/ojt/topics", label: "Topics", hint: "Master list", icon: HardHat, permission: "ojt:write" },
-  { href: "/dashboard/ojt/reports", label: "Reports", hint: "Export views", icon: FileBarChart, permission: "ojt:export" },
+  { href: "/dashboard/ojt", label: "Home", hint: "Start here", icon: LayoutGrid, exact: true },
+  { href: "/dashboard/ojt/topics", label: "Topics", hint: "What jobs to train", icon: HardHat, permission: "ojt:write", step: "1" },
+  { href: "/dashboard/ojt/planner", label: "Plan months", hint: "When to choose people and train", icon: Calendar, permission: "ojt:write", step: "2" },
+  { href: "/dashboard/ojt/matrix", label: "Select people", hint: "Who needs each topic", icon: ClipboardList, permission: "ojt:assign", step: "3" },
+  { href: "/dashboard/ojt/schedule", label: "Book date", hint: "Trainer, day and room", icon: BookOpen, permission: "ojt:schedule", step: "4" },
+  { href: "/dashboard/ojt/execution", label: "Train", hint: "Show the job and score", icon: PlayCircle, permission: "ojt:conduct", step: "5" },
+  { href: "/dashboard/ojt/assignments", label: "All records", hint: "Every person’s OJT", icon: ListChecks },
+  { href: "/dashboard/ojt/reports", label: "Reports", hint: "Print and export", icon: FileBarChart, permission: "ojt:export" },
 ];
 
 export function OjtNav() {
@@ -44,7 +45,7 @@ export function OjtNav() {
   });
 
   return (
-    <nav className="flex flex-wrap gap-1 rounded-xl border bg-muted/40 p-1">
+    <nav className="flex flex-wrap gap-1 rounded-xl border bg-muted/40 p-1" aria-label="OJT steps">
       {visible.map((link) => {
         const active = link.exact
           ? pathname === link.href
@@ -62,7 +63,18 @@ export function OjtNav() {
                 : "text-muted-foreground hover:text-foreground"
             )}
           >
-            <Icon className="h-3.5 w-3.5 shrink-0 opacity-70" />
+            {link.step ? (
+              <span
+                className={cn(
+                  "flex h-4 w-4 items-center justify-center rounded-full text-[10px] font-bold",
+                  active ? "bg-primary text-primary-foreground" : "bg-muted-foreground/20"
+                )}
+              >
+                {link.step}
+              </span>
+            ) : (
+              <Icon className="h-3.5 w-3.5 shrink-0 opacity-70" />
+            )}
             {link.label}
           </Link>
         );

@@ -339,7 +339,10 @@ function PasswordStep({
           <Lock className="h-5 w-5" />
           Change temporary password
         </CardTitle>
-        <CardDescription>{PASSWORD_POLICY_HINT}</CardDescription>
+          <CardDescription>
+            Paste the one-time password from the credentials card, then choose a new password.{" "}
+            {PASSWORD_POLICY_HINT} Re-issuing credentials invalidates the previous temporary password.
+          </CardDescription>
       </CardHeader>
       <CardContent>
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4" noValidate>

@@ -69,7 +69,7 @@ export function OjtFormApprovalPanel({
   }, [form?.id, form?.effectiveDate, form?.revisionNumber]);
 
   const canWrite = profile?.role ? hasPermission(profile.role, "ojt:write") : false;
-  const title = kind === "planner" ? "Yearly planner control" : "Employee training matrix control";
+  const title = kind === "planner" ? "Sign the yearly plan" : "Sign the people list";
 
   const run = async (fn: () => Promise<unknown>, ok: string) => {
     if (!profile) return;
@@ -93,8 +93,7 @@ export function OjtFormApprovalPanel({
           <div>
             <CardTitle>{title}</CardTitle>
             <CardDescription>
-              Official form sign-off (Prepared / Checked / Verified / Approved). This is separate from the
-              operational Employee → HOD → QA record flow.
+              When this page is ready, sign in order: Prepare → HOD check → QA approve.
             </CardDescription>
           </div>
           <StatusBadge status={form?.status || "draft"} />

@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { OjtEmptyState } from "@/components/ojt/ojt-empty-state";
+import { OjtPageHint } from "@/components/ojt/ojt-page-hint";
 import { ojtNextAction, ojtStatusLabel } from "@/lib/ojt/next-action";
 import type { OjtAssignment } from "@/types/ojt";
 
@@ -60,15 +61,20 @@ export default function OjtExecutionQueuePage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">Conduct On Job Training</h1>
+        <h1 className="text-2xl font-bold tracking-tight">
+          {profile?.role === "trainer" ? "Step 5 — Train your people" : "Step 5 — Train"}
+        </h1>
         <p className="text-muted-foreground">
-          Practical demonstration on the shop floor — not a classroom exam. Open a session to start, score, or acknowledge.
+          Open a booked session. Show the job on the floor, write a short note, then mark pass or fail.
         </p>
       </div>
+      <OjtPageHint title="This is not an exam">
+        OJT is practical training. The trainer demonstrates, the person tries, then the trainer scores. Classroom MCQ exams are a different module.
+      </OjtPageHint>
       <Card>
         <CardHeader>
             <CardTitle>Ready now</CardTitle>
-            <CardDescription>Scheduled, in progress, or waiting for employee acknowledgement</CardDescription>
+            <CardDescription>Booked, started, or waiting for the employee to confirm</CardDescription>
         </CardHeader>
         <CardContent>
           {loading ? (
@@ -80,8 +86,8 @@ export default function OjtExecutionQueuePage() {
               title="No sessions in the queue"
               description={
                 profile?.role === "trainer"
-                  ? "When a department books an OJT with you as trainer, it will show up here."
-                  : "Book a date first. Scheduled OJT will appear here for the trainer to start."
+                  ? "When a department books you as trainer, the session will show up here."
+                  : "Book a date first. Then the trainer can start from this list."
               }
               actionHref={
                 profile?.role && hasPermission(profile.role, "ojt:schedule")

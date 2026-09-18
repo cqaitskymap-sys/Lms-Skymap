@@ -2,7 +2,7 @@
  * Super Admin — staff user provisioning & directory.
  */
 
-import { auth, db, COLLECTIONS } from "@/lib/firebase/client";
+import { auth } from "@/lib/firebase/client";
 import {
   isDemoMode,
   DEMO_USERS,
@@ -17,7 +17,6 @@ import { resolveStaffAuthEmail } from "@/lib/auth/user-admin-schemas";
 import { normalizeAllowedModules } from "@/lib/rbac/modules";
 import type { UserProfile } from "@/types";
 import { generateId } from "@/lib/utils";
-import { collection, getDocs, query, where } from "firebase/firestore/lite";
 
 export interface StaffCredentials {
   /** Login ID shown on the credentials card / used at sign-in */
@@ -87,17 +86,18 @@ export async function listUsersByRoles(roles: UserProfile["role"][]): Promise<Us
       .sort((a, b) => a.displayName.localeCompare(b.displayName));
   }
 
-  const q =
-    wanted.length === 1
-      ? query(collection(db, COLLECTIONS.users), where("role", "==", wanted[0]))
-      : query(collection(db, COLLECTIONS.users), where("role", "in", wanted));
-  const snap = await getDocs(q);
-  return snap.docs
-    .map((d) => {
-      const data = d.data() as UserProfile;
-      return { ...data, id: data.id || d.id, uid: data.uid || d.id } as UserProfile;
-    })
-    .filter((p) => p.isActive !== false)
+  const params = new URLSearchParams({ roles: wanted.join(",") });
+  const res = await fetch(`/api/users/directory?${params}`, { headers: await authHeaders() });
+  if (res.status === 401 || res.status === 403) return [];
+  const json = (await res.json().catch(() => ({}))) as {
+    error?: string;
+    users?: UserProfile[];
+  };
+  if (!res.ok) {
+    throw new Error(json.error || "Failed to load staff directory");
+  }
+  return (json.users || [])
+    .filter((p) => wanted.includes(p.role) && p.isActive !== false)
     .sort((a, b) => (a.displayName || "").localeCompare(b.displayName || ""));
 }
 

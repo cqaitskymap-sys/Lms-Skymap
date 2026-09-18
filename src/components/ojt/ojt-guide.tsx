@@ -11,52 +11,107 @@ const PLANNER_STEPS = [
   {
     n: "1",
     title: "Add topics",
-    body: "List the practical activities / SOPs people must be trained on.",
+    body: "Write the jobs people must learn. Example: how to dispense raw material.",
     href: "/dashboard/ojt/topics",
   },
   {
     n: "2",
     title: "Plan months",
-    body: "Mark S (select people) and E (train) on separate rows, then prepare / check / approve the yearly planner.",
+    body: "For each topic, tick S = month you will choose people. Tick E = month you will train them.",
     href: "/dashboard/ojt/planner",
   },
   {
     n: "3",
-    title: "Select employees",
-    body: "On the matrix S row, click a cell: ✓ means this person needs that OJT. NA means not applicable.",
+    title: "Select people",
+    body: "Click under a name. ✓ means this person needs that training. NA means not needed.",
     href: "/dashboard/ojt/matrix",
   },
   {
     n: "4",
     title: "Book a date",
-    body: "Assign a trainer, date, time and shop-floor location.",
+    body: "Pick trainer, day, time and room.",
     href: "/dashboard/ojt/schedule",
   },
   {
     n: "5",
     title: "Train & score",
-    body: "Trainer demonstrates, records notes, then scores competency.",
+    body: "Trainer shows the job on the floor, then marks pass or fail.",
     href: "/dashboard/ojt/execution",
   },
   {
     n: "6",
     title: "Sign off",
-    body: "Employee acknowledges → HOD verifies → QA approves. Done.",
+    body: "Employee confirms → HOD checks → QA approves. Then it is done.",
     href: "/dashboard/ojt/assignments",
   },
 ];
 
 const EMPLOYEE_STEPS = [
-  { n: "1", title: "Get assigned", body: "Your department selects you for a practical topic.", href: "/dashboard/ojt/assignments" },
-  { n: "2", title: "Attend OJT", body: "Trainer shows the activity on the job — this is not an MCQ exam.", href: "/dashboard/ojt/execution" },
-  { n: "3", title: "Acknowledge", body: "Confirm you understood and can perform the activity.", href: "/dashboard/ojt/assignments" },
+  {
+    n: "1",
+    title: "See your list",
+    body: "When your department picks you for a job, it appears here.",
+    href: "/dashboard/ojt/assignments",
+  },
+  {
+    n: "2",
+    title: "Attend with trainer",
+    body: "This is practical training on the floor — not a written exam.",
+    href: "/dashboard/ojt/assignments",
+  },
+  {
+    n: "3",
+    title: "Confirm you understood",
+    body: "After the trainer scores you, open the record and click Confirm.",
+    href: "/dashboard/ojt/assignments",
+  },
 ];
 
 const TRAINER_STEPS = [
-  { n: "1", title: "Open your queue", body: "See OJTs scheduled for you.", href: "/dashboard/ojt/execution" },
-  { n: "2", title: "Demonstrate", body: "Show the practical activity and write observations.", href: "/dashboard/ojt/execution" },
-  { n: "3", title: "Evaluate", body: "Score the trainee and sign off. Failures go to retraining.", href: "/dashboard/ojt/execution" },
+  {
+    n: "1",
+    title: "Open your sessions",
+    body: "See people booked with you as trainer.",
+    href: "/dashboard/ojt/execution",
+  },
+  {
+    n: "2",
+    title: "Show the job",
+    body: "Demonstrate the activity and write a short note.",
+    href: "/dashboard/ojt/execution",
+  },
+  {
+    n: "3",
+    title: "Mark pass or fail",
+    body: "Score each skill. Fail goes to retraining.",
+    href: "/dashboard/ojt/execution",
+  },
 ];
+
+export function ojtRoleIntro(role?: UserRole | null): { title: string; body: string } {
+  if (role === "employee") {
+    return {
+      title: "Your on-job training",
+      body: "Attend the practical session, then confirm you understood. You do not need to plan months or pick people.",
+    };
+  }
+  if (role === "trainer") {
+    return {
+      title: "Your OJT sessions",
+      body: "Open a booked session, show the job, then mark pass or fail.",
+    };
+  }
+  if (role === "hr") {
+    return {
+      title: "On-job training",
+      body: "View records and reports. Department heads plan months and select people.",
+    };
+  }
+  return {
+    title: "On-job training",
+    body: "Practical training on the shop floor. Follow the numbered steps — this is not a classroom exam.",
+  };
+}
 
 export function OjtGuide({
   role,
@@ -79,10 +134,12 @@ export function OjtGuide({
         aria-expanded={open}
       >
         <div>
-          <p className="text-sm font-semibold">How On Job Training works</p>
+          <p className="text-sm font-semibold">
+            {canPlan ? "How to run OJT — 6 simple steps" : "What you need to do"}
+          </p>
           <p className="text-xs text-muted-foreground">
             {canPlan
-              ? "Practical competency on the shop floor — separate from classroom SOP exams."
+              ? "New here? Start at step 1. Click a card to open that page."
               : "Follow these steps for your role."}
           </p>
         </div>

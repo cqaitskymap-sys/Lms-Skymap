@@ -20,16 +20,6 @@ cp .env.example .env.local
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) → **Sign in**.
-
-| Role | Email | Password |
-|------|-------|----------|
-| Super Admin | `admin@pharma.local` | `Admin@123` |
-| HR | `hr@pharma.local` | `Hr@12345` |
-| QA | `qa@pharma.local` | `Qa@12345` |
-| Department Head | `dept@pharma.local` | `Dept@123` |
-| Trainer | `trainer@pharma.local` | `Train@123` |
-| Employee | `employee@pharma.local` | `Emp@12345` |
 
 ## Production Firebase setup
 

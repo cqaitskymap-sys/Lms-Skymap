@@ -90,10 +90,11 @@ export default function OjtAssignmentDetailPage({
   const refresh = useCallback(async (opts?: { silent?: boolean }) => {
     if (!opts?.silent) setLoading(true);
     try {
+      const needsStaff = profile?.role && profile.role !== "employee";
       const [asg, crit, staff] = await Promise.all([
         getOjtAssignment(id),
         listOjtEvaluationCriteria(),
-        listOjtStaffOptions(),
+        needsStaff ? listOjtStaffOptions() : Promise.resolve([]),
       ]);
       setRow(asg);
       setCriteria(crit.filter((c) => c.isActive));
@@ -131,7 +132,7 @@ export default function OjtAssignmentDetailPage({
     } finally {
       setLoading(false);
     }
-  }, [id]);
+  }, [id, profile?.role]);
 
   useEffect(() => {
     void refresh();
@@ -203,7 +204,7 @@ export default function OjtAssignmentDetailPage({
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <Button asChild variant="ghost" size="sm" className="-ml-2 mb-1 text-muted-foreground">
-            <Link href="/dashboard/ojt/assignments">← All records</Link>
+            <Link href="/dashboard/ojt/assignments">← Back to all records</Link>
           </Button>
           <h1 className="text-2xl font-bold tracking-tight">{row.trainingTopic}</h1>
           <p className="text-muted-foreground">
@@ -235,7 +236,7 @@ export default function OjtAssignmentDetailPage({
       <div className="grid gap-4 lg:grid-cols-2">
         <Card>
           <CardHeader>
-            <CardTitle>Basic information</CardTitle>
+            <CardTitle>Who is this for?</CardTitle>
           </CardHeader>
           <CardContent className="grid gap-2 text-sm">
             <p><span className="text-muted-foreground">Employee:</span> {row.employeeName} ({row.employeeCode})</p>
@@ -247,8 +248,8 @@ export default function OjtAssignmentDetailPage({
         </Card>
         <Card>
           <CardHeader>
-            <CardTitle>SOP / reference</CardTitle>
-            <CardDescription>Historical records keep the version used at training time</CardDescription>
+            <CardTitle>What is being trained?</CardTitle>
+            <CardDescription>The SOP version used on the training day is kept on this record.</CardDescription>
           </CardHeader>
           <CardContent className="grid gap-2 text-sm">
             <p><span className="text-muted-foreground">Topic:</span> {row.trainingTopic}</p>
@@ -259,9 +260,9 @@ export default function OjtAssignmentDetailPage({
             {row.sopVersionChangeJustification ? (
               <p><span className="text-muted-foreground">Version change justification:</span> {row.sopVersionChangeJustification}</p>
             ) : null}
-            <p><span className="text-muted-foreground">Selection month:</span> {monthName(row.selectionMonth)}</p>
-            <p><span className="text-muted-foreground">Planned execution:</span> {monthName(row.plannedExecutionMonth)}</p>
-            <p><span className="text-muted-foreground">Actual execution:</span> {formatDate(row.actualExecutionDate)}</p>
+            <p><span className="text-muted-foreground">People month:</span> {monthName(row.selectionMonth)}</p>
+            <p><span className="text-muted-foreground">Planned training month:</span> {monthName(row.plannedExecutionMonth)}</p>
+            <p><span className="text-muted-foreground">Actual training date:</span> {formatDate(row.actualExecutionDate)}</p>
             {row.executionDeviation ? (
               <p className="rounded-md border border-amber-300/50 bg-amber-50/50 p-2 text-xs dark:bg-amber-950/20">
                 Deviation from {monthName(row.executionDeviation.originalPlannedMonth)} {row.executionDeviation.originalYear}: {row.executionDeviation.reason} · {row.executionDeviation.approvedByName}
@@ -274,9 +275,9 @@ export default function OjtAssignmentDetailPage({
       {(canAssign || canSchedule) && ["selected", "assigned", "draft"].includes(row.status) && (
         <Card id="ojt-schedule" className="scroll-mt-24">
           <CardHeader>
-            <CardTitle>Assign trainer & book a date</CardTitle>
+            <CardTitle>Pick trainer & book a date</CardTitle>
             <CardDescription>
-              Date must fall in {monthName(row.plannedExecutionMonth)} {row.year} unless an authorized deviation is recorded. Original planned month is never overwritten.
+              Prefer a date in {monthName(row.plannedExecutionMonth)} {row.year}. If the date is in another month, write a reason.
             </CardDescription>
           </CardHeader>
           <CardContent className="grid gap-3 md:grid-cols-2">
@@ -401,8 +402,8 @@ export default function OjtAssignmentDetailPage({
       {isTrainer && ["scheduled", "rescheduled", "in_progress"].includes(row.status) && (
         <Card id="ojt-execution" className="scroll-mt-24">
           <CardHeader>
-            <CardTitle>Practical training notes</CardTitle>
-            <CardDescription>Describe what was demonstrated and how the employee performed.</CardDescription>
+            <CardTitle>Training notes</CardTitle>
+            <CardDescription>Write what you showed and how the person did.</CardDescription>
           </CardHeader>
           <CardContent className="grid gap-3 md:grid-cols-2">
             {row.status === "scheduled" || row.status === "rescheduled" ? (
@@ -411,7 +412,7 @@ export default function OjtAssignmentDetailPage({
                 disabled={busy}
                 onClick={() => actor && run(() => startOjtExecution(row.id, actor), "OJT started")}
               >
-                Start this OJT session
+                Start this session
               </Button>
             ) : null}
             <div className="space-y-1">
@@ -483,9 +484,9 @@ export default function OjtAssignmentDetailPage({
       {isTrainer && ["in_progress", "scheduled", "rescheduled"].includes(row.status) && (
         <Card id="ojt-evaluation" className="scroll-mt-24">
           <CardHeader>
-            <CardTitle>Score competency</CardTitle>
+            <CardTitle>Score the person</CardTitle>
             <CardDescription>
-              Rate each skill. Below 3 or any Fail marks the OJT as not competent and sends the person to retraining.
+              Mark each skill. A rating below 3, or any Fail, means they did not pass and need retraining.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -605,7 +606,7 @@ export default function OjtAssignmentDetailPage({
                   }, failed ? "Recorded as failed" : "Evaluation submitted");
                 }}
               >
-                Submit scores & trainer sign-off
+                Save scores & sign as trainer
               </Button>
             </div>
           </CardContent>
@@ -633,20 +634,20 @@ export default function OjtAssignmentDetailPage({
       {canAck && row.status === "trainer_completed" && (
         <Card id="ojt-ack" className="scroll-mt-24">
           <CardHeader>
-            <CardTitle>Confirm you understood this OJT</CardTitle>
-            <CardDescription>Tick the box only if you can perform the activity as trained.</CardDescription>
+            <CardTitle>Confirm you understood</CardTitle>
+            <CardDescription>Tick the box only if you can do this job the way you were trained.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
             <p className="text-sm">{OJT_ACK_STATEMENT}</p>
             <div className="flex items-center gap-2">
               <Checkbox checked={agreed} onCheckedChange={(v) => setAgreed(v === true)} id="ack" />
-              <Label htmlFor="ack">I acknowledge this On Job Training</Label>
+              <Label htmlFor="ack">Yes, I understood this training</Label>
             </div>
             <Button
               disabled={!agreed || busy}
               onClick={() => actor && run(() => acknowledgeOjt(row.id, actor), "Acknowledgement recorded")}
             >
-              Submit acknowledgement
+              Yes, I understood
             </Button>
           </CardContent>
         </Card>
@@ -666,8 +667,8 @@ export default function OjtAssignmentDetailPage({
       {canVerify && row.status === "verification_pending" && (
         <Card id="ojt-hod" className="scroll-mt-24">
           <CardHeader>
-            <CardTitle>HOD / Designee verification</CardTitle>
-            <CardDescription>Confirm the practical record is complete. Reject returns the record to training — it is not marked completed.</CardDescription>
+            <CardTitle>HOD check</CardTitle>
+            <CardDescription>Confirm the notes are complete. Reject sends it back — it is not marked done.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
             <Textarea value={hodComments} onChange={(e) => setHodComments(e.target.value)} placeholder="Comments" />
@@ -702,7 +703,7 @@ export default function OjtAssignmentDetailPage({
         <Card id="ojt-qa" className="scroll-mt-24">
           <CardHeader>
             <CardTitle>QA approval</CardTitle>
-            <CardDescription>Final compliance sign-off. Approving closes this OJT record. Reject returns it to HOD verification.</CardDescription>
+            <CardDescription>Last sign-off. Approve closes this record. Reject sends it back to HOD.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
             <Textarea value={qaComments} onChange={(e) => setQaComments(e.target.value)} placeholder="Comments" />
@@ -759,8 +760,8 @@ export default function OjtAssignmentDetailPage({
       {canRetrain && (row.status === "failed" || row.status === "retraining_required") && (
         <Card id="ojt-retrain" className="scroll-mt-24">
           <CardHeader>
-            <CardTitle>Schedule retraining</CardTitle>
-            <CardDescription>Failed attempts stay in history. A new attempt is added — nothing is deleted.</CardDescription>
+            <CardTitle>Book retraining</CardTitle>
+            <CardDescription>Old scores stay in history. A new attempt is added — nothing is deleted.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
             <Textarea value={retrainReason} onChange={(e) => setRetrainReason(e.target.value)} placeholder="Failure / retraining reason" />

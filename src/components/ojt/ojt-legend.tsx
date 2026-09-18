@@ -4,12 +4,12 @@ export function OjtPlannerLegend() {
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
-        <LegendSwatch className="bg-sky-500/20 text-sky-800 dark:text-sky-200" label="S ✓" hint="Selection month (official row)" />
-        <LegendSwatch className="bg-emerald-500/20 text-emerald-800 dark:text-emerald-200" label="E ✓" hint="Execution month (official row)" />
-        <LegendSwatch className="bg-muted/60 text-muted-foreground" label="" hint="Not planned" />
+        <LegendSwatch className="bg-sky-500/20 text-sky-800 dark:text-sky-200" label="S ✓" hint="Blue S = month you choose people" />
+        <LegendSwatch className="bg-emerald-500/20 text-emerald-800 dark:text-emerald-200" label="E ✓" hint="Green E = month you train them" />
+        <LegendSwatch className="bg-muted/60 text-muted-foreground" label="" hint="Empty = not planned" />
       </div>
       <p className="text-[11px] text-muted-foreground">
-        Official form uses separate S and E rows with tick marks. Combined S/E is not stored as a single value.
+        Click a month to tick or untick it. First finish the S (people) month, then tick the E (training) month.
       </p>
     </div>
   );
@@ -19,13 +19,12 @@ export function OjtMatrixLegend() {
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
-        <LegendSwatch className="bg-muted/40" label="blank" hint="No selection" />
-        <LegendSwatch className="bg-emerald-500/15 text-emerald-700" label="✓" hint="Selected for this topic" />
-        <LegendSwatch className="bg-muted text-muted-foreground" label="NA" hint="Not applicable — no OJT record" />
+        <LegendSwatch className="bg-muted/40" label="blank" hint="Not chosen yet — click to assign" />
+        <LegendSwatch className="bg-emerald-500/15 text-emerald-700" label="✓" hint="This person needs this training" />
+        <LegendSwatch className="bg-muted text-muted-foreground" label="NA" hint="Not needed for this person" />
       </div>
       <p className="text-[11px] text-muted-foreground">
-        S = Selection of Employee. E = Execution date of training. Workflow states (scheduled, overdue) are system
-        enhancements shown as tooltips, not official matrix values. Training shall be imparted on current version of SOP.
+        S row = click under a name to mark ✓ or NA. E row later shows the training date. After ✓, open All records to book a date.
       </p>
     </div>
   );

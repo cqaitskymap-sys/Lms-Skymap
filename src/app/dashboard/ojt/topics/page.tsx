@@ -46,6 +46,7 @@ import {
 import { StatusBadge } from "@/components/shared/status-badge";
 import { Switch } from "@/components/ui/switch";
 import { OjtEmptyState } from "@/components/ojt/ojt-empty-state";
+import { OjtPageHint } from "@/components/ojt/ojt-page-hint";
 import { formatDate } from "@/lib/utils";
 import type { OjtEvaluationCriterion, OjtSettings, OjtTopic } from "@/types/ojt";
 import type { SopDocument } from "@/types";
@@ -155,18 +156,22 @@ export default function OjtTopicsPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">OJT topics</h1>
+        <h1 className="text-2xl font-bold tracking-tight">Step 1 — Topics</h1>
         <p className="text-muted-foreground">
-          This is the master list. After you add topics, load them into the yearly plan, then tick people on the matrix.
+          Write the jobs people must learn. After this, go to Plan months.
         </p>
       </div>
+      <OjtPageHint title="What to do here">
+        Pick a department, type the topic name (example: Dispensing of raw materials), then click Save topic.
+        Link an SOP if this training is for a procedure. You can skip SOP and write NA.
+      </OjtPageHint>
 
       {canWrite && (
         <Card>
           <CardHeader>
-            <CardTitle>Add a training topic</CardTitle>
+            <CardTitle>Add a topic</CardTitle>
             <CardDescription>
-              Name the practical activity. Link an approved SOP if this OJT is for a procedure; otherwise leave as NA.
+              Name the job. Link an SOP if this is for a written procedure; otherwise leave SOP as No SOP / NA.
             </CardDescription>
           </CardHeader>
           <CardContent className="grid gap-3 md:grid-cols-2">
@@ -225,7 +230,7 @@ export default function OjtTopicsPage() {
                 Import QA matrix SOP list
               </Button>
               <Button variant="ghost" asChild>
-                <Link href="/dashboard/ojt/planner">Next: yearly plan →</Link>
+                <Link href="/dashboard/ojt/planner">Next: plan months →</Link>
               </Button>
             </div>
           </CardContent>
@@ -244,7 +249,7 @@ export default function OjtTopicsPage() {
           ) : topics.length === 0 ? (
             <OjtEmptyState
               title="No topics yet"
-              description="Add the practical activities for this department, or import the QA SOP list if you are setting up Quality Assurance."
+              description="Add the first job for this department using the form above."
             />
           ) : (
             <Table>
@@ -328,14 +333,14 @@ export default function OjtTopicsPage() {
       />
 
       {canAdmin && settings && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Approval flow</CardTitle>
-            <CardDescription>
-              Configurable verification after trainer evaluation. New assignments copy these flags.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="grid gap-3 sm:grid-cols-2">
+        <details className="rounded-2xl border bg-card">
+          <summary className="cursor-pointer px-6 py-4 text-sm font-medium">
+            Advanced settings — who must sign, and how scoring works
+          </summary>
+          <div className="grid gap-3 border-t p-6 sm:grid-cols-2">
+            <p className="text-sm text-muted-foreground sm:col-span-2">
+              New training records copy these flags. Leave the defaults if you are unsure.
+            </p>
             {(
               [
                 ["requireEmployeeAck", "Employee acknowledgement"],
@@ -419,8 +424,8 @@ export default function OjtTopicsPage() {
                 ))}
               </ul>
             </div>
-          </CardContent>
-        </Card>
+          </div>
+        </details>
       )}
     </div>
   );

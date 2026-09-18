@@ -74,9 +74,32 @@ export async function changeUserPassword(params: {
     throw new Error("You can only change your own password");
   }
 
-  const credential = EmailAuthProvider.credential(user.email, params.currentPassword);
-  await reauthenticateWithCredential(user, credential);
-  await updatePassword(user, params.newPassword);
+  try {
+    const credential = EmailAuthProvider.credential(user.email, params.currentPassword);
+    await reauthenticateWithCredential(user, credential);
+    await updatePassword(user, params.newPassword);
+  } catch (err) {
+    const code =
+      err && typeof err === "object" && "code" in err
+        ? String((err as { code?: string }).code)
+        : "";
+    if (
+      code === "auth/wrong-password" ||
+      code === "auth/invalid-credential" ||
+      code === "auth/invalid-login-credentials"
+    ) {
+      throw new Error(
+        "Temporary password is incorrect. Use the password from the credentials card — re-issuing login credentials replaces the previous one."
+      );
+    }
+    if (code === "auth/too-many-requests") {
+      throw new Error("Too many attempts. Wait a few minutes and try again.");
+    }
+    if (code === "auth/requires-recent-login") {
+      throw new Error("Session expired. Sign in again with the temporary password, then set a new one.");
+    }
+    throw err instanceof Error ? err : new Error("Could not change password");
+  }
 
   const now = new Date().toISOString();
   await updateDoc(doc(db, COLLECTIONS.users, params.userId), {

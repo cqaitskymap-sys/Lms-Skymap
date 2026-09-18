@@ -63,7 +63,7 @@ export function OjtNextStepBanner({
           <StatusBadge status={assignment.status} label={ojtStatusLabel(assignment.status)} />
         </div>
         <p className="text-sm text-muted-foreground">{action.hint}</p>
-        <p className="text-xs text-muted-foreground">Waiting on: {action.waitingOn}</p>
+        <p className="text-xs text-muted-foreground">Who should act now: {action.waitingOn}</p>
       </div>
       {action.canAct ? (
         <Button size="sm" asChild>

@@ -12,6 +12,8 @@ export type OjtNextAction = {
   canAct: boolean;
   tone: "default" | "warning" | "danger" | "success";
   formId?: string;
+  /** Stable list identity when several forms share the same page path. */
+  id?: string;
 };
 
 const RANK: Record<OjtStatus, number> = {
@@ -54,22 +56,22 @@ export function ojtWorkflowSteps(assignment: OjtAssignment): OjtProgressStep[] {
 
   const failed = status === "failed" || status === "retraining_required";
   const keys: { key: string; label: string; currentWhen: OjtStatus[] }[] = [
-    { key: "select", label: "Selected", currentWhen: ["draft", "selected"] },
+    { key: "select", label: "Person chosen", currentWhen: ["draft", "selected"] },
     { key: "trainer", label: "Trainer", currentWhen: ["assigned"] },
     { key: "schedule", label: "Date booked", currentWhen: ["scheduled", "rescheduled"] },
     { key: "train", label: "Training", currentWhen: ["in_progress"] },
-    { key: "evaluate", label: "Evaluated", currentWhen: failed ? ["failed", "retraining_required"] : [] },
+    { key: "evaluate", label: "Scored", currentWhen: failed ? ["failed", "retraining_required"] : [] },
   ];
   if (assignment.requireEmployeeAck) {
-    keys.push({ key: "ack", label: "Employee", currentWhen: ["trainer_completed"] });
+    keys.push({ key: "ack", label: "Employee OK", currentWhen: ["trainer_completed"] });
   }
   if (assignment.requireHodVerification) {
-    keys.push({ key: "hod", label: "HOD", currentWhen: ["verification_pending"] });
+    keys.push({ key: "hod", label: "HOD OK", currentWhen: ["verification_pending"] });
   }
   if (assignment.requireQaApproval) {
-    keys.push({ key: "qa", label: "QA", currentWhen: ["qa_pending"] });
+    keys.push({ key: "qa", label: "QA OK", currentWhen: ["qa_pending"] });
   }
-  keys.push({ key: "done", label: "Completed", currentWhen: ["completed"] });
+  keys.push({ key: "done", label: "Done", currentWhen: ["completed"] });
 
   const currentKey =
     keys.find((k) => k.currentWhen.includes(status))?.key ??
@@ -101,8 +103,8 @@ export function ojtNextAction(
 
   if (assignment.status === "completed") {
     return {
-      title: "Training complete",
-      hint: "This On Job Training record is closed.",
+      title: "Training is done",
+      hint: "This record is closed. Nothing more to do.",
       waitingOn: "—",
       href,
       canAct: false,
@@ -112,7 +114,7 @@ export function ojtNextAction(
   if (assignment.status === "cancelled") {
     return {
       title: "Cancelled",
-      hint: "This OJT will not be executed.",
+      hint: "This training will not happen.",
       waitingOn: "—",
       href,
       canAct: false,
@@ -122,8 +124,8 @@ export function ojtNextAction(
 
   const byStatus: Partial<Record<OjtStatus, OjtNextAction>> = {
     draft: {
-      title: "Finish selection",
-      hint: "Confirm this employee on the training matrix.",
+      title: "Finish selecting this person",
+      hint: "Open Select people and mark ✓ for this topic.",
       waitingOn: "Department head",
       href: "/dashboard/ojt/matrix",
       canAct: can(r, "ojt:assign"),
@@ -131,8 +133,8 @@ export function ojtNextAction(
       formId: "ojt-schedule",
     },
     selected: {
-      title: "Assign a trainer",
-      hint: "Pick who will demonstrate this activity on the shop floor.",
+      title: "Pick a trainer",
+      hint: "Choose who will show this job on the floor.",
       waitingOn: "Department head",
       href,
       canAct: can(r, "ojt:assign"),
@@ -140,8 +142,8 @@ export function ojtNextAction(
       formId: "ojt-schedule",
     },
     assigned: {
-      title: "Book a training date",
-      hint: `Choose a date in ${monthHint(assignment)} and a location.`,
+      title: "Book a date",
+      hint: `Pick a day in ${monthHint(assignment)} and a room.`,
       waitingOn: "Department head",
       href: can(r, "ojt:schedule") ? "/dashboard/ojt/schedule" : href,
       canAct: can(r, "ojt:schedule"),
@@ -149,8 +151,8 @@ export function ojtNextAction(
       formId: "ojt-schedule",
     },
     scheduled: {
-      title: "Start practical training",
-      hint: "Trainer demonstrates the activity, then records notes and scores.",
+      title: "Start training",
+      hint: "Trainer shows the job, writes notes, then scores.",
       waitingOn: assignment.trainerName || "Trainer",
       href: `/dashboard/ojt/execution/${assignment.id}`,
       canAct: can(r, "ojt:conduct") || can(r, "ojt:evaluate"),
@@ -159,7 +161,7 @@ export function ojtNextAction(
     },
     rescheduled: {
       title: "Start retraining",
-      hint: "A new attempt is ready. Conduct the practical session again.",
+      hint: "A new attempt is ready. Show the job again and score.",
       waitingOn: assignment.trainerName || "Trainer",
       href: `/dashboard/ojt/execution/${assignment.id}`,
       canAct: can(r, "ojt:conduct") || can(r, "ojt:evaluate"),
@@ -167,8 +169,8 @@ export function ojtNextAction(
       formId: "ojt-execution",
     },
     in_progress: {
-      title: "Submit evaluation",
-      hint: "Score competency criteria and sign off as trainer.",
+      title: "Submit scores",
+      hint: "Mark each skill pass or fail, then sign as trainer.",
       waitingOn: assignment.trainerName || "Trainer",
       href,
       canAct: can(r, "ojt:evaluate"),
@@ -176,8 +178,8 @@ export function ojtNextAction(
       formId: "ojt-evaluation",
     },
     trainer_completed: {
-      title: "Employee acknowledgement",
-      hint: "Trainee confirms they received and understood this OJT.",
+      title: "Employee must confirm",
+      hint: "The trainee ticks that they understood and can do the job.",
       waitingOn: assignment.employeeName,
       href,
       canAct: can(r, "ojt:acknowledge"),
@@ -185,16 +187,16 @@ export function ojtNextAction(
       formId: "ojt-ack",
     },
     employee_acknowledged: {
-      title: "Waiting for verification",
-      hint: "HOD or QA will review the training record next.",
+      title: "Waiting for a check",
+      hint: "HOD or QA will review this record next.",
       waitingOn: assignment.requireHodVerification ? "Department head" : "QA",
       href,
       canAct: can(r, "ojt:verify") || can(r, "ojt:approve"),
       tone: "default",
     },
     verification_pending: {
-      title: "HOD verification",
-      hint: "Review the practical record, then verify or reject.",
+      title: "HOD must check",
+      hint: "Read the notes, then Verify or Reject.",
       waitingOn: "Department head",
       href,
       canAct: can(r, "ojt:verify"),
@@ -202,8 +204,8 @@ export function ojtNextAction(
       formId: "ojt-hod",
     },
     qa_pending: {
-      title: "QA approval",
-      hint: "Final compliance sign-off to close this OJT.",
+      title: "QA must approve",
+      hint: "Final sign-off to close this training.",
       waitingOn: "QA",
       href,
       canAct: can(r, "ojt:approve"),
@@ -211,8 +213,8 @@ export function ojtNextAction(
       formId: "ojt-qa",
     },
     failed: {
-      title: "Schedule retraining",
-      hint: "Competency was not demonstrated. Book a new attempt — history is kept.",
+      title: "Book retraining",
+      hint: "The person did not pass. Book a new date — old scores stay in history.",
       waitingOn: "Department head",
       href,
       canAct: can(r, "ojt:retrain"),
@@ -221,7 +223,7 @@ export function ojtNextAction(
     },
     retraining_required: {
       title: "Book retraining date",
-      hint: "Pick a new execution date. Previous scores stay in attempt history.",
+      hint: "Pick a new training day. Previous scores are kept.",
       waitingOn: "Department head",
       href,
       canAct: can(r, "ojt:retrain"),
@@ -242,8 +244,8 @@ export function ojtNextAction(
   if (overdue && action.tone !== "danger" && action.tone !== "success") {
     return {
       ...action,
-      title: `Overdue — ${action.title}`,
-      hint: `${action.hint} Planned month has already passed.`,
+      title: `Late — ${action.title}`,
+      hint: `${action.hint} The planned training month has already passed.`,
       tone: "danger",
     };
   }
@@ -302,29 +304,57 @@ export function waitingOjtQueue(
     .slice(0, limit);
 }
 
+function ojtFormActionHref(
+  kind: "planner" | "matrix",
+  year: number,
+  departmentId?: string
+): string {
+  const path = kind === "planner" ? "/dashboard/ojt/planner" : "/dashboard/ojt/matrix";
+  const params = new URLSearchParams({ year: String(year) });
+  if (departmentId) params.set("departmentId", departmentId);
+  return `${path}?${params.toString()}`;
+}
+
 export function ojtFormPendingActions(
-  forms: { kind: "planner" | "matrix"; status: string; departmentName?: string; year: number; locked?: boolean }[],
+  forms: {
+    id?: string;
+    kind: "planner" | "matrix";
+    status: string;
+    departmentId?: string;
+    departmentName?: string;
+    year: number;
+    locked?: boolean;
+  }[],
   role?: UserRole | null
 ): OjtNextAction[] {
   const r = role ?? undefined;
   const actions: OjtNextAction[] = [];
+  const seen = new Set<string>();
   for (const form of forms) {
     if (form.locked || form.status === "approved") continue;
-    const href = form.kind === "planner" ? "/dashboard/ojt/planner" : "/dashboard/ojt/matrix";
-    const name = form.kind === "planner" ? "Yearly planner" : "Employee training matrix";
+    const href = ojtFormActionHref(form.kind, form.year, form.departmentId);
+    const name = form.kind === "planner" ? "Yearly plan" : "People list";
+    const dept = form.departmentName || "Department";
+    const id =
+      form.id ||
+      `${form.kind}-${form.departmentId || dept}-${form.year}-${form.status}-${href}`;
+    if (seen.has(id)) continue;
+    seen.add(id);
     if (form.status === "draft" && can(r, "ojt:write")) {
       actions.push({
-        title: `${name} pending preparation`,
-        hint: `${form.departmentName || "Department"} ${form.year} is still draft.`,
-        waitingOn: "Officer/Executive",
+        id,
+        title: `Sign ${name} as prepared — ${dept}`,
+        hint: `${dept} ${form.year} is still a draft.`,
+        waitingOn: "You",
         href,
         canAct: true,
         tone: "warning",
       });
     } else if (form.status === "prepared" && (can(r, "ojt:verify") || can(r, "ojt:write"))) {
       actions.push({
-        title: `${name} pending check / HOD verification`,
-        hint: "Department Training Coordinator / HOD sign-off is outstanding.",
+        id,
+        title: `HOD must check ${name} — ${dept}`,
+        hint: "Department head sign-off is still needed.",
         waitingOn: "Department head",
         href,
         canAct: can(r, "ojt:verify") || r === "department_head" || r === "qa" || r === "super_admin",
@@ -332,8 +362,9 @@ export function ojtFormPendingActions(
       });
     } else if (form.status === "checked" && can(r, "ojt:approve")) {
       actions.push({
-        title: `${name} pending QA approval`,
-        hint: "Head QA approval is required before this controlled form is active.",
+        id,
+        title: `QA must approve ${name} — ${dept}`,
+        hint: "QA sign-off is needed before this form is locked.",
         waitingOn: "QA",
         href,
         canAct: true,

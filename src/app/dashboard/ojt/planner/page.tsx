@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, Fragment } from "react";
+import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { Loader2, Printer } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
@@ -48,6 +50,7 @@ import {
 import { StatusBadge } from "@/components/shared/status-badge";
 import { OjtEmptyState } from "@/components/ojt/ojt-empty-state";
 import { OjtPlannerLegend } from "@/components/ojt/ojt-legend";
+import { OjtPageHint } from "@/components/ojt/ojt-page-hint";
 import { OjtFormApprovalPanel } from "@/components/ojt/ojt-form-approvals";
 import { AdminDeleteButton } from "@/components/auth/admin-delete-button";
 import type { OjtFormDocument, OjtPlan, OjtSettings } from "@/types/ojt";
@@ -56,9 +59,10 @@ import { cn } from "@/lib/utils";
 export default function OjtPlannerPage() {
   const { profile } = useAuth();
   const { activeDepartments } = useDepartments();
+  const searchParams = useSearchParams();
   const defaultYear = currentCalendarYear();
-  const [year, setYear] = useState(String(defaultYear));
-  const [departmentId, setDepartmentId] = useState("");
+  const [year, setYear] = useState(() => searchParams.get("year") || String(defaultYear));
+  const [departmentId, setDepartmentId] = useState(() => searchParams.get("departmentId") || "");
   const [plans, setPlans] = useState<OjtPlan[]>([]);
   const [form, setForm] = useState<OjtFormDocument | null>(null);
   const [settings, setSettings] = useState<OjtSettings | null>(null);
@@ -104,8 +108,15 @@ export default function OjtPlannerPage() {
   }, [departmentId, deptLocked, year]);
 
   useEffect(() => {
-    if (deptLocked && !departmentId) setDepartmentId(deptLocked);
-  }, [deptLocked, departmentId]);
+    if (deptLocked) {
+      setDepartmentId(deptLocked);
+      return;
+    }
+    const fromUrl = searchParams.get("departmentId");
+    const yearFromUrl = searchParams.get("year");
+    if (fromUrl) setDepartmentId(fromUrl);
+    if (yearFromUrl) setYear(yearFromUrl);
+  }, [deptLocked, searchParams]);
 
   useEffect(() => {
     void refresh();
@@ -186,9 +197,9 @@ export default function OjtPlannerPage() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Yearly OJT plan</h1>
+          <h1 className="text-2xl font-bold tracking-tight">Step 2 — Plan months</h1>
           <p className="text-muted-foreground">
-            Official planner: each topic has a Selection (S) row and an Execution (E) row. Tick the applicable months.
+            For each topic, tick when you will choose people (S) and when you will train them (E).
           </p>
         </div>
         <Button variant="outline" size="sm" onClick={handlePrint} disabled={!plans.length}>
@@ -196,13 +207,17 @@ export default function OjtPlannerPage() {
           Print / PDF
         </Button>
       </div>
+      <OjtPageHint title="How to fill this table">
+        Choose department and year, then click <strong>Load topics into this year</strong>. Each topic has two rows:
+        blue <strong>S</strong> = month you pick people, green <strong>E</strong> = month you train. Click a month to tick it.
+      </OjtPageHint>
 
       <Card>
         <CardHeader>
-          <CardTitle>Choose department & year</CardTitle>
-          <CardDescription>
-            Load topics first, then mark selection month and execution month on separate rows.
-          </CardDescription>
+            <CardTitle>Choose department & year</CardTitle>
+            <CardDescription>
+              Load topics first. Then tick months on the S row and the E row.
+            </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-wrap items-end gap-3">
           <div className="space-y-1">
@@ -236,10 +251,15 @@ export default function OjtPlannerPage() {
             </Select>
           </div>
           {canWrite && (
-            <Button onClick={() => void handleSeed()} disabled={busy || !department || locked}>
-              {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Load topics into this year
-            </Button>
+            <>
+              <Button onClick={() => void handleSeed()} disabled={busy || !department || locked}>
+                {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                Load topics into this year
+              </Button>
+              <Button variant="ghost" asChild>
+                <Link href="/dashboard/ojt/matrix">Next: select people →</Link>
+              </Button>
+            </>
           )}
         </CardContent>
       </Card>
@@ -265,8 +285,8 @@ export default function OjtPlannerPage() {
               title={department ? "No topics on this year yet" : "Select a department"}
               description={
                 department
-                  ? "Create training topics, then click Load topics into this year."
-                  : "Pick a department above to see or build its yearly plan."
+                  ? "Go to Topics first, then click Load topics into this year."
+                  : "Pick a department above to build its year plan."
               }
               actionHref="/dashboard/ojt/topics"
               actionLabel="Go to topics"
@@ -279,7 +299,7 @@ export default function OjtPlannerPage() {
                     <TableHead className="sticky left-0 top-0 z-20 min-w-[56px] bg-background">S. No.</TableHead>
                     <TableHead className="sticky left-[56px] top-0 z-20 min-w-[220px] bg-background">Training Topic</TableHead>
                     <TableHead className="sticky top-0 z-10 min-w-[140px] bg-background">SOP No. / Reference</TableHead>
-                    <TableHead className="sticky top-0 z-10 w-12 bg-background text-center">S/E</TableHead>
+                    <TableHead className="sticky top-0 z-10 w-16 bg-background text-center">Row</TableHead>
                     {CALENDAR_MONTHS.map((m) => (
                       <TableHead
                         key={m.number}
@@ -328,7 +348,7 @@ export default function OjtPlannerPage() {
                                     selectionMonths: toggleMonthList(plan.selectionMonths, m.number),
                                   })
                                 }
-                                title="Toggle selection month"
+                                title="Tick this month to choose people"
                                 className={cn(
                                   "h-8 w-9 rounded-md text-xs font-semibold",
                                   on
@@ -435,7 +455,7 @@ export default function OjtPlannerPage() {
                                     executionMonths: toggleMonthList(plan.executionMonths, m.number),
                                   })
                                 }
-                                title="Toggle execution month"
+                                title="Tick this month to train"
                                 className={cn(
                                   "h-8 w-9 rounded-md text-xs font-semibold",
                                   on

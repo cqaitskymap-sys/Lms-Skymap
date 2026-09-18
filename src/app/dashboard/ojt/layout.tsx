@@ -8,9 +8,6 @@ export default function OjtLayout({ children }: { children: React.ReactNode }) {
     <RequirePermission permission="ojt:read">
       <div className="space-y-6">
         <OjtNav />
-        <p className="text-xs text-muted-foreground">
-          Practical shop-floor training (demonstrate → score → sign off). This is not a classroom MCQ exam.
-        </p>
         {children}
       </div>
     </RequirePermission>

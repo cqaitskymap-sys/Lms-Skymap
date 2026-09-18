@@ -32,6 +32,7 @@ import {
 } from "@/components/ui/table";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { OjtEmptyState } from "@/components/ojt/ojt-empty-state";
+import { OjtPageHint } from "@/components/ojt/ojt-page-hint";
 import { AdminDeleteButton } from "@/components/auth/admin-delete-button";
 import { AdminEditButton } from "@/components/auth/admin-edit-button";
 import { OjtAssignmentEditDialog } from "@/components/ojt/ojt-admin-dialogs";
@@ -84,7 +85,9 @@ export default function OjtAssignmentsPage() {
       }
       const [asg, staff] = await Promise.all([
         listOjtAssignments(filters),
-        listOjtStaffOptions().catch(() => []),
+        profile?.role === "employee"
+          ? Promise.resolve([])
+          : listOjtStaffOptions().catch(() => []),
       ]);
       setRows(asg);
       setTrainers(staff.filter((u) => u.role === "trainer" || u.role === "department_head" || u.role === "super_admin"));
@@ -116,18 +119,23 @@ export default function OjtAssignmentsPage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold tracking-tight">
-          {profile?.role === "employee" ? "My On Job Training" : "OJT records"}
+          {profile?.role === "employee" ? "My on-job training" : "All OJT records"}
         </h1>
         <p className="text-muted-foreground">
           {profile?.role === "employee"
-            ? "Open a record to acknowledge training after your trainer has scored you."
-            : "Search a person or topic, then open the record to see the next step."}
+            ? "Open a row when your trainer has scored you, then click Confirm."
+            : "Search a person or topic. The Next step column tells you what to do."}
         </p>
       </div>
+      <OjtPageHint>
+        {profile?.role === "employee"
+          ? "You only need to confirm after training. Planning and booking are done by your department."
+          : "Each row is one person + one topic. Click Continue when it is your turn."}
+      </OjtPageHint>
       <Card>
         <CardHeader>
           <CardTitle>Find a record</CardTitle>
-          <CardDescription>Filter by year and workflow status</CardDescription>
+          <CardDescription>Filter by year and status, or type a name</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-wrap gap-3">
           <Input
@@ -151,7 +159,7 @@ export default function OjtAssignmentsPage() {
           </Select>
           {canSchedule && (
             <Button asChild variant="outline">
-              <Link href="/dashboard/ojt/schedule">Schedule OJT</Link>
+              <Link href="/dashboard/ojt/schedule">Book a date</Link>
             </Button>
           )}
         </CardContent>
@@ -164,14 +172,14 @@ export default function OjtAssignmentsPage() {
             </div>
           ) : visible.length === 0 ? (
             <OjtEmptyState
-              title="No OJT records match"
+              title="No matching records"
               description={
                 profile?.role === "employee"
-                  ? "When your department selects you for a practical topic, it will show up here."
-                  : "Select people on the employee matrix to create records, or change the filters above."
+                  ? "When your department selects you for a topic, it will show up here."
+                  : "Select people in step 3 to create records, or change the filters above."
               }
               actionHref={canSchedule ? "/dashboard/ojt/matrix" : undefined}
-              actionLabel={canSchedule ? "Open employee matrix" : undefined}
+              actionLabel={canSchedule ? "Select people" : undefined}
             />
           ) : (
             <Table>

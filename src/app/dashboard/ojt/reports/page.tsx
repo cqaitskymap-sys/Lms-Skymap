@@ -370,7 +370,7 @@ export default function OjtReportsPage() {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">OJT reports</h1>
-          <p className="text-muted-foreground">Planner, matrix, competency and audit extracts — pick a report type below.</p>
+          <p className="text-muted-foreground">Pick a report type below, then export if you need a file.</p>
         </div>
         {active && canExport && <ReportExportMenu dataset={active} />}
       </div>

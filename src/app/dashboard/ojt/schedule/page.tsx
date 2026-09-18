@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/select";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { OjtEmptyState } from "@/components/ojt/ojt-empty-state";
+import { OjtPageHint } from "@/components/ojt/ojt-page-hint";
 import { ojtStatusLabel } from "@/lib/ojt/next-action";
 import type { OjtAssignment } from "@/types/ojt";
 
@@ -125,11 +126,14 @@ export default function OjtSchedulePage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">Book an OJT date</h1>
+        <h1 className="text-2xl font-bold tracking-tight">Step 4 — Book a date</h1>
         <p className="text-muted-foreground">
-          Pick a person from the left, then set trainer, date (must be in the planned month), time and location.
+          Pick a person on the left, then fill trainer, day, time and room on the right.
         </p>
       </div>
+      <OjtPageHint title="Tip">
+        The date should fall in the planned training month shown under the name. If it does not, you must write a reason.
+      </OjtPageHint>
       {!canSchedule ? (
         <p className="text-sm text-muted-foreground">You can view assigned OJT but cannot schedule sessions.</p>
       ) : null}
@@ -137,7 +141,7 @@ export default function OjtSchedulePage() {
         <Card>
           <CardHeader>
             <CardTitle>Waiting for a date</CardTitle>
-            <CardDescription>Selected people who do not have a session yet</CardDescription>
+            <CardDescription>People who were selected but do not have a day yet</CardDescription>
           </CardHeader>
           <CardContent>
             {loading ? (
@@ -147,9 +151,9 @@ export default function OjtSchedulePage() {
             ) : rows.length === 0 ? (
               <OjtEmptyState
                 title="Nobody is waiting"
-                description="Select employees on the matrix first. They will appear here so you can book a shop-floor date."
+                description="First select people in step 3. They will appear here so you can book a day."
                 actionHref="/dashboard/ojt/matrix"
-                actionLabel="Open employee matrix"
+                actionLabel="Select people"
               />
             ) : (
               <ul className="space-y-2">
@@ -179,8 +183,8 @@ export default function OjtSchedulePage() {
             <CardTitle>When and where</CardTitle>
             <CardDescription>
               {selected
-                ? `${selected.employeeName} · ${selected.trainingTopic}. Date must be in ${monthName(selected.plannedExecutionMonth)} ${selected.year}.`
-                : "Select a person on the left to fill in the session details."}
+                ? `${selected.employeeName} · ${selected.trainingTopic}. Prefer a date in ${monthName(selected.plannedExecutionMonth)} ${selected.year}.`
+                : "Click a person on the left first."}
             </CardDescription>
           </CardHeader>
           <CardContent className="grid gap-3">
@@ -200,7 +204,7 @@ export default function OjtSchedulePage() {
               </Select>
             </div>
             <div className="space-y-1">
-              <Label>Execution date</Label>
+              <Label>Training date</Label>
               <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} disabled={!canSchedule} />
             </div>
             <div className="grid grid-cols-2 gap-3">
@@ -214,7 +218,7 @@ export default function OjtSchedulePage() {
               </div>
             </div>
             <div className="space-y-1">
-              <Label>Location</Label>
+              <Label>Room / location</Label>
               <Input value={location} onChange={(e) => setLocation(e.target.value)} placeholder="e.g. Dispensing room / Line 2" />
             </div>
             {selected && date && !dateFallsInMonth(calendarDateToIso(date), selected.year, selected.plannedExecutionMonth) && (
