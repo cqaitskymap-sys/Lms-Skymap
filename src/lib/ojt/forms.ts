@@ -26,8 +26,18 @@ export function mergeOjtSettings(raw?: Partial<OjtSettings> | null): OjtSettings
     createdBy: raw?.createdBy || "system",
     ...raw,
     id: "global",
-    plannerApprovals: { ...DEFAULT_OJT_FORM_APPROVALS, ...raw?.plannerApprovals },
-    matrixApprovals: { ...DEFAULT_OJT_FORM_APPROVALS, ...raw?.matrixApprovals },
+    plannerApprovals: {
+      ...DEFAULT_OJT_FORM_APPROVALS,
+      ...raw?.plannerApprovals,
+      requireCheckedByCoordinator: false,
+      requireVerifiedByHod: false,
+    },
+    matrixApprovals: {
+      ...DEFAULT_OJT_FORM_APPROVALS,
+      ...raw?.matrixApprovals,
+      requireCheckedByCoordinator: false,
+      requireVerifiedByHod: false,
+    },
     plannerFormNumber: raw?.plannerFormNumber || DEFAULT_PLANNER_FORM_NUMBER,
     matrixFormNumber: raw?.matrixFormNumber || DEFAULT_MATRIX_FORM_NUMBER,
     companyName: raw?.companyName || DEFAULT_OJT_COMPANY_NAME,
@@ -90,8 +100,6 @@ export function statusAfterFormSignoff(
 export function requiredRolesForApproval(config: OjtFormApprovalConfig): OjtFormSignoffRole[] {
   const roles: OjtFormSignoffRole[] = [];
   if (config.requirePreparedBy) roles.push("prepared_by");
-  if (config.requireCheckedByCoordinator) roles.push("checked_by_coordinator");
-  if (config.requireVerifiedByHod) roles.push("verified_by_hod");
   if (config.requireCheckedByHead) roles.push("checked_by_head");
   if (config.requireApprovedByQa) roles.push("approved_by_qa");
   return roles;

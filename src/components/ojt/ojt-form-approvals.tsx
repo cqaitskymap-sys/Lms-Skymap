@@ -24,8 +24,6 @@ import { StatusBadge } from "@/components/shared/status-badge";
 
 const SIGNOFF_ORDER: OjtFormSignoffRole[] = [
   "prepared_by",
-  "checked_by_coordinator",
-  "verified_by_hod",
   "checked_by_head",
   "approved_by_qa",
 ];
@@ -34,11 +32,8 @@ function canSignRole(role: OjtFormSignoffRole, userRole?: UserRole | null): bool
   if (!userRole) return false;
   if (userRole === "super_admin") return true;
   if (role === "approved_by_qa") return userRole === "qa";
-  if (role === "verified_by_hod" || role === "checked_by_head") {
+  if (role === "checked_by_head") {
     return userRole === "department_head" || userRole === "qa";
-  }
-  if (role === "checked_by_coordinator") {
-    return userRole === "department_head" || userRole === "qa" || userRole === "hr";
   }
   return hasPermission(userRole, "ojt:write");
 }
@@ -135,22 +130,11 @@ export function OjtFormApprovalPanel({
         </div>
 
         <div className="grid gap-2 md:grid-cols-2 lg:grid-cols-3">
-          {(kind === "planner"
-            ? SIGNOFF_ORDER
-            : SIGNOFF_ORDER.filter(
-                (role) => role === "prepared_by" || role === "checked_by_head" || role === "approved_by_qa"
-              )
-          ).map((role) => {
+          {SIGNOFF_ORDER.map((role) => {
             const signed = form ? latestSignoff(form, role) : undefined;
             const labels = OJT_FORM_SIGNOFF_LABELS[role];
             const action =
-              role === "prepared_by"
-                ? "prepared"
-                : role === "approved_by_qa"
-                  ? "approved"
-                  : role === "verified_by_hod"
-                    ? "verified"
-                    : "checked";
+              role === "prepared_by" ? "prepared" : role === "approved_by_qa" ? "approved" : "checked";
             return (
               <div key={role} className="rounded-lg border p-3 text-sm">
                 <p className="font-medium">{labels.title}</p>

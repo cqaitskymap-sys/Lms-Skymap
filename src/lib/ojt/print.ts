@@ -147,28 +147,16 @@ export function printOjtPlannerForm(args: {
           <table class="signatures">
             <tr>
               <td>
-                <div class="sig-title">Checked By</div>
-                <div class="sig-role">Department Training Coordinator</div>
-                <div>${signLine(form || null, "checked_by_coordinator")}</div>
-              </td>
-              <td>
-                <div class="sig-title">Verified By</div>
-                <div class="sig-role">Department HOD/Designee</div>
-                <div>${signLine(form || null, "verified_by_hod")}</div>
-              </td>
-              <td>
                 <div class="sig-title">Prepared By</div>
                 <div class="sig-role">Officer/Executive</div>
                 <div>${signLine(form || null, "prepared_by")}</div>
               </td>
-            </tr>
-            <tr>
               <td>
                 <div class="sig-title">Checked By</div>
                 <div class="sig-role">Department Head</div>
                 <div>${signLine(form || null, "checked_by_head")}</div>
               </td>
-              <td colspan="2">
+              <td>
                 <div class="sig-title">Approved By</div>
                 <div class="sig-role">Head QA</div>
                 <div>${signLine(form || null, "approved_by_qa")}</div>

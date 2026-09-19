@@ -25,8 +25,8 @@ export const DEFAULT_OJT_APPROVAL_CONFIG: OjtApprovalConfig = {
 
 export const DEFAULT_OJT_FORM_APPROVALS: OjtFormApprovalConfig = {
   requirePreparedBy: true,
-  requireCheckedByCoordinator: true,
-  requireVerifiedByHod: true,
+  requireCheckedByCoordinator: false,
+  requireVerifiedByHod: false,
   requireCheckedByHead: true,
   requireApprovedByQa: true,
 };

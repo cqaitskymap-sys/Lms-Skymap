@@ -47,7 +47,6 @@ export function OjtTopicEditDialog({
   const { profile } = useAuth();
   const [busy, setBusy] = useState(false);
   const [title, setTitle] = useState("");
-  const [description, setDescription] = useState("");
   const [departmentId, setDepartmentId] = useState("");
   const [sopId, setSopId] = useState("none");
   const [reference, setReference] = useState("");
@@ -55,7 +54,6 @@ export function OjtTopicEditDialog({
   useEffect(() => {
     if (!topic || !open) return;
     setTitle(topic.trainingTopic);
-    setDescription(topic.description || "");
     setDepartmentId(topic.departmentId);
     setSopId(topic.sopId || "none");
     setReference(topic.referenceDocumentNumber || topic.sopNumber || "");
@@ -73,7 +71,6 @@ export function OjtTopicEditDialog({
         topic.id,
         {
           trainingTopic: title.trim(),
-          description: description.trim() || undefined,
           departmentId: department?.id || topic.departmentId,
           departmentName: department?.name || topic.departmentName,
           sopId: sopId === "none" ? undefined : sopId,
@@ -141,10 +138,6 @@ export function OjtTopicEditDialog({
               onChange={(e) => setReference(e.target.value)}
               placeholder="SOP/QA/067 or NA"
             />
-          </div>
-          <div className="space-y-1">
-            <Label>Description</Label>
-            <Textarea value={description} onChange={(e) => setDescription(e.target.value)} />
           </div>
         </div>
         <DialogFooter>

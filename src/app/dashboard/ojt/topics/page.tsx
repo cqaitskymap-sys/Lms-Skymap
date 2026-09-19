@@ -27,7 +27,6 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
@@ -67,7 +66,6 @@ export default function OjtTopicsPage() {
   const [title, setTitle] = useState("");
   const [reference, setReference] = useState("");
   const [sopId, setSopId] = useState("none");
-  const [description, setDescription] = useState("");
   const [editingTopic, setEditingTopic] = useState<OjtTopic | null>(null);
 
   const refresh = useCallback(async (opts?: { silent?: boolean }) => {
@@ -112,7 +110,6 @@ export default function OjtTopicsPage() {
       await createOjtTopic(
         {
           trainingTopic: title.trim(),
-          description: description.trim() || undefined,
           departmentId: department.id,
           departmentName: department.name,
           sopId: sopId === "none" ? undefined : sopId,
@@ -121,7 +118,6 @@ export default function OjtTopicsPage() {
         toOjtActor(profile)
       );
       setTitle("");
-      setDescription("");
       setReference("");
       setSopId("none");
       toast.success("OJT topic created");
@@ -217,10 +213,6 @@ export default function OjtTopicsPage() {
                 onChange={(e) => setReference(e.target.value)}
                 placeholder="SOP/QA/067 or NA"
               />
-            </div>
-            <div className="space-y-1 md:col-span-2">
-              <Label>Description</Label>
-              <Textarea value={description} onChange={(e) => setDescription(e.target.value)} placeholder="What should the trainee be able to do after this OJT?" />
             </div>
             <div className="flex flex-wrap gap-2 md:col-span-2">
               <Button onClick={() => void handleCreate()} disabled={busy}>

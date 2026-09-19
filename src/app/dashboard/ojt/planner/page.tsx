@@ -14,7 +14,6 @@ import {
   getOjtFormDocument,
   getOjtSettings,
   listOjtPlans,
-  listOjtStaffOptions,
   seedPlannerFromTopics,
   upsertOjtPlan,
 } from "@/lib/services/ojt";
@@ -66,7 +65,6 @@ export default function OjtPlannerPage() {
   const [plans, setPlans] = useState<OjtPlan[]>([]);
   const [form, setForm] = useState<OjtFormDocument | null>(null);
   const [settings, setSettings] = useState<OjtSettings | null>(null);
-  const [staff, setStaff] = useState<{ uid: string; displayName: string; role: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
 
@@ -75,19 +73,10 @@ export default function OjtPlannerPage() {
   const deptLocked = profile?.role === "department_head" ? profile.departmentId : undefined;
   const locked = Boolean(form?.locked);
 
-  const trainerLabel = useCallback(
-    (id?: string) => {
-      if (!id) return "—";
-      return staff.find((u) => u.uid === id)?.displayName || id;
-    },
-    [staff]
-  );
-
   const refresh = useCallback(async (opts?: { silent?: boolean }) => {
     if (!opts?.silent) setLoading(true);
     try {
       const dept = deptLocked || departmentId;
-      setStaff(await listOjtStaffOptions());
       setSettings(await getOjtSettings());
       if (dept) {
         const [planRows, formRow] = await Promise.all([
@@ -311,8 +300,6 @@ export default function OjtPlannerPage() {
                         {m.short}
                       </TableHead>
                     ))}
-                    <TableHead className="sticky top-0 z-10 bg-background">Trainer</TableHead>
-                    <TableHead className="sticky top-0 z-10 bg-background">Responsible</TableHead>
                     <TableHead className="sticky top-0 z-10 bg-background">Status</TableHead>
                     {isSuperAdmin && <TableHead className="sticky top-0 z-10 bg-background text-right">Actions</TableHead>}
                   </TableRow>
@@ -363,64 +350,6 @@ export default function OjtPlannerPage() {
                             </TableCell>
                           );
                         })}
-                        <TableCell rowSpan={2}>
-                          <Select
-                            disabled={!canWrite || locked}
-                            value={plan.trainerId || "none"}
-                            onValueChange={(v) => {
-                              const uid = v === "none" ? undefined : v;
-                              void patchPlan(plan, {
-                                trainerId: uid,
-                                trainerName: uid ? trainerLabel(uid) : undefined,
-                              });
-                            }}
-                          >
-                            <SelectTrigger className="w-40">
-                              <SelectValue placeholder="Trainer" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="none">Unassigned</SelectItem>
-                              {staff
-                                .filter((u) =>
-                                  u.role === "trainer" || u.role === "department_head" || u.role === "super_admin"
-                                )
-                                .map((u) => (
-                                  <SelectItem key={u.uid} value={u.uid}>
-                                    {u.displayName}
-                                  </SelectItem>
-                                ))}
-                            </SelectContent>
-                          </Select>
-                        </TableCell>
-                        <TableCell rowSpan={2}>
-                          <Select
-                            disabled={!canWrite || locked}
-                            value={plan.responsiblePersonId || "none"}
-                            onValueChange={(v) => {
-                              const uid = v === "none" ? undefined : v;
-                              void patchPlan(plan, {
-                                responsiblePersonId: uid,
-                                responsiblePersonName: uid ? trainerLabel(uid) : undefined,
-                              });
-                            }}
-                          >
-                            <SelectTrigger className="w-40">
-                              <SelectValue placeholder="Responsible" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="none">Unassigned</SelectItem>
-                              {staff
-                                .filter((u) =>
-                                  ["department_head", "qa", "trainer", "hr"].includes(u.role)
-                                )
-                                .map((u) => (
-                                  <SelectItem key={u.uid} value={u.uid}>
-                                    {u.displayName}
-                                  </SelectItem>
-                                ))}
-                            </SelectContent>
-                          </Select>
-                        </TableCell>
                         <TableCell rowSpan={2}>
                           <StatusBadge status={plan.status} />
                         </TableCell>

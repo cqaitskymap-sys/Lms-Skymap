@@ -82,6 +82,30 @@ function formatDateForPrint(value?: string): string {
   return `${day}/${month}/${year}`;
 }
 
+function formatExperienceDuration(fromDate?: string, asOf = new Date()): string {
+  if (!fromDate) return "—";
+  const start = new Date(fromDate);
+  if (Number.isNaN(start.getTime()) || start > asOf) return "—";
+
+  let years = asOf.getFullYear() - start.getFullYear();
+  let months = asOf.getMonth() - start.getMonth();
+  if (asOf.getDate() < start.getDate()) months -= 1;
+  if (months < 0) {
+    years -= 1;
+    months += 12;
+  }
+
+  if (years <= 0 && months <= 0) {
+    const days = Math.max(0, Math.floor((asOf.getTime() - start.getTime()) / 86_400_000));
+    return days <= 1 ? `${days} day` : `${days} days`;
+  }
+
+  const parts: string[] = [];
+  if (years > 0) parts.push(years === 1 ? "1 year" : `${years} years`);
+  if (months > 0) parts.push(months === 1 ? "1 month" : `${months} months`);
+  return parts.join(" ");
+}
+
 function addDays(isoDate: string | undefined, days: number): string | undefined {
   if (!isoDate) return undefined;
   const base = new Date(isoDate);
@@ -312,9 +336,7 @@ function TniPageInner() {
     const departmentName = employee.departmentName || departmentLabel(departments, employee.departmentId) || "—";
     const designation = selectedJd?.title || employee.designation || "—";
     const experience =
-      employee.employmentType === "intern" || employee.employmentType === "temporary"
-        ? "Fresher"
-        : "Experienced";
+      selectedJd?.experience?.trim() || formatExperienceDuration(employee.dateOfJoining);
 
     const html = `
       <!doctype html>
@@ -582,7 +604,10 @@ function TniPageInner() {
     }
     printTniSheet({
       employee: emp,
-      selectedJd: jds.find((j) => j.id === record.jdId),
+      selectedJd:
+        jds.find((j) => j.id === record.jdId) ||
+        jds.find((j) => j.id === emp.jdId) ||
+        jds.find((j) => j.employeeId === emp.id),
       selectedNeeds: record.needs.map((n) => ({
         id: n.id,
         topic: n.topic,
