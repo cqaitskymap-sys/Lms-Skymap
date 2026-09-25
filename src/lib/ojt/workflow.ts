@@ -52,6 +52,16 @@ export function isOpenOjtStatus(status: OjtStatus): boolean {
   return (OPEN_OJT_STATUSES as readonly string[]).includes(status);
 }
 
+/** Settings override each criterion's own scale. "both" keeps the criterion scale. */
+export function criterionScaleForModel(
+  criterionScale: "1-5" | "pass_fail",
+  model: "pass_fail" | "rating_1_5" | "both" | undefined
+): "1-5" | "pass_fail" {
+  if (model === "pass_fail") return "pass_fail";
+  if (model === "rating_1_5") return "1-5";
+  return criterionScale;
+}
+
 /** 1–5 scores below 3, or any explicit Fail, mean not competent. */
 export function criterionIsFail(score: Pick<OjtCriterionScore, "result" | "rating">): boolean {
   if (score.result === "fail") return true;

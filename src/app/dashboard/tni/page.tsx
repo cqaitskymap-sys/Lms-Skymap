@@ -4,7 +4,7 @@ import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { toast } from "sonner";
-import { CheckCircle2, Loader2, Pencil, Plus, Printer, Sparkles, Trash2 } from "lucide-react";
+import { CheckCircle2, FileSignature, Loader2, Pencil, Plus, Printer, Sparkles, Trash2 } from "lucide-react";
 import { draftTniWithAi } from "@/lib/services/ai";
 import {
   approveTNI,
@@ -15,6 +15,16 @@ import {
   syncLocalTnisToFirebase,
   updateTNI,
 } from "@/lib/services/training";
+import {
+  approveTniSignoffAssignment,
+  fetchMyTniSignoffs,
+  type TniPendingSignoffRow,
+} from "@/lib/services/tni-signoff";
+import { resolveLinkedUserUid } from "@/lib/services/notifications";
+import { listUsersByRoles } from "@/lib/services/users";
+import { ROLE_LABELS } from "@/lib/rbac/permissions";
+import { sameJdSignoffPerson } from "@/lib/jd/absence-handover";
+import { TNI_SIGNOFF_SLOTS } from "@/lib/tni/signoff";
 import { TRAINING_UPDATED_EVENT } from "@/lib/training/demo-store";
 import {
   createTniLifecycle,
@@ -45,11 +55,15 @@ import type {
   Department,
   Employee,
   JobDescription,
+  JdSignoff,
   SopDocument,
   TrainingNeedItem,
   TrainingNeedIdentification,
+  UserProfile,
   UserRole,
 } from "@/types";
+
+const SELF_SIGNOFF = "__self__";
 
 const POST_JD_STAGES = [
   "jd_created",
@@ -62,6 +76,30 @@ const POST_JD_STAGES = [
   "certified",
   "qualified",
 ] as const;
+
+function employeeFullName(emp?: Employee | null): string {
+  if (!emp) return "";
+  return `${emp.firstName} ${emp.lastName}`.trim();
+}
+
+function mergeTniRecords(...lists: TrainingNeedIdentification[][]): TrainingNeedIdentification[] {
+  const byId = new Map<string, TrainingNeedIdentification>();
+  for (const list of lists) {
+    for (const row of list) byId.set(row.id, row);
+  }
+  return [...byId.values()].sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
+}
+
+function pickerValueForSignoff(
+  signoff: JdSignoff | undefined,
+  currentUid?: string
+): string {
+  if (!signoff) return "";
+  if (signoff.userId && currentUid && signoff.userId === currentUid) return SELF_SIGNOFF;
+  if (signoff.employeeId) return `emp:${signoff.employeeId}`;
+  if (signoff.userId) return `user:${signoff.userId}`;
+  return "";
+}
 
 interface NeedRow {
   id: string;
@@ -123,17 +161,23 @@ function statusBadgeVariant(status: TrainingNeedIdentification["status"]) {
 function TniPageInner() {
   const searchParams = useSearchParams();
   const employeeFromUrl = searchParams.get("employee") || "";
+  const acknowledgeFromUrl = searchParams.get("acknowledge") || "";
   const { profile, can } = useAuth();
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [jds, setJds] = useState<JobDescription[]>([]);
   const [sops, setSops] = useState<SopDocument[]>([]);
+  const [qaUsers, setQaUsers] = useState<UserProfile[]>([]);
   const [employeeId, setEmployeeId] = useState("");
   const [jdId, setJdId] = useState("");
   const [jobTitle, setJobTitle] = useState("");
   const [responsibilities, setResponsibilities] = useState("");
+  const [preparedByKey, setPreparedByKey] = useState(SELF_SIGNOFF);
+  const [approvedByKey, setApprovedByKey] = useState("");
   const [needs, setNeeds] = useState<NeedRow[]>([]);
   const [records, setRecords] = useState<TrainingNeedIdentification[]>([]);
+  const [assignedIds, setAssignedIds] = useState<Set<string>>(new Set());
+  const [myPendingSignoffs, setMyPendingSignoffs] = useState<TniPendingSignoffRow[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [aiBusy, setAiBusy] = useState(false);
@@ -157,57 +201,94 @@ function TniPageInner() {
   const loadData = useCallback(async () => {
     setLoading(true);
     setError(null);
+    const emptyPack = {
+      items: [] as TrainingNeedIdentification[],
+      pending: [] as TniPendingSignoffRow[],
+    };
+    const packPromise = profile?.uid
+      ? fetchMyTniSignoffs({
+          uid: profile.uid,
+          employeeId: profile.employeeId,
+        }).catch(() => emptyPack)
+      : Promise.resolve(emptyPack);
+
     try {
       const isEmployee = profile?.role === "employee";
       const myEmployeeId = profile?.employeeId;
 
       if (isEmployee) {
         if (!myEmployeeId) {
+          const pack = await packPromise;
+          setAssignedIds(new Set(pack.items.map((row) => row.id)));
+          setMyPendingSignoffs(pack.pending);
           setEmployees([]);
           setDepartments([]);
           setJds([]);
           setSops([]);
-          setRecords([]);
-          setError("Your account is not linked to an employee profile");
+          setQaUsers([]);
+          setRecords(pack.items);
+          if (!pack.items.length) {
+            setError("Your account is not linked to an employee profile");
+          }
           return;
         }
-        const [depts, jdList, sopList, tniList, self] = await Promise.all([
+        const [pack, depts, jdList, sopList, tniList, self] = await Promise.all([
+          packPromise,
           listDepartments(),
           listJobDescriptions({ employeeId: myEmployeeId }),
           listSopsDetailed({ status: "approved" }),
           listTNIs({ employeeId: myEmployeeId }),
           getEmployee(myEmployeeId).catch(() => null),
         ]);
-        setEmployees(self ? [self] : []);
+        setAssignedIds(new Set(pack.items.map((row) => row.id)));
+        setMyPendingSignoffs(pack.pending);
+        const extraIds = [
+          ...new Set(
+            pack.items
+              .map((row) => row.employeeId)
+              .filter((id) => id && id !== myEmployeeId)
+          ),
+        ];
+        const extras = (
+          await Promise.all(extraIds.map((id) => getEmployee(id).catch(() => null)))
+        ).filter((row): row is Employee => Boolean(row));
+        setEmployees(self ? [self, ...extras.filter((e) => e.id !== self.id)] : extras);
         setDepartments(depts.filter((d) => d.isActive));
         setJds(jdList);
         setSops(sopList);
-        setRecords(tniList.sort((a, b) => b.createdAt.localeCompare(a.createdAt)));
+        setQaUsers([]);
+        setRecords(mergeTniRecords(tniList, pack.items));
         return;
       }
 
-      const [emps, depts, jdList, sopList, tniList] = await Promise.all([
+      const [pack, emps, depts, jdList, sopList, tniList, qa] = await Promise.all([
+        packPromise,
         listEmployeesForLifecycle(),
         listDepartments(),
         listJobDescriptions(),
         listSopsDetailed({ status: "approved" }),
         listTNIs(),
+        listUsersByRoles(["qa"]).catch(() => [] as UserProfile[]),
       ]);
+      setAssignedIds(new Set(pack.items.map((row) => row.id)));
+      setMyPendingSignoffs(pack.pending);
       setEmployees(emps);
       setDepartments(depts.filter((d) => d.isActive));
       setJds(jdList);
       setSops(sopList);
-      setRecords(tniList.sort((a, b) => b.createdAt.localeCompare(a.createdAt)));
+      setQaUsers(qa);
+      setRecords(mergeTniRecords(tniList, pack.items));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load TNI data");
       setEmployees([]);
       setJds([]);
       setSops([]);
+      setQaUsers([]);
       setRecords([]);
     } finally {
       setLoading(false);
     }
-  }, [profile?.role, profile?.employeeId]);
+  }, [profile?.role, profile?.employeeId, profile?.uid]);
 
   useEffect(() => {
     void (async () => {
@@ -238,6 +319,7 @@ function TniPageInner() {
   const approvedJds = useMemo(() => jds.filter((j) => j.status === "approved"), [jds]);
 
   useEffect(() => {
+    if (editingId) return;
     const emp = employees.find((e) => e.id === employeeId);
     if (!emp) return;
     const linked =
@@ -251,7 +333,7 @@ function TniPageInner() {
       setJobTitle(emp.designation);
       setJdId("");
     }
-  }, [employeeId, employees, approvedJds]);
+  }, [employeeId, employees, approvedJds, editingId]);
 
   const scopedEmployees = useMemo(() => {
     if (employeeScopeId) {
@@ -283,18 +365,91 @@ function TniPageInner() {
   const visibleRecords = useMemo(() => {
     let rows = records;
     if (employeeScopeId) {
-      rows = rows.filter((r) => r.employeeId === employeeScopeId);
+      rows = rows.filter(
+        (r) =>
+          r.employeeId === employeeScopeId ||
+          r.preparedBySignoff?.employeeId === employeeScopeId ||
+          r.approvedBySignoff?.employeeId === employeeScopeId ||
+          assignedIds.has(r.id)
+      );
     } else if (deptScopeId) {
-      rows = rows.filter((r) => r.departmentId === deptScopeId);
+      rows = rows.filter((r) => r.departmentId === deptScopeId || assignedIds.has(r.id));
     }
     return rows;
-  }, [records, deptScopeId, employeeScopeId]);
+  }, [records, deptScopeId, employeeScopeId, assignedIds]);
 
   const employeeJds = useMemo(
     () =>
       approvedJds.filter((j) => !employeeId || j.employeeId === employeeId),
     [approvedJds, employeeId]
   );
+
+  const signoffEmployees = useMemo(
+    () =>
+      scopedEmployees.filter(
+        (e) =>
+          e.id !== employeeId &&
+          e.id !== profile?.employeeId &&
+          e.status !== "inactive" &&
+          e.status !== "terminated"
+      ),
+    [scopedEmployees, employeeId, profile?.employeeId]
+  );
+
+  const qaPickerUsers = useMemo(
+    () => qaUsers.filter((u) => u.uid && u.uid !== profile?.uid),
+    [qaUsers, profile?.uid]
+  );
+
+  const qaUserIds = useMemo(() => new Set(qaPickerUsers.map((u) => u.uid)), [qaPickerUsers]);
+
+  const approvedByEmployees = useMemo(
+    () => signoffEmployees.filter((e) => !e.userId || !qaUserIds.has(e.userId)),
+    [signoffEmployees, qaUserIds]
+  );
+
+  const extraPickerItem = (
+    key: string,
+    listedEmpIds: Set<string>,
+    listedUserIds: Set<string>
+  ) => {
+    if (!key || key === SELF_SIGNOFF) return null;
+    if (key.startsWith("emp:")) {
+      const id = key.slice(4);
+      if (listedEmpIds.has(id)) return null;
+      const emp = employees.find((e) => e.id === id);
+      return {
+        value: key,
+        label: emp
+          ? `${employeeFullName(emp)} · ${emp.employeeCode}`
+          : id,
+      };
+    }
+    if (key.startsWith("user:")) {
+      const uid = key.slice(5);
+      if (!uid || uid === profile?.uid || listedUserIds.has(uid)) return null;
+      const user = qaUsers.find((u) => u.uid === uid);
+      return { value: key, label: user?.displayName || uid };
+    }
+    return { value: key, label: key };
+  };
+
+  const extraPreparedItem = extraPickerItem(
+    preparedByKey,
+    new Set(signoffEmployees.map((e) => e.id)),
+    qaUserIds
+  );
+  const extraApprovedItem = extraPickerItem(
+    approvedByKey,
+    new Set(approvedByEmployees.map((e) => e.id)),
+    qaUserIds
+  );
+
+  useEffect(() => {
+    if (!acknowledgeFromUrl) return;
+    const node = document.getElementById(`tni-${acknowledgeFromUrl}`);
+    node?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [acknowledgeFromUrl, visibleRecords]);
 
   function resetForm() {
     setEditingId(null);
@@ -303,15 +458,19 @@ function TniPageInner() {
     setJdId("");
     setJobTitle("");
     setResponsibilities("");
+    setPreparedByKey(SELF_SIGNOFF);
+    setApprovedByKey("");
   }
 
   function printTniSheet(args: {
     employee: Employee;
     selectedJd?: JobDescription;
     selectedNeeds: NeedRow[];
+    preparedBy?: JdSignoff;
+    approvedBy?: JdSignoff;
   }) {
     if (typeof window === "undefined") return;
-    const { employee, selectedJd, selectedNeeds } = args;
+    const { employee, selectedJd, selectedNeeds, preparedBy, approvedBy } = args;
 
     const rowsHtml = selectedNeeds
       .map((need, index) => {
@@ -337,6 +496,30 @@ function TniPageInner() {
     const designation = selectedJd?.title || employee.designation || "—";
     const experience =
       selectedJd?.experience?.trim() || formatExperienceDuration(employee.dateOfJoining);
+
+    const printSignBlock = (title: string, roleLine: string, signoff?: JdSignoff) => {
+      const signed =
+        signoff?.status === "acknowledged" &&
+        (signoff.acknowledgedByName || signoff.name);
+      const name = (signoff?.acknowledgedByName || signoff?.name || "").trim();
+      const stamp = signoff?.acknowledgedAt ? formatDateForPrint(signoff.acknowledgedAt) : "";
+      if (signed && name) {
+        return `
+          <div class="title">${title}</div>
+          <div class="role">${roleLine}</div>
+          <div class="sign-esign">${escapeHtml(name)}</div>
+          <div class="sign-note">Electronically computer-generated signature</div>
+          ${stamp ? `<div class="sign-note">${escapeHtml(stamp)}</div>` : ""}
+          ${signoff?.signatureText ? `<div class="sign-note">${escapeHtml(signoff.signatureText)}</div>` : ""}
+        `;
+      }
+      return `
+        <div class="title">${title}</div>
+        <div class="role">${roleLine}</div>
+        ${name ? `<div>Name: <span class="filled-name">${escapeHtml(name)}</span></div>` : ""}
+        <div>Sign/Date</div>
+      `;
+    };
 
     const html = `
       <!doctype html>
@@ -365,7 +548,10 @@ function TniPageInner() {
             .signatures td { width: 50%; vertical-align: top; border: none; padding: 0; font-size: 14px; line-height: 1.55; }
             .signatures .right { text-align: right; }
             .signatures .title { font-weight: 700; margin-bottom: 4px; }
-            .signatures .role { margin-bottom: 28px; }
+            .signatures .role { margin-bottom: 10px; }
+            .sign-esign { font-family: "Segoe Script", "Lucida Handwriting", cursive; font-size: 18px; color: #1e3a8a; line-height: 1.2; }
+            .sign-note { font-size: 11px; font-style: italic; color: #555; }
+            .filled-name { font-weight: 700; text-decoration: underline; }
             .footer { margin-top: 28px; font-size: 14px; display: flex; justify-content: space-between; }
           </style>
         </head>
@@ -414,14 +600,18 @@ function TniPageInner() {
             <table class="signatures">
               <tr>
                 <td>
-                  <div class="title">Prepared By</div>
-                  <div class="role">Department Training Coordinator/HOD</div>
-                  <div>Sign/Date</div>
+                  ${printSignBlock(
+                    TNI_SIGNOFF_SLOTS.prepared_by.label,
+                    TNI_SIGNOFF_SLOTS.prepared_by.roleLine,
+                    preparedBy
+                  )}
                 </td>
                 <td class="right">
-                  <div class="title">Approved By</div>
-                  <div class="role">Head-Quality Assurance/Designee</div>
-                  <div>Sign/Date</div>
+                  ${printSignBlock(
+                    TNI_SIGNOFF_SLOTS.approved_by.label,
+                    TNI_SIGNOFF_SLOTS.approved_by.roleLine,
+                    approvedBy
+                  )}
                 </td>
               </tr>
             </table>
@@ -482,6 +672,67 @@ function TniPageInner() {
     }
   }
 
+  async function buildSignoffFromKey(
+    key: string,
+    fallback?: JdSignoff
+  ): Promise<JdSignoff | null> {
+    if (!profile || !key) return null;
+    if (key === SELF_SIGNOFF) {
+      return {
+        userId: profile.uid,
+        name: (profile.displayName || "").trim() || "Current user",
+        ...(profile.employeeId ? { employeeId: profile.employeeId } : {}),
+        designation: ROLE_LABELS[profile.role] || profile.role,
+        status: "pending",
+      };
+    }
+    if (key.startsWith("user:")) {
+      const uid = key.slice(5);
+      const user = qaUsers.find((u) => u.uid === uid);
+      if (user) {
+        const linkedEmp = employees.find((e) => e.userId === uid);
+        return {
+          userId: uid,
+          name: user.displayName,
+          designation: ROLE_LABELS[user.role] || user.role,
+          ...(linkedEmp ? { employeeId: linkedEmp.id } : {}),
+          status: "pending",
+        };
+      }
+      if (fallback?.userId === uid) {
+        return { ...fallback, status: fallback.status || "pending" };
+      }
+      if (uid) {
+        return {
+          userId: uid,
+          name: fallback?.name || "QA",
+          designation: fallback?.designation,
+          status: "pending",
+        };
+      }
+      return null;
+    }
+    if (key.startsWith("emp:")) {
+      const empId = key.slice(4);
+      const picked = employees.find((e) => e.id === empId);
+      if (picked) {
+        const uid = picked.userId || (await resolveLinkedUserUid(picked.id));
+        return {
+          employeeId: picked.id,
+          name: employeeFullName(picked),
+          designation: picked.designation,
+          ...(uid ? { userId: uid } : {}),
+          status: "pending",
+        };
+      }
+      if (fallback?.employeeId === empId) {
+        return { ...fallback, status: fallback.status || "pending" };
+      }
+      return null;
+    }
+    return null;
+  }
+
   async function handleSubmit() {
     if (!actor || !profile) return;
     if (!employeeId) {
@@ -510,6 +761,27 @@ function TniPageInner() {
 
     setBusy(true);
     try {
+      const previous = editingId ? records.find((r) => r.id === editingId) : undefined;
+      const preparedBySignoff = await buildSignoffFromKey(
+        preparedByKey || SELF_SIGNOFF,
+        previous?.preparedBySignoff
+      );
+      if (!preparedBySignoff) {
+        toast.error("Select who prepares this TNI");
+        return;
+      }
+      const approvedBySignoff = await buildSignoffFromKey(
+        approvedByKey,
+        previous?.approvedBySignoff
+      );
+      if (!approvedBySignoff) {
+        toast.error("Select Head-QA / designee for Approved By");
+        return;
+      }
+      if (sameJdSignoffPerson(preparedBySignoff, approvedBySignoff)) {
+        toast.error("Prepared By and Approved By must be different people");
+        return;
+      }
       const payload = {
         employeeId,
         departmentId: dept,
@@ -520,13 +792,35 @@ function TniPageInner() {
             topic: n.topic.trim(),
             priority: n.priority,
             rationale: n.rationale.trim(),
-            status: "identified",
+            status: "identified" as const,
           };
           if (n.sopId) item.sopId = n.sopId;
           if (n.targetCompletionDate) item.targetCompletionDate = n.targetCompletionDate;
           return item;
         }),
+        preparedBySignoff,
+        approvedBySignoff,
       };
+
+      const willNotify: string[] = [];
+      const missingLogin: string[] = [];
+      const track = (changed: boolean, name: string, hasUid: boolean) => {
+        if (!changed || !name) return;
+        if (hasUid) willNotify.push(name);
+        else missingLogin.push(name);
+      };
+      track(
+        !previous || !sameJdSignoffPerson(previous.preparedBySignoff, preparedBySignoff),
+        preparedBySignoff.name || "",
+        Boolean(preparedBySignoff.userId)
+      );
+      track(
+        !previous || !sameJdSignoffPerson(previous.approvedBySignoff, approvedBySignoff),
+        approvedBySignoff.name || "",
+        Boolean(approvedBySignoff.userId)
+      );
+      const uniqueNotified = [...new Set(willNotify)];
+      const uniqueMissing = [...new Set(missingLogin)];
 
       if (editingId) {
         const tni = await updateTNI(editingId, payload, profile.uid);
@@ -536,11 +830,24 @@ function TniPageInner() {
         } catch (syncErr) {
           console.error("[TNI] SOP assign after update failed:", syncErr);
         }
-        toast.success(`TNI updated (${tni.id})`);
+        toast.success(
+          uniqueNotified.length
+            ? `TNI updated · notified ${uniqueNotified.join(", ")}`
+            : `TNI updated (${tni.id})`
+        );
       } else {
         const tni = await createTNI(payload, profile.uid);
         await createTniLifecycle(employeeId, tni.id, actor);
-        toast.success(`TNI submitted (${tni.id})`);
+        toast.success(
+          uniqueNotified.length
+            ? `TNI submitted · notified ${uniqueNotified.join(", ")}`
+            : `TNI submitted (${tni.id})`
+        );
+      }
+      for (const name of uniqueMissing) {
+        toast.warning(
+          `${name} has no login account, so a notification could not be sent`
+        );
       }
 
       await loadData();
@@ -569,6 +876,8 @@ function TniPageInner() {
         targetCompletionDate: n.targetCompletionDate,
       }))
     );
+    setPreparedByKey(pickerValueForSignoff(record.preparedBySignoff, profile?.uid));
+    setApprovedByKey(pickerValueForSignoff(record.approvedBySignoff, profile?.uid));
   }
 
   async function handleDelete(id: string) {
@@ -588,6 +897,31 @@ function TniPageInner() {
     try {
       await approveTNI(record.id, profile.uid);
       toast.success("TNI approved");
+      await loadData();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Approval failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleAcknowledgeSignoff(
+    record: TrainingNeedIdentification,
+    slot: "prepared_by" | "approved_by"
+  ) {
+    if (!profile) return;
+    setBusy(true);
+    try {
+      await approveTniSignoffAssignment(
+        record.id,
+        {
+          uid: profile.uid,
+          name: profile.displayName,
+          employeeId: profile.employeeId,
+        },
+        slot
+      );
+      toast.success("Approved — electronically computer-generated signature added");
       await loadData();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Approval failed");
@@ -616,6 +950,8 @@ function TniPageInner() {
         rationale: n.rationale,
         targetCompletionDate: n.targetCompletionDate,
       })),
+      preparedBy: record.preparedBySignoff,
+      approvedBy: record.approvedBySignoff,
     });
   }
 
@@ -675,16 +1011,31 @@ function TniPageInner() {
                       <SelectValue placeholder="Select employee" />
                     </SelectTrigger>
                     <SelectContent>
-                      {(editingId
-                        ? scopedEmployees.filter((e) => e.id === employeeId)
-                        : eligible.length
-                          ? eligible
-                          : scopedEmployees
-                      ).map((e) => (
-                        <SelectItem key={e.id} value={e.id}>
-                          {e.firstName} {e.lastName} · {e.employeeCode}
-                        </SelectItem>
-                      ))}
+                      {(() => {
+                        const options = editingId
+                          ? scopedEmployees.filter((e) => e.id === employeeId)
+                          : eligible.length
+                            ? eligible
+                            : scopedEmployees;
+                        const missing =
+                          employeeId && !options.some((e) => e.id === employeeId)
+                            ? employees.find((e) => e.id === employeeId)
+                            : undefined;
+                        return (
+                          <>
+                            {missing && (
+                              <SelectItem value={missing.id}>
+                                {missing.firstName} {missing.lastName} · {missing.employeeCode}
+                              </SelectItem>
+                            )}
+                            {options.map((e) => (
+                              <SelectItem key={e.id} value={e.id}>
+                                {e.firstName} {e.lastName} · {e.employeeCode}
+                              </SelectItem>
+                            ))}
+                          </>
+                        );
+                      })()}
                     </SelectContent>
                   </Select>
                   {!editingId && eligible.length === 0 && (
@@ -707,6 +1058,11 @@ function TniPageInner() {
                       <SelectValue placeholder="Select JD" />
                     </SelectTrigger>
                     <SelectContent>
+                      {jdId && !employeeJds.some((j) => j.id === jdId) && (
+                        <SelectItem value={jdId}>
+                          {jds.find((j) => j.id === jdId)?.title || jdId}
+                        </SelectItem>
+                      )}
                       {employeeJds.map((j) => (
                         <SelectItem key={j.id} value={j.id}>
                           {j.title}
@@ -791,6 +1147,75 @@ function TniPageInner() {
                 </div>
               ))}
 
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <Label>Prepared By</Label>
+                  <Select value={preparedByKey || undefined} onValueChange={setPreparedByKey}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select preparer" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={SELF_SIGNOFF}>
+                        Me ({profile?.displayName || "current user"})
+                      </SelectItem>
+                      {extraPreparedItem && (
+                        <SelectItem value={extraPreparedItem.value}>
+                          {extraPreparedItem.label}
+                        </SelectItem>
+                      )}
+                      {signoffEmployees.map((e) => (
+                        <SelectItem key={e.id} value={`emp:${e.id}`}>
+                          {employeeFullName(e)} · {e.employeeCode}
+                          {e.designation ? ` · ${e.designation}` : ""}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    Department Training Coordinator/HOD. They Approve, then their
+                    e-signature appears on the TNI.
+                  </p>
+                </div>
+                <div className="space-y-2">
+                  <Label>Approved By</Label>
+                  <Select value={approvedByKey || undefined} onValueChange={setApprovedByKey}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select Head-QA / designee" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={SELF_SIGNOFF}>
+                        Me ({profile?.displayName || "current user"})
+                      </SelectItem>
+                      {extraApprovedItem && extraApprovedItem.value !== SELF_SIGNOFF && (
+                        <SelectItem value={extraApprovedItem.value}>
+                          {extraApprovedItem.label}
+                        </SelectItem>
+                      )}
+                      {qaPickerUsers.map((u) => (
+                        <SelectItem key={u.uid} value={`user:${u.uid}`}>
+                          {u.displayName} · {ROLE_LABELS[u.role] || u.role}
+                        </SelectItem>
+                      ))}
+                      {approvedByEmployees.map((e) => (
+                        <SelectItem key={e.id} value={`emp:${e.id}`}>
+                          {employeeFullName(e)} · {e.employeeCode}
+                          {e.designation ? ` · ${e.designation}` : ""}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    Head-Quality Assurance/Designee. They Approve, then their
+                    e-signature appears on the TNI.
+                  </p>
+                  {qaUsers.length === 0 && (
+                    <p className="text-xs text-amber-700">
+                      No QA login accounts found. You can still pick an employee as designee.
+                    </p>
+                  )}
+                </div>
+              </div>
+
               <div className="flex flex-wrap gap-2">
                 <Button type="button" variant="outline" onClick={addNeed}>
                   <Plus className="mr-2 h-4 w-4" />
@@ -840,10 +1265,25 @@ function TniPageInner() {
               visibleRecords.map((record) => {
                 const emp = employees.find((e) => e.id === record.employeeId);
                 const linkedJd = jds.find((j) => j.id === record.jdId);
+                const pendingForMe = myPendingSignoffs.filter((row) => row.tniId === record.id);
+                const highlighted = acknowledgeFromUrl === record.id;
+                const signoffLine = (label: string, signoff?: JdSignoff) =>
+                  signoff?.name ? (
+                    <p className="text-xs text-muted-foreground">
+                      {label}:{" "}
+                      <span className="font-medium text-foreground">{signoff.name}</span>
+                      {signoff.status === "acknowledged"
+                        ? ` · signed ${formatDateForPrint(signoff.acknowledgedAt)}`
+                        : " · pending"}
+                    </p>
+                  ) : null;
                 return (
                   <div
                     key={record.id}
-                    className="flex flex-wrap items-start justify-between gap-3 rounded-md border p-3"
+                    id={`tni-${record.id}`}
+                    className={`flex flex-wrap items-start justify-between gap-3 rounded-md border p-3 ${
+                      highlighted ? "border-primary ring-2 ring-primary/30" : ""
+                    }`}
                   >
                     <div className="space-y-1">
                       <div className="flex flex-wrap items-center gap-2">
@@ -860,6 +1300,8 @@ function TniPageInner() {
                       <p className="text-xs text-muted-foreground">
                         JD: {linkedJd?.title || record.jdId} · {record.needs.length} need(s)
                       </p>
+                      {signoffLine("Prepared by", record.preparedBySignoff)}
+                      {signoffLine("Approved by", record.approvedBySignoff)}
                       {record.approvedAt && (
                         <p className="text-xs text-muted-foreground">
                           Approved {formatDateForPrint(record.approvedAt)}
@@ -876,7 +1318,22 @@ function TniPageInner() {
                         <Printer className="mr-1 h-3.5 w-3.5" />
                         Print
                       </Button>
-                      {canApprove && record.status === "submitted" && (
+                      {pendingForMe.map((row) => (
+                        <Button
+                          key={row.slot}
+                          type="button"
+                          size="sm"
+                          disabled={busy}
+                          onClick={() => void handleAcknowledgeSignoff(record, row.slot)}
+                        >
+                          <FileSignature className="mr-1 h-3.5 w-3.5" />
+                          {row.actionLabel} {row.label}
+                        </Button>
+                      ))}
+                      {canApprove &&
+                        record.status === "submitted" &&
+                        !record.approvedBySignoff?.employeeId &&
+                        !record.approvedBySignoff?.userId && (
                         <Button
                           type="button"
                           variant="secondary"
@@ -885,7 +1342,7 @@ function TniPageInner() {
                           onClick={() => void handleApprove(record)}
                         >
                           <CheckCircle2 className="mr-1 h-3.5 w-3.5" />
-                          Approve
+                          Approve TNI
                         </Button>
                       )}
                       {canWrite && (

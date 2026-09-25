@@ -116,6 +116,18 @@ export function canApproveForm(doc: OjtFormDocument, config: OjtFormApprovalConf
   return missingRequiredSignoffs(doc, { ...config, requireApprovedByQa: false }).length === 0;
 }
 
+/** Sign-offs must follow the required order: Prepare, then HOD, then QA. */
+export function canSignFormRole(
+  doc: OjtFormDocument,
+  config: OjtFormApprovalConfig,
+  role: OjtFormSignoffRole
+): boolean {
+  const required = requiredRolesForApproval(config);
+  const index = required.indexOf(role);
+  if (index <= 0) return true;
+  return required.slice(0, index).every((prior) => hasAcceptedSignoff(doc, prior));
+}
+
 export function assertFormUnlocked(doc: OjtFormDocument | null, action: string): void {
   if (doc?.locked) {
     throw new Error(

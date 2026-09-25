@@ -21,6 +21,7 @@ import {
   TodaysTasks,
 } from "@/components/dashboard/panels";
 import { MiniCalendar } from "@/components/dashboard/mini-calendar";
+import { JdHandoverPendingCard } from "@/components/jd/jd-handover-pending";
 import { roleQuickActions } from "@/lib/dashboard/data";
 import {
   buildDashboardView,
@@ -99,6 +100,8 @@ export function DashboardShell({ role, title, subtitle, children }: DashboardShe
           <p className="text-sm text-muted-foreground md:text-base">{subtitle}</p>
         </div>
       </MotionItem>
+
+      <JdHandoverPendingCard />
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {view.roleStats.map((s) => (

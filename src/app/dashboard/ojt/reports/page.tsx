@@ -256,7 +256,7 @@ export default function OjtReportsPage() {
       return {
         type: "training_matrix" as ReportType,
         title: "Monthly OJT Planner",
-        description: "S = selection, E = execution",
+        description: "Selection months and execution months for each topic",
         generatedAt: new Date().toISOString(),
         columns: [
           { key: "topic", label: "Training Topic" },
@@ -266,24 +266,14 @@ export default function OjtReportsPage() {
           { key: "trainer", label: "Trainer" },
           { key: "status", label: "Status" },
         ],
-        rows: plans.flatMap((p, index) => [
-          {
-            topic: p.trainingTopic,
-            sop: p.referenceDocumentNumber || p.sopNumber || "NA",
-            selection: "S",
-            execution: p.selectionMonths.map(monthName).join(", "),
-            trainer: p.trainerName || "",
-            status: `${index + 1}`,
-          },
-          {
-            topic: "",
-            sop: "",
-            selection: "E",
-            execution: p.executionMonths.map(monthName).join(", "),
-            trainer: "",
-            status: p.status,
-          },
-        ]),
+        rows: plans.map((p) => ({
+          topic: p.trainingTopic,
+          sop: p.referenceDocumentNumber || p.sopNumber || "NA",
+          selection: p.selectionMonths.map(monthName).join(", ") || "—",
+          execution: p.executionMonths.map(monthName).join(", ") || "—",
+          trainer: p.trainerName || "",
+          status: p.status,
+        })),
         kpis: [{ label: "Planner rows", value: plans.length }],
         charts: [],
       } satisfies ReportDataset;

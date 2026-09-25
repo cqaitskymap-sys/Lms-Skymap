@@ -70,6 +70,7 @@ import { QA_OJT_SEED_TOPICS, normalizeSopNumber } from "@/lib/ojt/seed-topics";
 import {
   assertFormUnlocked,
   canApproveForm,
+  canSignFormRole,
   emptyFormDocument,
   formApprovalsFor,
   formDocumentId,
@@ -80,6 +81,11 @@ import { getSopBundle, listSopsDetailed } from "@/lib/services/sops";
 import { createNotification, notifyEmployee } from "@/lib/services/notifications";
 import { recordAuditEvent } from "@/lib/services/audit-logs";
 import { isDemoMode } from "@/lib/demo/data";
+import {
+  assertFirestoreReadsOpen,
+  isResourceExhausted,
+  noteFirestoreExhausted,
+} from "@/lib/firebase/read-gate";
 
 function firestoreFields(snap: { data: () => unknown }): Record<string, unknown> {
   const data = snap.data();
@@ -100,7 +106,55 @@ function isPermissionDenied(err: unknown): boolean {
   return code === "permission-denied" || /insufficient permissions/i.test(String(err));
 }
 
+const READ_CACHE_MS = 20_000;
+const readCache = new Map<string, { at: number; value: unknown }>();
+const readInflight = new Map<string, Promise<unknown>>();
+
+function takeCache<T>(key: string): T | undefined {
+  const hit = readCache.get(key);
+  if (!hit) return undefined;
+  if (Date.now() - hit.at > READ_CACHE_MS) {
+    readCache.delete(key);
+    return undefined;
+  }
+  return hit.value as T;
+}
+
+function putCache(key: string, value: unknown) {
+  readCache.set(key, { at: Date.now(), value });
+}
+
+function dropCache(prefix: string) {
+  for (const key of readCache.keys()) {
+    if (key.startsWith(prefix)) readCache.delete(key);
+  }
+}
+
+async function cachedRead<T>(key: string, loader: () => Promise<T>): Promise<T> {
+  const hit = takeCache<T>(key);
+  if (hit !== undefined) return hit;
+  const pending = readInflight.get(key) as Promise<T> | undefined;
+  if (pending) return pending;
+  const promise = loader()
+    .then((value) => {
+      putCache(key, value);
+      readInflight.delete(key);
+      return value;
+    })
+    .catch((err) => {
+      readInflight.delete(key);
+      throw err;
+    });
+  readInflight.set(key, promise);
+  return promise;
+}
+
 function rethrowOjtPermission(err: unknown, collectionHint?: string): never {
+  if (isResourceExhausted(err)) {
+    throw new Error(
+      "Firestore is rate-limiting OJT reads. Wait a minute, then reload. Month ticks are saved together so this plan is not read again on every click."
+    );
+  }
   if (isPermissionDenied(err)) {
     throw new Error(
       collectionHint
@@ -115,8 +169,10 @@ async function ojtGetDocs(
   q: Parameters<typeof getDocs>[0]
 ): Promise<Awaited<ReturnType<typeof getDocs>>> {
   try {
+    assertFirestoreReadsOpen();
     return await getDocs(q);
   } catch (err) {
+    noteFirestoreExhausted(err);
     return rethrowOjtPermission(err);
   }
 }
@@ -125,8 +181,10 @@ async function ojtGetDoc(
   ref: Parameters<typeof getDoc>[0]
 ): Promise<Awaited<ReturnType<typeof getDoc>>> {
   try {
+    assertFirestoreReadsOpen();
     return await getDoc(ref);
   } catch (err) {
+    noteFirestoreExhausted(err);
     return rethrowOjtPermission(err);
   }
 }
@@ -254,6 +312,7 @@ async function saveTopic(topic: OjtTopic): Promise<void> {
     return;
   }
   await ojtSetDoc(doc(db, COLLECTIONS.ojtTopics, topic.id), sanitize(topic));
+  putCache(`ojt_topics/${topic.id}`, topic);
   notifyOjtUpdated();
 }
 
@@ -267,6 +326,8 @@ async function savePlan(plan: OjtPlan): Promise<void> {
     return;
   }
   await ojtSetDoc(doc(db, COLLECTIONS.ojtPlans, plan.id), sanitize(plan));
+  putCache(`ojt_plans/${plan.id}`, plan);
+  dropCache("ojt_plans_list/");
   notifyOjtUpdated();
 }
 
@@ -295,6 +356,7 @@ async function saveFormDocument(docRow: OjtFormDocument): Promise<void> {
   try {
     // Use setDoc directly so permission-denied can fall back to the local store.
     await setDoc(doc(db, COLLECTIONS.ojtFormDocuments, docRow.id), sanitize(docRow));
+    putCache(`ojt_forms/${docRow.id}`, docRow);
     notifyOjtUpdated();
   } catch (err) {
     if (!isPermissionDenied(err)) return rethrowOjtPermission(err, COLLECTIONS.ojtFormDocuments);
@@ -319,9 +381,11 @@ export async function getOjtSettings(): Promise<OjtSettings> {
     return mergeOjtSettings(readOjtStore().settings ?? fallback);
   }
 
-  const snap = await ojtGetDoc(doc(db, COLLECTIONS.ojtSettings, "global"));
-  if (!snap.exists()) return fallback;
-  return mergeOjtSettings({ id: snap.id, ...firestoreFields(snap) } as OjtSettings);
+  return cachedRead("ojt_settings/global", async () => {
+    const snap = await ojtGetDoc(doc(db, COLLECTIONS.ojtSettings, "global"));
+    if (!snap.exists()) return fallback;
+    return mergeOjtSettings({ id: snap.id, ...firestoreFields(snap) } as OjtSettings);
+  });
 }
 
 export async function updateOjtSettings(
@@ -342,6 +406,7 @@ export async function updateOjtSettings(
     writeOjtStore(store);
   } else {
     await ojtSetDoc(doc(db, COLLECTIONS.ojtSettings, "global"), sanitize(next));
+    putCache("ojt_settings/global", next);
     notifyOjtUpdated();
   }
   await audit({
@@ -440,8 +505,10 @@ export async function getOjtTopic(id: string): Promise<OjtTopic | null> {
     const row = readOjtStore().topics.find((t) => t.id === id);
     return row ? cloneRow(row) : null;
   }
-  const snap = await ojtGetDoc(doc(db, COLLECTIONS.ojtTopics, id));
-  return snap.exists() ? ({ id: snap.id, ...firestoreFields(snap) } as OjtTopic) : null;
+  return cachedRead(`ojt_topics/${id}`, async () => {
+    const snap = await ojtGetDoc(doc(db, COLLECTIONS.ojtTopics, id));
+    return snap.exists() ? ({ id: snap.id, ...firestoreFields(snap) } as OjtTopic) : null;
+  });
 }
 
 type CurrentSopSnapshot = {
@@ -677,8 +744,10 @@ export async function getOjtPlan(id: string): Promise<OjtPlan | null> {
     const row = readOjtStore().plans.find((p) => p.id === id);
     return row ? cloneRow(row) : null;
   }
-  const snap = await ojtGetDoc(doc(db, COLLECTIONS.ojtPlans, id));
-  return snap.exists() ? ({ id: snap.id, ...firestoreFields(snap) } as OjtPlan) : null;
+  return cachedRead(`ojt_plans/${id}`, async () => {
+    const snap = await ojtGetDoc(doc(db, COLLECTIONS.ojtPlans, id));
+    return snap.exists() ? ({ id: snap.id, ...firestoreFields(snap) } as OjtPlan) : null;
+  });
 }
 
 /** Super Admin only — removes a yearly planner row and its OJT records. */
@@ -694,6 +763,8 @@ export async function deleteOjtPlan(id: string, actor: OjtActor): Promise<void> 
     writeOjtStore(store);
   } else {
     const assignments = await listOjtAssignments({ planId: id });
+    dropCache(`ojt_plans/${id}`);
+    dropCache("ojt_plans_list/");
     await ojtDeleteDoc(doc(db, COLLECTIONS.ojtPlans, id));
     await Promise.all(
       assignments.map((a) => ojtDeleteDoc(doc(db, COLLECTIONS.ojtAssignments, a.id)))
@@ -717,19 +788,21 @@ export async function upsertOjtPlan(
     topicId: string;
   },
   actor: OjtActor,
-  opts?: { allowWhenLocked?: boolean }
+  opts?: { allowWhenLocked?: boolean; silent?: boolean }
 ): Promise<OjtPlan> {
   const topic = await getOjtTopic(data.topicId);
   if (!topic) throw new Error("OJT topic not found");
   if (!topic.isActive && !data.id) throw new Error("Cannot plan an inactive OJT topic");
 
   const settings = await getOjtSettings();
+  const localRow = data.id && data.createdAt ? (data as OjtPlan) : undefined;
   const existing =
-    data.id
+    localRow ??
+    (data.id
       ? await getOjtPlan(data.id)
       : (await listOjtPlans({ year: data.year, departmentId: data.departmentId })).find(
           (p) => p.topicId === data.topicId
-        );
+        ));
 
   if (!opts?.allowWhenLocked) {
     const form = await getOjtFormDocument("planner", data.year, data.departmentId);
@@ -768,7 +841,17 @@ export async function upsertOjtPlan(
     updatedAt: now,
     updatedBy: actor.uid,
   };
-  await savePlan(plan);
+  if (opts?.silent) {
+    if (preferOjtLocal()) {
+      await savePlan(plan);
+    } else {
+      await ojtSetDoc(doc(db, COLLECTIONS.ojtPlans, plan.id), sanitize(plan));
+      putCache(`ojt_plans/${plan.id}`, plan);
+      dropCache("ojt_plans_list/");
+    }
+  } else {
+    await savePlan(plan);
+  }
   await audit({
     action: existing ? "update" : "create",
     resourceType: "ojt_plan",
@@ -789,8 +872,15 @@ export async function seedPlannerFromTopics(
   actor: OjtActor
 ): Promise<OjtPlan[]> {
   const topics = (await listOjtTopics(department.id)).filter((t) => t.isActive);
+  const existing = await listOjtPlans({ year, departmentId: department.id });
   const plans: OjtPlan[] = [];
+  let created = 0;
   for (const topic of topics) {
+    const row = existing.find((p) => p.topicId === topic.id);
+    if (row) {
+      plans.push(row);
+      continue;
+    }
     plans.push(
       await upsertOjtPlan(
         {
@@ -799,11 +889,14 @@ export async function seedPlannerFromTopics(
           departmentName: department.name,
           topicId: topic.id,
         },
-        actor
+        actor,
+        { silent: true }
       )
     );
+    created += 1;
   }
-  return plans;
+  if (created > 0) notifyOjtUpdated();
+  return plans.sort((a, b) => a.trainingTopic.localeCompare(b.trainingTopic));
 }
 
 export async function listOjtAssignments(
@@ -1016,22 +1109,24 @@ export async function setPlanEmployeeApplicability(params: {
     });
   }
 
+  let assignment: OjtAssignment | null = null;
+  if (params.applicability === "selected") {
+    assignment = await createOjtAssignmentForEmployee({
+      plan,
+      employee: params.employee,
+      actor: params.actor,
+      trainerId: params.trainerId,
+      trainerName: params.trainerName,
+    });
+  }
+
   const nextPlan = await upsertOjtPlan(
     { ...plan, employeeSelections: selections, year: plan.year, departmentId: plan.departmentId, topicId: plan.topicId },
     params.actor,
     { allowWhenLocked: true }
   );
 
-  let assignment: OjtAssignment | null = null;
-  if (params.applicability === "selected") {
-    assignment = await createOjtAssignmentForEmployee({
-      plan: nextPlan,
-      employee: params.employee,
-      actor: params.actor,
-      trainerId: params.trainerId,
-      trainerName: params.trainerName,
-    });
-  } else {
+  if (params.applicability !== "selected") {
     const open = existingAsg && ["selected", "draft", "assigned"].includes(existingAsg.status) ? existingAsg : null;
     if (open) {
       assignment = await cancelOjtAssignment(open.id, params.actor, "Marked not applicable on training matrix");
@@ -1247,8 +1342,12 @@ export async function submitOjtEvaluation(
   if (working.status !== assignment.status) {
     assertTransition(assignment.status, "in_progress");
   }
-  const nextStatus = statusAfterTrainerCompletion(working, passed);
-  assertTransition(working.status, nextStatus);
+  const holdForTrainerSignoff = assignment.requireTrainerSignoff !== false;
+  const completedStatus = statusAfterTrainerCompletion(working, passed);
+  const nextStatus = holdForTrainerSignoff ? working.status : completedStatus;
+  if (!holdForTrainerSignoff) {
+    assertTransition(working.status, nextStatus);
+  }
   const attempt = {
     id: generateId("ojt_att"),
     attemptNumber: assignment.attemptNumber || 1,
@@ -1958,9 +2057,13 @@ export async function getOjtFormDocument(
     return row ? cloneRow(row) : null;
   }
   try {
-    const snap = await getDoc(doc(db, COLLECTIONS.ojtFormDocuments, id));
-    return snap.exists() ? ({ id: snap.id, ...firestoreFields(snap) } as OjtFormDocument) : null;
+    return await cachedRead(`ojt_forms/${id}`, async () => {
+      assertFirestoreReadsOpen();
+      const snap = await getDoc(doc(db, COLLECTIONS.ojtFormDocuments, id));
+      return snap.exists() ? ({ id: snap.id, ...firestoreFields(snap) } as OjtFormDocument) : null;
+    });
   } catch (err) {
+    if (isResourceExhausted(err)) return rethrowOjtPermission(err);
     if (!isPermissionDenied(err)) throw err;
     const row = readOjtStore().formDocuments.find((d) => d.id === id);
     return row ? cloneRow(row) : null;
@@ -2074,6 +2177,9 @@ export async function signOjtFormDocument(params: {
     throw new Error("This controlled form is already approved. Create a revision to change it.");
   }
   const config = formApprovalsFor(params.kind, settings);
+  if (params.action !== "rejected" && !canSignFormRole(row, config, params.role)) {
+    throw new Error("Earlier sign-offs on this form are still pending");
+  }
   if (params.action === "approved" && params.role === "approved_by_qa" && !canApproveForm(row, config)) {
     throw new Error("Required preparation/checking/verification sign-offs are incomplete");
   }

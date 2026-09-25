@@ -106,7 +106,7 @@ export async function fetchDashboardSnapshot(
     role === "super_admin" ||
     role === "hr" ||
     role === "qa" ||
-    role === "dept_head" ||
+    role === "department_head" ||
     role === "trainer";
   const canReadAudit =
     role === "super_admin" || role === "hr" || role === "qa";

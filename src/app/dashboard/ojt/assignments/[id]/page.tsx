@@ -15,6 +15,7 @@ import {
   deleteOjtAssignment,
   deleteOjtAttachment,
   getOjtAssignment,
+  getOjtSettings,
   listOjtEvaluationCriteria,
   listOjtStaffOptions,
   markRetrainingRequired,
@@ -30,7 +31,7 @@ import {
 import { toOjtActor } from "@/lib/ojt/actor";
 import { OJT_UPDATED_EVENT } from "@/lib/ojt/demo-store";
 import { calendarDateToIso, dateFallsInMonth, OJT_ACK_STATEMENT, monthName } from "@/lib/ojt/constants";
-import { canTransition, displayOjtStatus, evaluationDidFail } from "@/lib/ojt/workflow";
+import { canTransition, criterionScaleForModel, displayOjtStatus, evaluationDidFail } from "@/lib/ojt/workflow";
 import { formatDate, formatDateTime } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -51,7 +52,7 @@ import { AdminEditButton } from "@/components/auth/admin-edit-button";
 import { OjtAssignmentEditDialog } from "@/components/ojt/ojt-admin-dialogs";
 import { OjtNextStepBanner, OjtProgress } from "@/components/ojt/ojt-progress";
 import { ojtStatusLabel } from "@/lib/ojt/next-action";
-import type { OjtAssignment, OjtCriterionScore, OjtEvaluationCriterion } from "@/types/ojt";
+import type { OjtAssignment, OjtCompetencyScoringModel, OjtCriterionScore, OjtEvaluationCriterion } from "@/types/ojt";
 
 export default function OjtAssignmentDetailPage({
   params,
@@ -73,6 +74,7 @@ export default function OjtAssignmentDetailPage({
   const [retrainReason, setRetrainReason] = useState("");
   const [agreed, setAgreed] = useState(false);
   const [scores, setScores] = useState<OjtCriterionScore[]>([]);
+  const [scoringModel, setScoringModel] = useState<OjtCompetencyScoringModel>("both");
   const [exec, setExec] = useState({
     actualExecutionDate: "",
     startTime: "",
@@ -91,14 +93,17 @@ export default function OjtAssignmentDetailPage({
     if (!opts?.silent) setLoading(true);
     try {
       const needsStaff = profile?.role && profile.role !== "employee";
-      const [asg, crit, staff] = await Promise.all([
+      const [asg, crit, staff, settings] = await Promise.all([
         getOjtAssignment(id),
         listOjtEvaluationCriteria(),
         needsStaff ? listOjtStaffOptions() : Promise.resolve([]),
+        getOjtSettings(),
       ]);
       setRow(asg);
       setCriteria(crit.filter((c) => c.isActive));
       setUsers(staff);
+      const model = settings.competencyScoringModel || "both";
+      setScoringModel(model);
       if (asg) {
         setExec({
           actualExecutionDate: asg.actualExecutionDate?.slice(0, 10) || "",
@@ -121,7 +126,7 @@ export default function OjtAssignmentDetailPage({
                 criterionId: c.id,
                 label: c.label,
                 result: "pass" as const,
-                rating: c.ratingScale === "1-5" ? 3 : undefined,
+                rating: criterionScaleForModel(c.ratingScale, model) === "1-5" ? 3 : undefined,
               }
             );
           })
@@ -497,7 +502,7 @@ export default function OjtAssignmentDetailPage({
                   <p className="font-medium">{c.label}</p>
                   <p className="text-xs text-muted-foreground">{c.description}</p>
                   <div className="mt-2 flex flex-wrap gap-3">
-                    {c.ratingScale === "1-5" ? (
+                    {criterionScaleForModel(c.ratingScale, scoringModel) === "1-5" ? (
                       <Select
                         value={String(score?.rating ?? 3)}
                         onValueChange={(v) =>
@@ -574,7 +579,14 @@ export default function OjtAssignmentDetailPage({
                 disabled={busy}
                 onClick={() => {
                   if (!actor) return;
-                  const failed = evaluationDidFail(scores);
+                  const scored = scores.map((score) => {
+                    const criterion = criteria.find((c) => c.id === score.criterionId);
+                    const scale = criterion
+                      ? criterionScaleForModel(criterion.ratingScale, scoringModel)
+                      : "pass_fail";
+                    return scale === "pass_fail" ? { ...score, rating: undefined } : score;
+                  });
+                  const failed = evaluationDidFail(scored);
                   void run(async () => {
                     if (exec.actualExecutionDate) {
                       await recordOjtExecution(
@@ -596,17 +608,19 @@ export default function OjtAssignmentDetailPage({
                     const asg = await submitOjtEvaluation(
                       row.id,
                       {
-                        criteria: scores,
+                        criteria: scored,
                         overallResult: failed ? "fail" : "pass",
                         comments,
                       },
                       actor
                     );
-                    await trainerSignOffOjt(asg.id, comments, actor);
+                    if (row.requireTrainerSignoff !== false) {
+                      await trainerSignOffOjt(asg.id, comments, actor);
+                    }
                   }, failed ? "Recorded as failed" : "Evaluation submitted");
                 }}
               >
-                Save scores & sign as trainer
+                {row.requireTrainerSignoff !== false ? "Save scores & sign as trainer" : "Save scores"}
               </Button>
             </div>
           </CardContent>

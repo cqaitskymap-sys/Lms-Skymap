@@ -59,10 +59,16 @@ export function writeOjtStore(store: OjtStore): void {
   notifyOjtUpdated();
 }
 
+let notifyTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** Coalesce bursts (month ticks, topic seed) into one reload. */
 export function notifyOjtUpdated(): void {
-  if (typeof window !== "undefined") {
+  if (typeof window === "undefined") return;
+  if (notifyTimer) clearTimeout(notifyTimer);
+  notifyTimer = setTimeout(() => {
+    notifyTimer = null;
     window.dispatchEvent(new CustomEvent(OJT_UPDATED_EVENT));
-  }
+  }, 400);
 }
 
 export function preferOjtLocal(): boolean {

@@ -8,6 +8,7 @@ import {
   doc,
   getDoc,
   getDocs,
+  limit,
   orderBy,
   query,
   setDoc,
@@ -15,7 +16,7 @@ import {
   where,
 } from "firebase/firestore/lite";
 import { db, COLLECTIONS } from "@/lib/firebase/client";
-import type { Notification } from "@/types";
+import type { Notification, UserProfile } from "@/types";
 import { generateId, nowISO } from "@/lib/services/helpers";
 import { isDemoMode } from "@/lib/demo/data";
 import {
@@ -28,6 +29,10 @@ import {
   readLifecycleStore,
   writeLifecycleStore,
 } from "@/lib/lifecycle/demo-store";
+import {
+  assertFirestoreReadsOpen,
+  noteFirestoreExhausted,
+} from "@/lib/firebase/read-gate";
 
 export const NOTIFICATIONS_UPDATED_EVENT = "pharma-notifications-updated";
 
@@ -53,6 +58,30 @@ export async function resolveEmployeeAuthUid(
     }
   } catch {
     /* fall through */
+  }
+  return null;
+}
+
+/** Employee record userId, or a staff/user profile linked via employeeId. */
+export async function resolveLinkedUserUid(employeeId: string): Promise<string | null> {
+  const fromEmployee = await resolveEmployeeAuthUid(employeeId);
+  if (fromEmployee) return fromEmployee;
+  try {
+    const snap = await getDocs(
+      query(
+        collection(db, COLLECTIONS.users),
+        where("employeeId", "==", employeeId),
+        limit(5)
+      )
+    );
+    for (const d of snap.docs) {
+      const data = d.data() as Pick<UserProfile, "uid" | "isActive">;
+      if (data.isActive === false) continue;
+      const uid = (data.uid || d.id || "").trim();
+      if (uid) return uid;
+    }
+  } catch {
+    /* users list may be restricted for this role */
   }
   return null;
 }
@@ -99,17 +128,33 @@ function markLocalNotificationRead(id: string, now: string): boolean {
   return found;
 }
 
+const remoteNotificationCache = new Map<string, { at: number; rows: Notification[] }>();
+const NOTIFICATION_CACHE_MS = 60_000;
+
 async function fetchRemoteNotifications(userId: string): Promise<Notification[]> {
-  const q = query(
-    collection(db, COLLECTIONS.notifications),
-    where("userId", "==", userId),
-    orderBy("createdAt", "desc")
-  );
-  const snap = await getDocs(q);
-  return snap.docs.map((d) => {
-    const data = d.data() as Omit<Notification, "id">;
-    return { ...data, id: d.id } as Notification;
-  });
+  const hit = remoteNotificationCache.get(userId);
+  if (hit && Date.now() - hit.at < NOTIFICATION_CACHE_MS) return hit.rows;
+
+  try {
+    assertFirestoreReadsOpen();
+    const q = query(
+      collection(db, COLLECTIONS.notifications),
+      where("userId", "==", userId),
+      orderBy("createdAt", "desc")
+    );
+    const snap = await getDocs(q);
+    const rows = snap.docs.map((d) => {
+      const data = d.data() as Omit<Notification, "id">;
+      return { ...data, id: d.id } as Notification;
+    });
+    remoteNotificationCache.set(userId, { at: Date.now(), rows });
+    return rows;
+  } catch (err) {
+    noteFirestoreExhausted(err);
+    if (hit) return hit.rows;
+    if (preferTrainingLocal() || isDemoMode()) return [];
+    throw err;
+  }
 }
 
 export async function getUserNotifications(userId: string): Promise<Notification[]> {
@@ -153,6 +198,7 @@ export async function createNotification(params: {
     return null;
   }
 
+  remoteNotificationCache.delete(userId);
   const id = generateId("notif");
   const now = nowISO();
   const notification: Notification = {

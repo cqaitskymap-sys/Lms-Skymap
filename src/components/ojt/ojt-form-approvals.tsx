@@ -4,11 +4,12 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
 import type { UserRole } from "@/types";
-import type { OjtFormDocument, OjtFormKind, OjtFormSignoffRole } from "@/types/ojt";
+import type { OjtFormApprovalConfig, OjtFormDocument, OjtFormKind, OjtFormSignoffRole } from "@/types/ojt";
 import { OJT_FORM_SIGNOFF_LABELS, formatOfficialDate, formatRevisionNumber } from "@/lib/ojt/constants";
-import { latestSignoff } from "@/lib/ojt/forms";
+import { canSignFormRole, formApprovalsFor, latestSignoff } from "@/lib/ojt/forms";
 import {
   createOjtFormRevision,
+  getOjtSettings,
   signOjtFormDocument,
   updateOjtFormDocumentMeta,
 } from "@/lib/services/ojt";
@@ -58,10 +59,25 @@ export function OjtFormApprovalPanel({
   const [comment, setComment] = useState("");
   const [effectiveDate, setEffectiveDate] = useState(form?.effectiveDate?.slice(0, 10) || "");
   const [revisionReason, setRevisionReason] = useState("");
+  const [approvalConfig, setApprovalConfig] = useState<OjtFormApprovalConfig | null>(null);
 
   useEffect(() => {
     setEffectiveDate(form?.effectiveDate?.slice(0, 10) || "");
   }, [form?.id, form?.effectiveDate, form?.revisionNumber]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void getOjtSettings()
+      .then((settings) => {
+        if (!cancelled) setApprovalConfig(formApprovalsFor(kind, settings));
+      })
+      .catch(() => {
+        if (!cancelled) setApprovalConfig(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [kind]);
 
   const canWrite = profile?.role ? hasPermission(profile.role, "ojt:write") : false;
   const title = kind === "planner" ? "Sign the yearly plan" : "Sign the people list";
@@ -135,6 +151,8 @@ export function OjtFormApprovalPanel({
             const labels = OJT_FORM_SIGNOFF_LABELS[role];
             const action =
               role === "prepared_by" ? "prepared" : role === "approved_by_qa" ? "approved" : "checked";
+            const priorReady =
+              !approvalConfig || !form || canSignFormRole(form, approvalConfig, role);
             return (
               <div key={role} className="rounded-lg border p-3 text-sm">
                 <p className="font-medium">{labels.title}</p>
@@ -146,7 +164,10 @@ export function OjtFormApprovalPanel({
                 ) : (
                   <p className="mt-2 text-xs text-muted-foreground">Sign & Date pending</p>
                 )}
-                {canSignRole(role, profile?.role) && !form?.locked && !signed && (
+                {canSignRole(role, profile?.role) && !form?.locked && !signed && !priorReady && (
+                  <p className="mt-2 text-xs text-muted-foreground">Waiting for the previous signature</p>
+                )}
+                {canSignRole(role, profile?.role) && !form?.locked && !signed && priorReady && (
                   <Button
                     size="sm"
                     className="mt-2"

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, Fragment } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, Fragment } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { toast } from "sonner";
@@ -67,6 +67,9 @@ export default function OjtPlannerPage() {
   const [settings, setSettings] = useState<OjtSettings | null>(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const plansRef = useRef<OjtPlan[]>([]);
+  const saveTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const dirtyRef = useRef(false);
 
   const canWrite = profile?.role ? hasPermission(profile.role, "ojt:write") : false;
   const isSuperAdmin = profile?.role === "super_admin";
@@ -74,6 +77,7 @@ export default function OjtPlannerPage() {
   const locked = Boolean(form?.locked);
 
   const refresh = useCallback(async (opts?: { silent?: boolean }) => {
+    if (opts?.silent && dirtyRef.current) return;
     if (!opts?.silent) setLoading(true);
     try {
       const dept = deptLocked || departmentId;
@@ -83,10 +87,15 @@ export default function OjtPlannerPage() {
           listOjtPlans({ year: Number(year), departmentId: dept }),
           getOjtFormDocument("planner", Number(year), dept),
         ]);
+        if (opts?.silent && dirtyRef.current) return;
+        plansRef.current = planRows;
         setPlans(planRows);
         setForm(formRow);
       } else {
-        setPlans(await listOjtPlans({ year: Number(year) }));
+        const planRows = await listOjtPlans({ year: Number(year) });
+        if (opts?.silent && dirtyRef.current) return;
+        plansRef.current = planRows;
+        setPlans(planRows);
         setForm(null);
       }
     } catch (err) {
@@ -143,28 +152,49 @@ export default function OjtPlannerPage() {
     }
   };
 
-  const patchPlan = async (plan: OjtPlan, patch: Partial<OjtPlan>) => {
+  useEffect(() => {
+    const timers = saveTimers.current;
+    return () => {
+      for (const timer of timers.values()) clearTimeout(timer);
+    };
+  }, []);
+
+  const patchPlan = (plan: OjtPlan, patch: Partial<OjtPlan>) => {
     if (!profile || !canWrite) return;
     if (locked) {
       toast.error("Approved planner is controlled. Create a revision before changing months.");
       return;
     }
-    setPlans((prev) => prev.map((p) => (p.id === plan.id ? { ...p, ...patch } : p)));
-    try {
-      await upsertOjtPlan(
-        {
-          ...plan,
-          ...patch,
-          year: plan.year,
-          departmentId: plan.departmentId,
-          topicId: plan.topicId,
-        },
-        toOjtActor(profile)
-      );
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Save failed");
-      await refresh({ silent: true });
-    }
+    const current = plansRef.current.find((p) => p.id === plan.id) ?? plan;
+    const next = { ...current, ...patch };
+    plansRef.current = plansRef.current.map((p) => (p.id === plan.id ? next : p));
+    setPlans(plansRef.current);
+    dirtyRef.current = true;
+    const pending = saveTimers.current.get(plan.id);
+    if (pending) clearTimeout(pending);
+    saveTimers.current.set(
+      plan.id,
+      setTimeout(() => {
+        saveTimers.current.delete(plan.id);
+        void upsertOjtPlan(
+          {
+            ...next,
+            year: next.year,
+            departmentId: next.departmentId,
+            topicId: next.topicId,
+          },
+          toOjtActor(profile)
+        )
+          .catch(async (err) => {
+            toast.error(err instanceof Error ? err.message : "Save failed");
+            dirtyRef.current = saveTimers.current.size > 0;
+            await refresh({ silent: true });
+          })
+          .finally(() => {
+            dirtyRef.current = saveTimers.current.size > 0;
+          });
+      }, 500)
+    );
   };
 
   const handlePrint = () => {

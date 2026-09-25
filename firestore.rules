@@ -54,6 +54,65 @@ service cloud.firestore {
         && request.resource.data[field] == currentNum(field) + 1;
     }
 
+    function isJdAbsenceHandoverAssignee() {
+      return isActive() && (
+        ('absenceHandoverUserId' in resource.data
+          && resource.data.absenceHandoverUserId == request.auth.uid)
+        || (userDoc().keys().hasAny(['employeeId'])
+          && 'absenceHandoverEmployeeId' in resource.data
+          && resource.data.absenceHandoverEmployeeId == userDoc().employeeId)
+        || ('assignedBy' in resource.data
+          && 'userId' in resource.data.assignedBy
+          && resource.data.assignedBy.userId == request.auth.uid)
+        || (userDoc().keys().hasAny(['employeeId'])
+          && 'assignedBy' in resource.data
+          && 'employeeId' in resource.data.assignedBy
+          && resource.data.assignedBy.employeeId == userDoc().employeeId)
+        || ('acceptedBy' in resource.data
+          && 'userId' in resource.data.acceptedBy
+          && resource.data.acceptedBy.userId == request.auth.uid)
+        || (userDoc().keys().hasAny(['employeeId'])
+          && 'acceptedBy' in resource.data
+          && 'employeeId' in resource.data.acceptedBy
+          && resource.data.acceptedBy.employeeId == userDoc().employeeId)
+      );
+    }
+
+    function isTniSignoffAssignee() {
+      return isActive() && (
+        ('preparedBySignoff' in resource.data
+          && 'userId' in resource.data.preparedBySignoff
+          && resource.data.preparedBySignoff.userId == request.auth.uid)
+        || (userDoc().keys().hasAny(['employeeId'])
+          && 'preparedBySignoff' in resource.data
+          && 'employeeId' in resource.data.preparedBySignoff
+          && resource.data.preparedBySignoff.employeeId == userDoc().employeeId)
+        || ('approvedBySignoff' in resource.data
+          && 'userId' in resource.data.approvedBySignoff
+          && resource.data.approvedBySignoff.userId == request.auth.uid)
+        || (userDoc().keys().hasAny(['employeeId'])
+          && 'approvedBySignoff' in resource.data
+          && 'employeeId' in resource.data.approvedBySignoff
+          && resource.data.approvedBySignoff.employeeId == userDoc().employeeId)
+      );
+    }
+
+    // Named absence-cover person may only stamp acknowledgement + e-signature fields.
+    function isJdAbsenceHandoverAck() {
+      return isJdAbsenceHandoverAssignee()
+        && resource.data.get('absenceHandoverStatus', 'pending') != 'acknowledged'
+        && request.resource.data.absenceHandoverStatus == 'acknowledged'
+        && onlyUpdating([
+          'absenceHandoverStatus',
+          'absenceHandoverAcknowledgedAt',
+          'absenceHandoverAcknowledgedBy',
+          'absenceHandoverAcknowledgedByName',
+          'absenceHandoverSignatureText',
+          'updatedAt',
+          'updatedBy'
+        ]);
+    }
+
     // Any active user may bump SOP read/ack counters, but cannot change SOP content.
     // Transform-only writes (FieldValue.increment) can report empty affectedKeys.
     function isSopCounterBump() {
@@ -191,9 +250,12 @@ service cloud.firestore {
       allow read: if isActive() && (
         hasRole(['super_admin', 'hr', 'qa', 'department_head', 'trainer']) ||
         (userDoc().keys().hasAny(['employeeId']) &&
-          resource.data.employeeId == userDoc().employeeId)
+          resource.data.employeeId == userDoc().employeeId) ||
+        isJdAbsenceHandoverAssignee()
       );
-      allow create, update: if hasRole(['super_admin', 'department_head']);
+      allow create: if hasRole(['super_admin', 'department_head']);
+      allow update: if hasRole(['super_admin', 'department_head'])
+        || isJdAbsenceHandoverAck();
       allow delete: if isSuperAdmin();
     }
 
@@ -201,7 +263,8 @@ service cloud.firestore {
       allow read: if isActive() && (
         hasRole(['super_admin', 'hr', 'qa', 'department_head', 'trainer']) ||
         (userDoc().keys().hasAny(['employeeId']) &&
-          resource.data.employeeId == userDoc().employeeId)
+          resource.data.employeeId == userDoc().employeeId) ||
+        isTniSignoffAssignee()
       );
       allow create, update: if hasRole(['super_admin', 'department_head']);
       allow delete: if isSuperAdmin();
@@ -281,7 +344,7 @@ service cloud.firestore {
         hasRole(['super_admin', 'hr', 'qa', 'department_head', 'trainer']) ||
         resource.data.employeeId == userDoc().employeeId
       );
-      allow create: if hasRole(['super_admin', 'department_head']);
+      allow create: if hasRole(['super_admin', 'department_head', 'qa']);
       allow update: if hasRole(['super_admin', 'department_head', 'trainer', 'qa'])
         || (
           isActive()

@@ -25,6 +25,9 @@ import type {
   JobDescription,
   TrainingNeedIdentification,
   TrainerProfile,
+  JdSignoff,
+  JdSignoffSlot,
+  TniSignoffSlot,
 } from "@/types";
 import { generateId, nowISO } from "@/lib/services/helpers";
 import {
@@ -41,7 +44,25 @@ import { isDemoMode } from "@/lib/demo/data";
 import {
   createNotification,
   notifyEmployee,
+  resolveLinkedUserUid,
 } from "@/lib/services/notifications";
+import {
+  buildJdComputerGeneratedSignature,
+  compactJdSignoff,
+  extraEmployeeIdsFromEmployees,
+  getJdSignoff,
+  isJdSignoffParty,
+  isJdSignoffPending,
+  JD_SIGNOFF_SLOTS,
+  parseJdSignoffSlot,
+  sameJdSignoffPerson,
+} from "@/lib/jd/absence-handover";
+import {
+  getTniSignoff,
+  isTniSignoffPending,
+  parseTniSignoffSlot,
+  TNI_SIGNOFF_SLOTS,
+} from "@/lib/tni/signoff";
 
 // Re-export for existing callers
 export {
@@ -557,6 +578,161 @@ async function assertUniqueJdNo(jdNo: string, excludeId?: string): Promise<void>
   }
 }
 
+async function notifyJdSignoff(
+  jd: JobDescription,
+  slot: JdSignoffSlot,
+  actorId: string
+): Promise<void> {
+  const signoff = getJdSignoff(jd, slot);
+  if (!signoff || (!signoff.employeeId && !signoff.userId)) return;
+  const meta = JD_SIGNOFF_SLOTS[slot];
+  const label = jd.jdNo || jd.id;
+  const title = `${meta.label} – ${meta.actionLabel.toLowerCase()} required`;
+  const message = `You were named on Job Description ${label}${jd.title ? ` (${jd.title})` : ""} for "${meta.label}". Please tap ${meta.actionLabel}.`;
+  const link = `/dashboard/jd?acknowledge=${encodeURIComponent(jd.id)}&slot=${slot}`;
+  const metadata = { jdId: jd.id, kind: meta.kind, slot };
+
+  try {
+    const uid =
+      signoff.userId ||
+      (signoff.employeeId ? await resolveLinkedUserUid(signoff.employeeId) : null);
+    if (uid) {
+      await createNotification({
+        userId: uid,
+        type: "handover",
+        title,
+        message,
+        link,
+        actorId,
+        metadata,
+      });
+      return;
+    }
+    if (signoff.employeeId) {
+      await notifyEmployee({
+        employeeId: signoff.employeeId,
+        type: "handover",
+        title,
+        message,
+        link,
+        actorId,
+        metadata,
+      });
+    }
+  } catch (err) {
+    console.warn(`[jd] ${slot} notification failed`, err);
+  }
+}
+
+async function notifyAllJdSignoffs(jd: JobDescription, actorId: string): Promise<void> {
+  await notifyJdSignoff(jd, "absence_handover", actorId);
+  await notifyJdSignoff(jd, "assigned_by", actorId);
+  await notifyJdSignoff(jd, "accepted_by", actorId);
+}
+
+async function hydrateSignoffUserId(signoff?: JdSignoff): Promise<JdSignoff | undefined> {
+  if (!signoff) return undefined;
+  if (signoff.userId || !signoff.employeeId) {
+    return compactJdSignoff({ ...signoff, status: signoff.status || "pending" });
+  }
+  const uid = await resolveLinkedUserUid(signoff.employeeId);
+  return compactJdSignoff({
+    ...signoff,
+    status: signoff.status || "pending",
+    ...(uid ? { userId: uid } : {}),
+  });
+}
+
+function signoffPersonChanged(prev?: JdSignoff, next?: JdSignoff): boolean {
+  if (!next) return false;
+  if (!prev) return true;
+  return !sameJdSignoffPerson(prev, next);
+}
+
+function mergeResolvedSignoffLogin(existing: JdSignoff, next: JdSignoff): JdSignoff | null {
+  if (existing.status === "acknowledged") return null;
+  if (existing.userId || !next.userId) return null;
+  return compactJdSignoff({ ...existing, userId: next.userId });
+}
+
+async function notifyJdAbsenceHandover(jd: JobDescription, actorId: string): Promise<void> {
+  await notifyJdSignoff(jd, "absence_handover", actorId);
+}
+
+async function notifyTniSignoff(
+  tni: TrainingNeedIdentification,
+  slot: TniSignoffSlot,
+  actorId: string
+): Promise<void> {
+  const signoff = getTniSignoff(tni, slot);
+  if (!signoff || (!signoff.employeeId && !signoff.userId)) return;
+  const meta = TNI_SIGNOFF_SLOTS[slot];
+  const title = `${meta.label} – ${meta.actionLabel.toLowerCase()} required`;
+  const message = `You were named on TNI ${tni.id} for "${meta.label}" (${meta.roleLine}). Please tap ${meta.actionLabel}.`;
+  const link = `/dashboard/tni?acknowledge=${encodeURIComponent(tni.id)}&slot=${slot}`;
+  const metadata = { tniId: tni.id, kind: meta.kind, slot };
+
+  try {
+    const uid =
+      signoff.userId ||
+      (signoff.employeeId ? await resolveLinkedUserUid(signoff.employeeId) : null);
+    if (uid) {
+      await createNotification({
+        userId: uid,
+        type: "handover",
+        title,
+        message,
+        link,
+        actorId,
+        metadata,
+      });
+      return;
+    }
+    if (signoff.employeeId) {
+      await notifyEmployee({
+        employeeId: signoff.employeeId,
+        type: "handover",
+        title,
+        message,
+        link,
+        actorId,
+        metadata,
+      });
+    }
+  } catch (err) {
+    console.warn(`[tni] ${slot} notification failed`, err);
+  }
+}
+
+async function notifyAllTniSignoffs(tni: TrainingNeedIdentification, actorId: string): Promise<void> {
+  await notifyTniSignoff(tni, "prepared_by", actorId);
+  await notifyTniSignoff(tni, "approved_by", actorId);
+}
+
+function nextPendingSignoff(
+  existing: JdSignoff | undefined,
+  next: JdSignoff | undefined
+): { value?: JdSignoff; changed: boolean } {
+  if (!next) return { changed: false };
+  if (next.status === "acknowledged") return { value: next, changed: false };
+  const changed = signoffPersonChanged(existing, next);
+  if (changed) {
+    return {
+      changed: true,
+      value: compactJdSignoff({
+        employeeId: next.employeeId,
+        userId: next.userId,
+        name: next.name,
+        designation: next.designation,
+        status: "pending",
+      }),
+    };
+  }
+  const linked = existing ? mergeResolvedSignoffLogin(existing, next) : null;
+  if (linked) return { value: linked, changed: false };
+  return { changed: false };
+}
+
 export async function createJobDescription(
   data: Omit<
     JobDescription,
@@ -579,12 +755,26 @@ export async function createJobDescription(
 
   const id = generateId("jd");
   const now = nowISO();
+  let absenceHandoverUserId = data.absenceHandoverUserId;
+  if (data.absenceHandoverEmployeeId && !absenceHandoverUserId) {
+    absenceHandoverUserId =
+      (await resolveLinkedUserUid(data.absenceHandoverEmployeeId)) || undefined;
+  }
+  const assignedBy = await hydrateSignoffUserId(data.assignedBy);
+  const acceptedBy = await hydrateSignoffUserId(data.acceptedBy);
+  const handoverPending = Boolean(
+    data.absenceHandoverEmployeeId || absenceHandoverUserId
+  );
   const jd: JobDescription = {
     ...data,
     id,
     jdNo,
     version,
     status: "draft",
+    ...(absenceHandoverUserId ? { absenceHandoverUserId } : {}),
+    ...(handoverPending ? { absenceHandoverStatus: "pending" as const } : {}),
+    ...(assignedBy ? { assignedBy } : {}),
+    ...(acceptedBy ? { acceptedBy } : {}),
     createdAt: now,
     updatedAt: now,
     createdBy: actorId,
@@ -596,11 +786,13 @@ export async function createJobDescription(
     const store = readTrainingStore();
     store.jobDescriptions = [jd, ...store.jobDescriptions.filter((j) => j.id !== id)];
     writeTrainingStore(store);
+    await notifyAllJdSignoffs(jd, actorId);
     return jd;
   }
 
   await setDoc(doc(db, COLLECTIONS.jobDescriptions, id), payload);
   notifyTrainingUpdated();
+  await notifyAllJdSignoffs(jd, actorId);
   return jd;
 }
 
@@ -630,13 +822,43 @@ export async function approveJobDescription(
 
 export async function listJobDescriptions(filters?: {
   employeeId?: string;
+  handoverEmployeeId?: string;
+  handoverUserId?: string;
 }): Promise<JobDescription[]> {
   if (preferTrainingLocal()) {
     let rows = [...readTrainingStore().jobDescriptions];
     if (filters?.employeeId) {
       rows = rows.filter((j) => j.employeeId === filters.employeeId);
     }
+    if (filters?.handoverEmployeeId) {
+      rows = rows.filter((j) => j.absenceHandoverEmployeeId === filters.handoverEmployeeId);
+    }
+    if (filters?.handoverUserId) {
+      rows = rows.filter((j) => j.absenceHandoverUserId === filters.handoverUserId);
+    }
     return rows.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+
+  if (filters?.handoverEmployeeId) {
+    const q = query(
+      collection(db, COLLECTIONS.jobDescriptions),
+      where("absenceHandoverEmployeeId", "==", filters.handoverEmployeeId)
+    );
+    const snap = await getDocs(q);
+    return snap.docs
+      .map((d) => ({ id: d.id, ...d.data() }) as JobDescription)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+
+  if (filters?.handoverUserId) {
+    const q = query(
+      collection(db, COLLECTIONS.jobDescriptions),
+      where("absenceHandoverUserId", "==", filters.handoverUserId)
+    );
+    const snap = await getDocs(q);
+    return snap.docs
+      .map((d) => ({ id: d.id, ...d.data() }) as JobDescription)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }
 
   if (filters?.employeeId) {
@@ -656,12 +878,22 @@ export async function listJobDescriptions(filters?: {
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
+const JD_ACK_CLEAR_FIELDS = [
+  "absenceHandoverAcknowledgedAt",
+  "absenceHandoverAcknowledgedBy",
+  "absenceHandoverAcknowledgedByName",
+  "absenceHandoverSignatureText",
+] as const;
+
 export async function updateJobDescription(
   id: string,
   updates: Partial<Omit<JobDescription, "id" | "createdAt" | "createdBy">>,
   actorId: string
 ): Promise<JobDescription> {
   const now = nowISO();
+  const existing = await getJobDescription(id);
+  if (!existing) throw new Error("Job Description not found");
+
   const { employeeId: ignoredEmployeeId, ...safeUpdates } = updates;
   void ignoredEmployeeId;
   if (safeUpdates.jdNo !== undefined) {
@@ -674,6 +906,84 @@ export async function updateJobDescription(
       throw new Error("Revision no. must be a whole number");
     }
   }
+
+  const handoverChanged =
+    safeUpdates.absenceHandoverEmployeeId !== undefined &&
+    safeUpdates.absenceHandoverEmployeeId !== existing.absenceHandoverEmployeeId;
+
+  if (handoverChanged) {
+    safeUpdates.absenceHandoverStatus = "pending";
+    for (const field of JD_ACK_CLEAR_FIELDS) {
+      (safeUpdates as Record<string, unknown>)[field] = undefined;
+    }
+  }
+
+  if (safeUpdates.absenceHandoverEmployeeId && !safeUpdates.absenceHandoverUserId) {
+    const linkedUid = await resolveLinkedUserUid(safeUpdates.absenceHandoverEmployeeId);
+    if (linkedUid) safeUpdates.absenceHandoverUserId = linkedUid;
+  }
+
+  if (handoverChanged && !safeUpdates.absenceHandoverUserId) {
+    (safeUpdates as Record<string, unknown>).absenceHandoverUserId = undefined;
+  }
+
+  let assignedChanged = false;
+  let acceptedChanged = false;
+  if (safeUpdates.assignedBy) {
+    const next = await hydrateSignoffUserId(safeUpdates.assignedBy);
+    if (next?.status === "acknowledged") {
+      safeUpdates.assignedBy = next;
+    } else {
+      assignedChanged = signoffPersonChanged(existing.assignedBy, next);
+      if (assignedChanged && next) {
+        safeUpdates.assignedBy = compactJdSignoff({
+          employeeId: next.employeeId,
+          userId: next.userId,
+          name: next.name,
+          designation: next.designation,
+          status: "pending",
+        });
+      } else {
+        const linked =
+          existing.assignedBy && next
+            ? mergeResolvedSignoffLogin(existing.assignedBy, next)
+            : null;
+        if (linked) {
+          safeUpdates.assignedBy = linked;
+        } else {
+          delete safeUpdates.assignedBy;
+        }
+      }
+    }
+  }
+  if (safeUpdates.acceptedBy) {
+    const next = await hydrateSignoffUserId(safeUpdates.acceptedBy);
+    if (next?.status === "acknowledged") {
+      safeUpdates.acceptedBy = next;
+    } else {
+      acceptedChanged = signoffPersonChanged(existing.acceptedBy, next);
+      if (acceptedChanged && next) {
+        safeUpdates.acceptedBy = compactJdSignoff({
+          employeeId: next.employeeId,
+          userId: next.userId,
+          name: next.name,
+          designation: next.designation,
+          status: "pending",
+        });
+      } else {
+        const linked =
+          existing.acceptedBy && next
+            ? mergeResolvedSignoffLogin(existing.acceptedBy, next)
+            : null;
+        if (linked) {
+          safeUpdates.acceptedBy = linked;
+        } else {
+          delete safeUpdates.acceptedBy;
+        }
+      }
+    }
+  }
+
   const localPayload = {
     ...safeUpdates,
     updatedAt: now,
@@ -682,20 +992,45 @@ export async function updateJobDescription(
 
   if (preferTrainingLocal()) {
     const store = readTrainingStore();
-    const existing = store.jobDescriptions.find((j) => j.id === id);
-    if (!existing) throw new Error("Job Description not found");
-    const updated: JobDescription = { ...existing, ...localPayload };
+    const current = store.jobDescriptions.find((j) => j.id === id);
+    if (!current) throw new Error("Job Description not found");
+    const updated: JobDescription = { ...current, ...localPayload };
+    for (const field of JD_ACK_CLEAR_FIELDS) {
+      if (updated[field] === undefined) delete updated[field];
+    }
+    if (updated.absenceHandoverUserId === undefined) {
+      delete updated.absenceHandoverUserId;
+    }
     store.jobDescriptions = store.jobDescriptions.map((j) => (j.id === id ? updated : j));
     writeTrainingStore(store);
+    if (handoverChanged) await notifyJdAbsenceHandover(updated, actorId);
+    if (assignedChanged) await notifyJdSignoff(updated, "assigned_by", actorId);
+    if (acceptedChanged) await notifyJdSignoff(updated, "accepted_by", actorId);
     return updated;
   }
 
+  const remotePayload: Record<string, unknown> = {
+    updatedAt: now,
+    updatedBy: actorId,
+  };
+  for (const [key, value] of Object.entries(safeUpdates)) {
+    remotePayload[key] =
+      value === undefined ? deleteField() : sanitizeForFirestore(value);
+  }
+
   try {
-    await updateDoc(doc(db, COLLECTIONS.jobDescriptions, id), localPayload);
+    await updateDoc(
+      doc(db, COLLECTIONS.jobDescriptions, id),
+      remotePayload as { [key: string]: unknown }
+    );
     const snap = await getDoc(doc(db, COLLECTIONS.jobDescriptions, id));
     if (snap.exists()) {
       notifyTrainingUpdated();
-      return { id: snap.id, ...snap.data() } as JobDescription;
+      const updated = { id: snap.id, ...snap.data() } as JobDescription;
+      if (handoverChanged) await notifyJdAbsenceHandover(updated, actorId);
+      if (assignedChanged) await notifyJdSignoff(updated, "assigned_by", actorId);
+      if (acceptedChanged) await notifyJdSignoff(updated, "accepted_by", actorId);
+      return updated;
     }
     throw new Error("Job Description not found");
   } catch (err) {
@@ -704,6 +1039,68 @@ export async function updateJobDescription(
       err instanceof Error ? err.message : "Failed to update job description in Firebase"
     );
   }
+}
+
+export async function acknowledgeJdSignoff(
+  id: string,
+  slotInput: string | null | undefined,
+  actor: { uid: string; name: string; employeeId?: string }
+): Promise<JobDescription> {
+  const slot = parseJdSignoffSlot(slotInput);
+  const jd = await getJobDescription(id);
+  if (!jd) throw new Error("Job Description not found");
+  const signoff = getJdSignoff(jd, slot);
+  if (!signoff || (!signoff.employeeId && !signoff.userId)) {
+    throw new Error("This Job Description has no person named for that signature");
+  }
+  const extraIds = extraEmployeeIdsFromEmployees(actor, readLifecycleStore().employees);
+  if (!isJdSignoffParty(signoff, actor, extraIds)) {
+    throw new Error("Only the named person can approve this signature");
+  }
+  if (!isJdSignoffPending(jd, slot)) {
+    throw new Error("This signature is already approved");
+  }
+
+  const now = nowISO();
+  const name = (actor.name || signoff.name || "Assignee").trim();
+  const signature = buildJdComputerGeneratedSignature(name, now);
+
+  if (slot === "absence_handover") {
+    return updateJobDescription(
+      id,
+      {
+        absenceHandoverStatus: "acknowledged",
+        absenceHandoverAcknowledgedAt: now,
+        absenceHandoverAcknowledgedBy: actor.uid,
+        absenceHandoverAcknowledgedByName: name,
+        absenceHandoverSignatureText: signature,
+      },
+      actor.uid
+    );
+  }
+
+  const key = slot === "assigned_by" ? "assignedBy" : "acceptedBy";
+  return updateJobDescription(
+    id,
+    {
+      [key]: compactJdSignoff({
+        ...signoff,
+        status: "acknowledged",
+        acknowledgedAt: now,
+        acknowledgedBy: actor.uid,
+        acknowledgedByName: name,
+        signatureText: signature,
+      }),
+    },
+    actor.uid
+  );
+}
+
+export async function acknowledgeJdAbsenceHandover(
+  id: string,
+  actor: { uid: string; name: string; employeeId?: string }
+): Promise<JobDescription> {
+  return acknowledgeJdSignoff(id, "absence_handover", actor);
 }
 
 async function clearEmployeeJdLink(employeeId: string, jdId: string): Promise<void> {
@@ -757,6 +1154,8 @@ export async function createTNI(
 
   const id = generateId("tni");
   const now = nowISO();
+  const preparedBySignoff = await hydrateSignoffUserId(data.preparedBySignoff);
+  const approvedBySignoff = await hydrateSignoffUserId(data.approvedBySignoff);
   const tni: TrainingNeedIdentification = {
     ...data,
     needs: data.needs.map((n) => {
@@ -774,6 +1173,8 @@ export async function createTNI(
     id,
     version: 1,
     status: "submitted",
+    ...(preparedBySignoff ? { preparedBySignoff } : {}),
+    ...(approvedBySignoff ? { approvedBySignoff } : {}),
     createdAt: now,
     updatedAt: now,
     createdBy: actorId,
@@ -785,11 +1186,13 @@ export async function createTNI(
     const store = readTrainingStore();
     store.tnis = [tni, ...store.tnis.filter((t) => t.id !== id)];
     writeTrainingStore(store);
+    await notifyAllTniSignoffs(tni, actorId);
     return tni;
   }
 
   await setDoc(doc(db, COLLECTIONS.tni, id), payload);
   notifyTrainingUpdated();
+  await notifyAllTniSignoffs(tni, actorId);
   return tni;
 }
 
@@ -853,7 +1256,7 @@ export async function listTNIs(filters?: {
     if (filters?.employeeId) {
       rows = rows.filter((t) => t.employeeId === filters.employeeId);
     }
-    return rows.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    return rows.sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
   }
 
   if (filters?.employeeId) {
@@ -864,13 +1267,13 @@ export async function listTNIs(filters?: {
     const snap = await getDocs(q);
     return snap.docs
       .map((d) => ({ id: d.id, ...d.data() }) as TrainingNeedIdentification)
-      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+      .sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
   }
 
   const snap = await getDocs(collection(db, COLLECTIONS.tni));
   return snap.docs
     .map((d) => ({ id: d.id, ...d.data() }) as TrainingNeedIdentification)
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    .sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
 }
 
 export async function updateTNI(
@@ -881,6 +1284,9 @@ export async function updateTNI(
   actorId: string
 ): Promise<TrainingNeedIdentification> {
   const now = nowISO();
+  const existing = await getTNI(id);
+  if (!existing) throw new Error("TNI not found");
+
   const { employeeId: ignoredEmployeeId, jdId: ignoredJdId, ...safeUpdates } = updates;
   void ignoredEmployeeId;
   void ignoredJdId;
@@ -897,6 +1303,23 @@ export async function updateTNI(
     return item;
   });
 
+  let preparedChanged = false;
+  let approvedChanged = false;
+  if (safeUpdates.preparedBySignoff) {
+    const next = await hydrateSignoffUserId(safeUpdates.preparedBySignoff);
+    const result = nextPendingSignoff(existing.preparedBySignoff, next);
+    preparedChanged = result.changed;
+    if (result.value) safeUpdates.preparedBySignoff = result.value;
+    else delete safeUpdates.preparedBySignoff;
+  }
+  if (safeUpdates.approvedBySignoff) {
+    const next = await hydrateSignoffUserId(safeUpdates.approvedBySignoff);
+    const result = nextPendingSignoff(existing.approvedBySignoff, next);
+    approvedChanged = result.changed;
+    if (result.value) safeUpdates.approvedBySignoff = result.value;
+    else delete safeUpdates.approvedBySignoff;
+  }
+
   const localPayload = {
     ...safeUpdates,
     ...(cleanedNeeds ? { needs: cleanedNeeds } : {}),
@@ -906,11 +1329,13 @@ export async function updateTNI(
 
   if (preferTrainingLocal()) {
     const store = readTrainingStore();
-    const existing = store.tnis.find((t) => t.id === id);
-    if (!existing) throw new Error("TNI not found");
-    const updated: TrainingNeedIdentification = { ...existing, ...localPayload };
+    const current = store.tnis.find((t) => t.id === id);
+    if (!current) throw new Error("TNI not found");
+    const updated: TrainingNeedIdentification = { ...current, ...localPayload };
     store.tnis = store.tnis.map((t) => (t.id === id ? updated : t));
     writeTrainingStore(store);
+    if (preparedChanged) await notifyTniSignoff(updated, "prepared_by", actorId);
+    if (approvedChanged) await notifyTniSignoff(updated, "approved_by", actorId);
     return updated;
   }
 
@@ -919,13 +1344,57 @@ export async function updateTNI(
     const snap = await getDoc(doc(db, COLLECTIONS.tni, id));
     if (snap.exists()) {
       notifyTrainingUpdated();
-      return { id: snap.id, ...snap.data() } as TrainingNeedIdentification;
+      const updated = { id: snap.id, ...snap.data() } as TrainingNeedIdentification;
+      if (preparedChanged) await notifyTniSignoff(updated, "prepared_by", actorId);
+      if (approvedChanged) await notifyTniSignoff(updated, "approved_by", actorId);
+      return updated;
     }
     throw new Error("TNI not found");
   } catch (err) {
     if (err instanceof Error && err.message === "TNI not found") throw err;
     throw new Error(err instanceof Error ? err.message : "Failed to update TNI in Firebase");
   }
+}
+
+export async function acknowledgeTniSignoff(
+  id: string,
+  slotInput: string | null | undefined,
+  actor: { uid: string; name: string; employeeId?: string }
+): Promise<TrainingNeedIdentification> {
+  const slot = parseTniSignoffSlot(slotInput);
+  const tni = await getTNI(id);
+  if (!tni) throw new Error("TNI not found");
+  const signoff = getTniSignoff(tni, slot);
+  if (!signoff || (!signoff.employeeId && !signoff.userId)) {
+    throw new Error("This TNI has no person named for that signature");
+  }
+  const extraIds = extraEmployeeIdsFromEmployees(actor, readLifecycleStore().employees);
+  if (!isJdSignoffParty(signoff, actor, extraIds)) {
+    throw new Error("Only the named person can approve this signature");
+  }
+  if (!isTniSignoffPending(tni, slot)) {
+    throw new Error("This signature is already approved");
+  }
+
+  const now = nowISO();
+  const name = (actor.name || signoff.name || "Assignee").trim();
+  const key = slot === "approved_by" ? "approvedBySignoff" : "preparedBySignoff";
+  const patch: Partial<TrainingNeedIdentification> = {
+    [key]: compactJdSignoff({
+      ...signoff,
+      status: "acknowledged",
+      acknowledgedAt: now,
+      acknowledgedBy: actor.uid,
+      acknowledgedByName: name,
+      signatureText: buildJdComputerGeneratedSignature(name, now),
+    }),
+  };
+  if (slot === "approved_by" && tni.status === "submitted") {
+    patch.status = "approved";
+    patch.approvedBy = actor.uid;
+    patch.approvedAt = now;
+  }
+  return updateTNI(id, patch, actor.uid);
 }
 
 async function clearEmployeeTniLink(employeeId: string, tniId: string): Promise<void> {

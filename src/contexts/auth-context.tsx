@@ -32,6 +32,10 @@ import {
 import { SESSION_IDLE_TIMEOUT_MS, SESSION_REFRESH_INTERVAL_MS } from "@/constants/auth";
 import { logActivity } from "@/lib/services/activity";
 import { setRememberSessionPref } from "@/lib/auth/remember-login";
+import {
+  firestoreReadsBlocked,
+  noteFirestoreExhausted,
+} from "@/lib/firebase/read-gate";
 
 interface AuthContextValue {
   user: User | null;
@@ -51,6 +55,30 @@ interface AuthContextValue {
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 const DEMO_SESSION_KEY = "pharma_lms_demo_session";
 const DEMO_LOCKOUT_KEY = "pharma_lms_demo_lockouts";
+const PROFILE_CACHE_KEY = "pharma_lms_profile_cache";
+const PROFILE_CACHE_MS = 10 * 60 * 1000;
+
+function readProfileCache(uid: string): { profile: UserProfile; at: number } | null {
+  if (typeof sessionStorage === "undefined") return null;
+  try {
+    const raw = sessionStorage.getItem(PROFILE_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { profile: UserProfile; at: number };
+    if (parsed.profile?.uid !== uid) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function writeProfileCache(profile: UserProfile) {
+  if (typeof sessionStorage === "undefined") return;
+  try {
+    sessionStorage.setItem(PROFILE_CACHE_KEY, JSON.stringify({ profile, at: Date.now() }));
+  } catch {
+    /* private mode */
+  }
+}
 
 function buildBootstrapProfile(firebaseUser: User): UserProfile {
   const now = new Date().toISOString();
@@ -91,6 +119,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const idleTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const fetchProfile = useCallback(async (firebaseUser: User) => {
+    const cached = readProfileCache(firebaseUser.uid);
+    if (cached) setProfile(cached.profile);
+    if (
+      cached &&
+      (firestoreReadsBlocked() || Date.now() - cached.at < PROFILE_CACHE_MS)
+    ) {
+      return cached.profile;
+    }
+
     try {
       const snap = await getDoc(doc(db, COLLECTIONS.users, firebaseUser.uid));
       if (snap.exists()) {
@@ -100,6 +137,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           data.displayName =
             firebaseUser.displayName || data.email?.split("@")[0] || "User";
         }
+        writeProfileCache(data);
         setProfile(data);
         return data;
       }
@@ -112,7 +150,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       setProfile(provisional);
       return provisional;
-    } catch {
+    } catch (err) {
+      noteFirestoreExhausted(err);
+      if (cached) return cached.profile;
       const fallback = buildBootstrapProfile(firebaseUser);
       setProfile(fallback);
       return fallback;
@@ -337,11 +377,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         message = "Too many failed attempts. Try again later.";
       }
 
-      if (
-        !message.includes("deactivated") &&
-        !message.includes("locked") &&
-        !message.includes("temporarily locked")
-      ) {
+      const credentialFailure =
+        code === "auth/wrong-password" ||
+        code === "auth/invalid-credential" ||
+        code === "auth/user-not-found" ||
+        code === "auth/invalid-email";
+      if (credentialFailure) {
         const failure = await reportLoginFailure(normalized);
         throw new Error(failure.message || message);
       }

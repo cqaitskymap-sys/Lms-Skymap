@@ -391,6 +391,37 @@ export interface JobDescription extends Timestamps {
   approvedBy?: string;
   approvedAt?: string;
   effectiveFrom: string;
+  /** Colleague named to cover this role during absence */
+  absenceHandoverEmployeeId?: string;
+  absenceHandoverName?: string;
+  /** Linked Auth uid — used for inbox targeting and acknowledge permission */
+  absenceHandoverUserId?: string;
+  absenceHandoverStatus?: "pending" | "acknowledged";
+  absenceHandoverAcknowledgedAt?: string;
+  absenceHandoverAcknowledgedBy?: string;
+  absenceHandoverAcknowledgedByName?: string;
+  /** Electronically computer-generated signature line shown on the JD */
+  absenceHandoverSignatureText?: string;
+  /** Page-2 signature: Job Responsibility Assigned by */
+  assignedBy?: JdSignoff;
+  /** Page-2 signature: Job Responsibility Accepted by */
+  acceptedBy?: JdSignoff;
+}
+
+export type JdSignoffSlot = "absence_handover" | "assigned_by" | "accepted_by";
+
+export type TniSignoffSlot = "prepared_by" | "approved_by";
+
+export interface JdSignoff {
+  employeeId?: string;
+  userId?: string;
+  name?: string;
+  designation?: string;
+  status?: "pending" | "acknowledged";
+  acknowledgedAt?: string;
+  acknowledgedBy?: string;
+  acknowledgedByName?: string;
+  signatureText?: string;
 }
 
 export interface TrainingNeedItem {
@@ -413,6 +444,10 @@ export interface TrainingNeedIdentification extends Timestamps {
   status: "draft" | "submitted" | "approved" | "in_progress" | "completed";
   approvedBy?: string;
   approvedAt?: string;
+  /** Print box: Prepared By (Department Training Coordinator/HOD) */
+  preparedBySignoff?: JdSignoff;
+  /** Print box: Approved By (Head-Quality Assurance/Designee) */
+  approvedBySignoff?: JdSignoff;
 }
 
 export interface SopDocument extends Timestamps {

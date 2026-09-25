@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { CheckCheck, Loader2, Trash2 } from "lucide-react";
+import { CheckCheck, CheckCircle2, Loader2, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/auth-context";
 import { RequirePermission } from "@/components/auth/require-permission";
@@ -13,7 +13,9 @@ import {
   markNotificationRead,
   NOTIFICATIONS_UPDATED_EVENT,
 } from "@/lib/services/notifications";
-import { TRAINING_UPDATED_EVENT } from "@/lib/training/demo-store";
+import { approveJdHandoverAssignment, fetchMyJdSignoffs } from "@/lib/services/jd-handover";
+import { approveTniSignoffAssignment, fetchMyTniSignoffs } from "@/lib/services/tni-signoff";
+import { TRAINING_UPDATED_EVENT, notifyTrainingUpdated } from "@/lib/training/demo-store";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -33,6 +35,53 @@ const TYPE_LABEL: Record<NotificationType, string> = {
   system: "System",
 };
 
+function handoverJdId(n: Notification): string | null {
+  if (n.metadata?.kind?.startsWith("tni_")) return null;
+  if (n.metadata?.jdId) return n.metadata.jdId;
+  if ((n.link || "").includes("/dashboard/tni")) return null;
+  const match = /[?&]acknowledge=([^&]+)/.exec(n.link || "");
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
+function tniSignoffId(n: Notification): string | null {
+  if (n.metadata?.tniId) return n.metadata.tniId;
+  if (!(n.link || "").includes("/dashboard/tni")) return null;
+  const match = /[?&]acknowledge=([^&]+)/.exec(n.link || "");
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
+function tniSignoffSlot(n: Notification): string {
+  if (n.metadata?.slot) return n.metadata.slot;
+  const match = /[?&]slot=([^&]+)/.exec(n.link || "");
+  if (match) return decodeURIComponent(match[1]);
+  if (n.metadata?.kind === "tni_approved_by") return "approved_by";
+  return "prepared_by";
+}
+
+function isTniSignoffNotification(n: Notification): boolean {
+  if (n.metadata?.kind === "tni_prepared_by" || n.metadata?.kind === "tni_approved_by") return true;
+  if (n.type === "handover" && tniSignoffId(n)) return true;
+  return false;
+}
+
+function handoverSlot(n: Notification): string {
+  if (n.metadata?.slot) return n.metadata.slot;
+  const match = /[?&]slot=([^&]+)/.exec(n.link || "");
+  if (match) return decodeURIComponent(match[1]);
+  if (n.metadata?.kind === "jd_assigned_by") return "assigned_by";
+  if (n.metadata?.kind === "jd_accepted_by") return "accepted_by";
+  return "absence_handover";
+}
+
+function isJdHandoverNotification(n: Notification): boolean {
+  if (isTniSignoffNotification(n)) return false;
+  if (n.metadata?.kind === "jd_absence_handover") return true;
+  if (n.metadata?.kind === "jd_assigned_by" || n.metadata?.kind === "jd_accepted_by") return true;
+  if (n.metadata?.kind === "jd_signoff") return true;
+  if (n.type === "handover" && handoverJdId(n)) return true;
+  return false;
+}
+
 type Filter = "all" | "unread";
 
 export default function NotificationsPage() {
@@ -43,6 +92,9 @@ export default function NotificationsPage() {
   const [error, setError] = useState<string | null>(null);
   const [markingAll, setMarkingAll] = useState(false);
   const [filter, setFilter] = useState<Filter>("all");
+  const [approvingId, setApprovingId] = useState<string | null>(null);
+  const [resolvedKeys, setResolvedKeys] = useState<Set<string>>(() => new Set());
+  const [openSignoffKeys, setOpenSignoffKeys] = useState<Set<string>>(() => new Set());
 
   const refresh = useCallback(async () => {
     if (!profile) {
@@ -53,7 +105,22 @@ export default function NotificationsPage() {
     setLoading(true);
     setError(null);
     try {
-      setItems(await getUserNotifications(profile.uid));
+      const [notes, jdPack, tniPack] = await Promise.all([
+        getUserNotifications(profile.uid),
+        fetchMyJdSignoffs({ uid: profile.uid, employeeId: profile.employeeId }).catch(() => ({
+          pending: [],
+        })),
+        fetchMyTniSignoffs({ uid: profile.uid, employeeId: profile.employeeId }).catch(() => ({
+          pending: [],
+        })),
+      ]);
+      setItems(notes);
+      setOpenSignoffKeys(
+        new Set([
+          ...jdPack.pending.map((row) => `${row.jdId}:${row.slot}`),
+          ...tniPack.pending.map((row) => `tni:${row.tniId}:${row.slot}`),
+        ])
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load notifications");
       setItems([]);
@@ -90,6 +157,83 @@ export default function NotificationsPage() {
   const handleOpen = async (n: Notification) => {
     await markRead(n);
     if (n.link) router.push(n.link);
+  };
+
+  const handleApproveTniSignoff = async (n: Notification) => {
+    if (!profile) return;
+    const tniId = tniSignoffId(n);
+    if (!tniId) {
+      toast.error("This notification is missing the TNI id");
+      return;
+    }
+    setApprovingId(n.id);
+    const slot = tniSignoffSlot(n);
+    const resolvedKey = `tni:${tniId}:${slot}`;
+    try {
+      await approveTniSignoffAssignment(
+        tniId,
+        {
+          uid: profile.uid,
+          name: profile.displayName,
+          employeeId: profile.employeeId,
+        },
+        slot
+      );
+      toast.success("Approved — electronically computer-generated signature added");
+      await markRead(n);
+      setResolvedKeys((prev) => new Set(prev).add(resolvedKey));
+      notifyTrainingUpdated();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Approval failed";
+      if (/already approved/i.test(message)) {
+        await markRead(n);
+        setResolvedKeys((prev) => new Set(prev).add(resolvedKey));
+        toast.message("This signature is already approved");
+      } else {
+        toast.error(message);
+      }
+    } finally {
+      setApprovingId(null);
+    }
+  };
+
+  const handleApproveHandover = async (n: Notification) => {
+    if (!profile) return;
+    const jdId = handoverJdId(n);
+    if (!jdId) {
+      toast.error("This notification is missing the Job Description id");
+      return;
+    }
+    setApprovingId(n.id);
+    const slot = handoverSlot(n);
+    const resolvedKey = `${jdId}:${slot}`;
+    try {
+      await approveJdHandoverAssignment(
+        jdId,
+        {
+          uid: profile.uid,
+          name: profile.displayName,
+          employeeId: profile.employeeId,
+        },
+        slot
+      );
+      const action = slot === "accepted_by" ? "Accepted" : "Approved";
+      toast.success(`${action} — electronically computer-generated signature added`);
+      await markRead(n);
+      setResolvedKeys((prev) => new Set(prev).add(resolvedKey));
+      notifyTrainingUpdated();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Approval failed";
+      if (/already approved/i.test(message)) {
+        await markRead(n);
+        setResolvedKeys((prev) => new Set(prev).add(resolvedKey));
+        toast.message("This signature is already approved");
+      } else {
+        toast.error(message);
+      }
+    } finally {
+      setApprovingId(null);
+    }
   };
 
   const handleMarkAll = async () => {
@@ -212,6 +356,42 @@ export default function NotificationsPage() {
                   <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
                     <span>{formatDateTime(n.createdAt)}</span>
                     <div className="flex items-center gap-2">
+                      {isTniSignoffNotification(n) &&
+                        tniSignoffId(n) &&
+                        openSignoffKeys.has(`tni:${tniSignoffId(n)}:${tniSignoffSlot(n)}`) &&
+                        !resolvedKeys.has(`tni:${tniSignoffId(n)}:${tniSignoffSlot(n)}`) && (
+                        <Button
+                          size="sm"
+                          className="h-7 text-xs"
+                          disabled={approvingId === n.id}
+                          onClick={() => void handleApproveTniSignoff(n)}
+                        >
+                          {approvingId === n.id ? (
+                            <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <CheckCircle2 className="mr-1 h-3.5 w-3.5" />
+                          )}
+                          Approve
+                        </Button>
+                      )}
+                      {isJdHandoverNotification(n) &&
+                        handoverJdId(n) &&
+                        openSignoffKeys.has(`${handoverJdId(n)}:${handoverSlot(n)}`) &&
+                        !resolvedKeys.has(`${handoverJdId(n)}:${handoverSlot(n)}`) && (
+                        <Button
+                          size="sm"
+                          className="h-7 text-xs"
+                          disabled={approvingId === n.id}
+                          onClick={() => void handleApproveHandover(n)}
+                        >
+                          {approvingId === n.id ? (
+                            <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <CheckCircle2 className="mr-1 h-3.5 w-3.5" />
+                          )}
+                          {handoverSlot(n) === "accepted_by" ? "Accept" : "Approve"}
+                        </Button>
+                      )}
                       {!n.isRead && (
                         <Button
                           variant="ghost"

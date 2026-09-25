@@ -3,7 +3,7 @@
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { toast } from "sonner";
-import { CheckCircle2, Loader2, Pencil, Printer, Sparkles } from "lucide-react";
+import { CheckCircle2, FileSignature, Loader2, Pencil, Printer, Sparkles } from "lucide-react";
 import { draftJdWithAi } from "@/lib/services/ai";
 import {
   approveJobDescription,
@@ -12,6 +12,14 @@ import {
   listJobDescriptions,
   updateJobDescription,
 } from "@/lib/services/training";
+import {
+  approveJdHandoverAssignment,
+  fetchMyJdSignoffs,
+  type JdPendingSignoffRow,
+} from "@/lib/services/jd-handover";
+import { resolveLinkedUserUid } from "@/lib/services/notifications";
+import { sameJdSignoffPerson } from "@/lib/jd/absence-handover";
+import { JdHandoverPendingCard } from "@/components/jd/jd-handover-pending";
 import { TRAINING_UPDATED_EVENT } from "@/lib/training/demo-store";
 import {
   createJdLifecycle,
@@ -37,7 +45,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import type { Department, Employee, JobDescription, UserRole } from "@/types";
+import { ROLE_LABELS } from "@/lib/rbac/permissions";
+import type { Department, Employee, JobDescription, JdSignoff, UserRole } from "@/types";
+
+const SELF_ASSIGNER = "__self__";
 
 const POST_HANDOVER_STAGES = [
   "department_handover",
@@ -51,6 +62,19 @@ const POST_HANDOVER_STAGES = [
   "certified",
   "qualified",
 ] as const;
+
+function employeeFullName(emp?: Employee | null): string {
+  if (!emp) return "";
+  return `${emp.firstName} ${emp.lastName}`.trim();
+}
+
+function mergeJdRecords(...lists: JobDescription[][]): JobDescription[] {
+  const byId = new Map<string, JobDescription>();
+  for (const list of lists) {
+    for (const row of list) byId.set(row.id, row);
+  }
+  return [...byId.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
 
 function formatDate(value?: string): string {
   if (!value) return "—";
@@ -68,10 +92,14 @@ function statusBadgeVariant(status: JobDescription["status"]) {
 function JdPageInner() {
   const searchParams = useSearchParams();
   const employeeFromUrl = searchParams.get("employee") || "";
+  const acknowledgeFromUrl = searchParams.get("acknowledge") || "";
   const { profile, can } = useAuth();
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [employeeId, setEmployeeId] = useState("");
+  const [handoverEmployeeId, setHandoverEmployeeId] = useState("");
+  const [assignedByEmployeeId, setAssignedByEmployeeId] = useState("");
+  const [acceptedByEmployeeId, setAcceptedByEmployeeId] = useState("");
   const [jdNo, setJdNo] = useState("");
   const [revisionNo, setRevisionNo] = useState("1");
   const [jobTitle, setJobTitle] = useState("");
@@ -89,6 +117,8 @@ function JdPageInner() {
   const [aiBusy, setAiBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [assignedIds, setAssignedIds] = useState<Set<string>>(new Set());
+  const [myPendingSignoffs, setMyPendingSignoffs] = useState<JdPendingSignoffRow[]>([]);
 
   const actor: LifecycleActor | null = useMemo(() => {
     if (!profile) return null;
@@ -108,25 +138,44 @@ function JdPageInner() {
     setLoading(true);
     setError(null);
     try {
+      const pack = profile?.uid
+        ? await fetchMyJdSignoffs({
+            uid: profile.uid,
+            employeeId: profile.employeeId,
+          }).catch(() => ({ items: [] as JobDescription[], pending: [] as JdPendingSignoffRow[] }))
+        : { items: [] as JobDescription[], pending: [] as JdPendingSignoffRow[] };
+      const assigned = pack.items;
+      setAssignedIds(new Set(assigned.map((row) => row.id)));
+      setMyPendingSignoffs(pack.pending);
+
       const isEmployee = profile?.role === "employee";
       const myEmployeeId = profile?.employeeId;
 
       if (isEmployee) {
+        const depts = await listDepartments().catch(() => [] as Department[]);
+        setDepartments(depts.filter((d) => d.isActive));
         if (!myEmployeeId) {
           setEmployees([]);
-          setDepartments([]);
-          setRecords([]);
-          setError("Your account is not linked to an employee profile");
+          setRecords(assigned);
           return;
         }
-        const [depts, jdRows, self] = await Promise.all([
-          listDepartments(),
+        const [ownRows, self] = await Promise.all([
           listJobDescriptions({ employeeId: myEmployeeId }),
           getEmployee(myEmployeeId).catch(() => null),
         ]);
-        setEmployees(self ? [self] : []);
-        setDepartments(depts.filter((d) => d.isActive));
-        setRecords(jdRows.sort((a, b) => b.createdAt.localeCompare(a.createdAt)));
+        const jdRows = mergeJdRecords(ownRows, assigned);
+        const extraIds = [
+          ...new Set(
+            assigned
+              .map((row) => row.employeeId)
+              .filter((id) => id && id !== myEmployeeId)
+          ),
+        ];
+        const extras = (
+          await Promise.all(extraIds.map((id) => getEmployee(id).catch(() => null)))
+        ).filter((row): row is Employee => Boolean(row));
+        setEmployees(self ? [self, ...extras.filter((e) => e.id !== self.id)] : extras);
+        setRecords(jdRows);
         return;
       }
 
@@ -137,7 +186,7 @@ function JdPageInner() {
       ]);
       setEmployees(emps);
       setDepartments(depts.filter((d) => d.isActive));
-      setRecords(jdRows.sort((a, b) => b.createdAt.localeCompare(a.createdAt)));
+      setRecords(mergeJdRecords(jdRows, assigned));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load JD data");
       setEmployees([]);
@@ -146,7 +195,7 @@ function JdPageInner() {
     } finally {
       setLoading(false);
     }
-  }, [profile?.role, profile?.employeeId]);
+  }, [profile?.role, profile?.employeeId, profile?.uid]);
 
   useEffect(() => {
     void loadData();
@@ -201,12 +250,65 @@ function JdPageInner() {
   const visibleRecords = useMemo(() => {
     let rows = records;
     if (employeeScopeId) {
-      rows = rows.filter((r) => r.employeeId === employeeScopeId);
+      rows = rows.filter(
+        (r) =>
+          r.employeeId === employeeScopeId ||
+          r.absenceHandoverEmployeeId === employeeScopeId ||
+          r.assignedBy?.employeeId === employeeScopeId ||
+          r.acceptedBy?.employeeId === employeeScopeId ||
+          assignedIds.has(r.id)
+      );
     } else if (deptScopeId) {
-      rows = rows.filter((r) => r.departmentId === deptScopeId);
+      rows = rows.filter((r) => r.departmentId === deptScopeId || assignedIds.has(r.id));
     }
     return rows;
-  }, [records, deptScopeId, employeeScopeId]);
+  }, [records, deptScopeId, employeeScopeId, assignedIds]);
+
+  const handoverCandidates = useMemo(
+    () =>
+      scopedEmployees.filter(
+        (e) =>
+          e.id !== employeeId &&
+          e.status !== "inactive" &&
+          e.status !== "terminated"
+      ),
+    [scopedEmployees, employeeId]
+  );
+
+  const selectedHandover = useMemo(
+    () => employees.find((e) => e.id === handoverEmployeeId) || null,
+    [employees, handoverEmployeeId]
+  );
+
+  const selectedAssigned = useMemo(
+    () =>
+      assignedByEmployeeId && assignedByEmployeeId !== SELF_ASSIGNER
+        ? employees.find((e) => e.id === assignedByEmployeeId) || null
+        : null,
+    [employees, assignedByEmployeeId]
+  );
+
+  const selectedAccepted = useMemo(
+    () => employees.find((e) => e.id === acceptedByEmployeeId) || null,
+    [employees, acceptedByEmployeeId]
+  );
+
+  const signoffCandidates = useMemo(
+    () =>
+      scopedEmployees.filter((e) => e.status !== "inactive" && e.status !== "terminated"),
+    [scopedEmployees]
+  );
+
+  useEffect(() => {
+    if (editingId) return;
+    if (employeeId) setAcceptedByEmployeeId(employeeId);
+  }, [employeeId, editingId]);
+
+  useEffect(() => {
+    if (!acknowledgeFromUrl) return;
+    const node = document.getElementById(`jd-${acknowledgeFromUrl}`);
+    node?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [acknowledgeFromUrl, visibleRecords]);
 
   function resetForm() {
     setEditingId(null);
@@ -220,6 +322,9 @@ function JdPageInner() {
     setSupersedesNo("");
     setEffectiveFrom(new Date().toISOString().slice(0, 10));
     setEmployeeId("");
+    setHandoverEmployeeId("");
+    setAssignedByEmployeeId("");
+    setAcceptedByEmployeeId("");
   }
 
   async function handleAiDraft() {
@@ -286,9 +391,86 @@ function JdPageInner() {
       toast.error("Department required — handover employee first");
       return;
     }
+    const handoverEmp = employees.find((x) => x.id === handoverEmployeeId);
+    if (!handoverEmp) {
+      toast.error("Select who will take over in case of absence");
+      return;
+    }
+    if (handoverEmp.id === employeeId) {
+      toast.error("Absence handover person must be someone else");
+      return;
+    }
+    const assignedIsSelfEarly = assignedByEmployeeId === SELF_ASSIGNER;
+    const sameAssignAndAccept =
+      acceptedByEmployeeId ===
+      (assignedIsSelfEarly ? profile.employeeId || "" : assignedByEmployeeId);
+    const acceptedIsCurrentUser =
+      assignedIsSelfEarly &&
+      employees.some((e) => e.id === acceptedByEmployeeId && e.userId === profile.uid);
+    if (
+      (sameAssignAndAccept && acceptedByEmployeeId) ||
+      acceptedIsCurrentUser
+    ) {
+      toast.error("Assigned by and Accepted by must be different people");
+      return;
+    }
+    const handoverName = employeeFullName(handoverEmp);
+    if (!handoverName) {
+      toast.error("Selected handover person has no name");
+      return;
+    }
+
+    const assignedIsSelf = assignedByEmployeeId === SELF_ASSIGNER;
+    const assignedEmp = assignedIsSelf
+      ? null
+      : employees.find((x) => x.id === assignedByEmployeeId);
+    if (!assignedIsSelf && !assignedEmp) {
+      toast.error("Select who assigns the job responsibility");
+      return;
+    }
+    const acceptedEmp = employees.find((x) => x.id === acceptedByEmployeeId);
+    if (!acceptedEmp) {
+      toast.error("Select who accepts the job responsibility");
+      return;
+    }
 
     setBusy(true);
     try {
+      const handoverUid =
+        handoverEmp.userId || (await resolveLinkedUserUid(handoverEmp.id));
+      const assignedUid = assignedIsSelf
+        ? profile.uid
+        : assignedEmp?.userId ||
+          (assignedEmp ? await resolveLinkedUserUid(assignedEmp.id) : undefined);
+      const acceptedUid =
+        acceptedEmp.userId || (await resolveLinkedUserUid(acceptedEmp.id));
+
+      const assignedName = assignedIsSelf
+        ? (profile.displayName || "").trim() || "Current user"
+        : employeeFullName(assignedEmp);
+      const assignedBy: JdSignoff = assignedIsSelf
+        ? {
+            userId: profile.uid,
+            name: assignedName,
+            ...(profile.employeeId ? { employeeId: profile.employeeId } : {}),
+            designation: ROLE_LABELS[profile.role] || profile.role,
+            status: "pending",
+          }
+        : {
+            employeeId: assignedEmp!.id,
+            name: assignedName,
+            designation: assignedEmp!.designation,
+            ...(assignedUid ? { userId: assignedUid } : {}),
+            status: "pending",
+          };
+      const acceptedBy: JdSignoff = {
+        employeeId: acceptedEmp.id,
+        name: employeeFullName(acceptedEmp),
+        designation: acceptedEmp.designation,
+        ...(acceptedUid ? { userId: acceptedUid } : {}),
+        status: "pending",
+      };
+
       const payload = {
         employeeId,
         departmentId: dept,
@@ -304,17 +486,66 @@ function JdPageInner() {
         experience: experience.trim(),
         supersedesNo: supersedesNo.trim(),
         effectiveFrom: effectiveParsed.toISOString(),
+        absenceHandoverEmployeeId: handoverEmp.id,
+        absenceHandoverName: handoverName,
+        ...(handoverUid ? { absenceHandoverUserId: handoverUid } : {}),
+        assignedBy,
+        acceptedBy,
       };
+
+      const previous = editingId ? records.find((r) => r.id === editingId) : undefined;
+      const acceptedName = employeeFullName(acceptedEmp);
+      const willNotify: string[] = [];
+      const missingLogin: string[] = [];
+      const notifyIfChanged = (
+        changed: boolean,
+        name: string,
+        hasUid: boolean
+      ) => {
+        if (!changed || !name) return;
+        if (hasUid) willNotify.push(name);
+        else missingLogin.push(name);
+      };
+      notifyIfChanged(
+        !previous || previous.absenceHandoverEmployeeId !== handoverEmp.id,
+        handoverName,
+        Boolean(handoverUid)
+      );
+      notifyIfChanged(
+        !previous || !sameJdSignoffPerson(previous.assignedBy, assignedBy),
+        assignedName,
+        Boolean(assignedUid)
+      );
+      notifyIfChanged(
+        !previous || !sameJdSignoffPerson(previous.acceptedBy, acceptedBy),
+        acceptedName,
+        Boolean(acceptedUid)
+      );
+      const uniqueNotified = [...new Set(willNotify)];
+      const uniqueMissing = [...new Set(missingLogin)];
 
       if (editingId) {
         const { skills: _ignoredSkills, ...updatePayload } = payload;
         void _ignoredSkills;
         await updateJobDescription(editingId, updatePayload, profile.uid);
-        toast.success("Job Description updated");
+        toast.success(
+          uniqueNotified.length
+            ? `Job Description updated · notified ${uniqueNotified.join(", ")}`
+            : "Job Description updated"
+        );
       } else {
         const jd = await createJobDescription(payload, profile.uid);
         await createJdLifecycle(employeeId, jd.id, actor);
-        toast.success(`Job Description saved (${jd.id})`);
+        toast.success(
+          uniqueNotified.length
+            ? `Job Description saved · notified ${uniqueNotified.join(", ")}`
+            : `Job Description saved (${jd.id})`
+        );
+      }
+      for (const name of uniqueMissing) {
+        toast.warning(
+          `${name} has no login account, so a notification could not be sent`
+        );
       }
 
       await loadData();
@@ -338,6 +569,13 @@ function JdPageInner() {
     setExperience(record.experience || "");
     setSupersedesNo(record.supersedesNo || "");
     setEffectiveFrom(record.effectiveFrom.slice(0, 10));
+    setHandoverEmployeeId(record.absenceHandoverEmployeeId || "");
+    setAssignedByEmployeeId(
+      record.assignedBy?.userId && profile?.uid === record.assignedBy.userId
+        ? SELF_ASSIGNER
+        : record.assignedBy?.employeeId || ""
+    );
+    setAcceptedByEmployeeId(record.acceptedBy?.employeeId || record.employeeId);
   }
 
   async function handleDelete(id: string) {
@@ -357,6 +595,35 @@ function JdPageInner() {
     try {
       await approveJobDescription(record.id, profile.uid);
       toast.success("Job Description approved");
+      await loadData();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Approval failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleAcknowledgeHandover(
+    record: JobDescription,
+    slot: "absence_handover" | "assigned_by" | "accepted_by" = "absence_handover"
+  ) {
+    if (!profile) return;
+    setBusy(true);
+    try {
+      await approveJdHandoverAssignment(
+        record.id,
+        {
+          uid: profile.uid,
+          name: profile.displayName,
+          employeeId: profile.employeeId,
+        },
+        slot
+      );
+      toast.success(
+        slot === "accepted_by"
+          ? "Accepted — electronically computer-generated signature added"
+          : "Approved — electronically computer-generated signature added"
+      );
       await loadData();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Approval failed");
@@ -388,6 +655,45 @@ function JdPageInner() {
       (record.version && record.version > 1 ? String(record.version - 1) : "—");
     const jdNo = (record.jdNo || record.id).toUpperCase();
     const logoUrl = `${window.location.origin}/brand/skymap-logo.png`;
+    const handoverName = record.absenceHandoverName?.trim() || "";
+    const handoverAcked = record.absenceHandoverStatus === "acknowledged";
+    const ackName =
+      record.absenceHandoverAcknowledgedByName?.trim() || handoverName;
+    const ackStamp = record.absenceHandoverAcknowledgedAt
+      ? formatDate(record.absenceHandoverAcknowledgedAt)
+      : "";
+
+    const printSignCell = (title: string, signoff?: JdSignoff) => {
+      const signed =
+        signoff?.status === "acknowledged" &&
+        (signoff.acknowledgedByName || signoff.name);
+      const name = (signoff?.acknowledgedByName || signoff?.name || "").trim();
+      const stamp = signoff?.acknowledgedAt ? formatDate(signoff.acknowledgedAt) : "";
+      const designation = signoff?.designation?.trim() || "";
+      if (signed && name) {
+        return `
+          <div class="sign-title">${title}</div>
+          <div class="sign-esign">${escapeHtml(name)}</div>
+          <div class="sign-note">Electronically computer-generated signature</div>
+          ${stamp ? `<div class="sign-note">${escapeHtml(stamp)}</div>` : ""}
+          <div class="sign-meta">Designation: ${
+            designation
+              ? `<span class="filled-name">${escapeHtml(designation)}</span>`
+              : `<span class="line">&nbsp;</span>`
+          }</div>
+        `;
+      }
+      return `
+        <div class="sign-title">${title}</div>
+        <div class="sign-meta">(Name, Sign and Date)</div>
+        ${signoff?.name ? `<div class="sign-meta">${escapeHtml(signoff.name)}</div>` : ""}
+        <div class="sign-meta">Designation: ${
+          designation
+            ? `<span class="filled-name">${escapeHtml(designation)}</span>`
+            : `<span class="line">&nbsp;</span>`
+        }</div>
+      `;
+    };
 
     const responsibilityRows = (record.responsibilities.length
       ? record.responsibilities
@@ -463,9 +769,35 @@ function JdPageInner() {
             .center { text-align: center; width: 70px; }
             .handover, .ack { margin-top: 12px; font-size: 13px; line-height: 1.7; }
             .line { display: inline-block; min-width: 220px; border-bottom: 1px solid #333; margin: 0 4px; }
+            .filled-name {
+              display: inline-block;
+              min-width: 220px;
+              border-bottom: 1px solid #333;
+              margin: 0 4px;
+              padding: 0 4px;
+              font-weight: 700;
+              text-align: center;
+            }
+            .esign-block { display: inline-block; vertical-align: top; margin-left: 8px; }
+            .esign {
+              display: block;
+              font-family: "Segoe Script", "Lucida Handwriting", "Brush Script MT", cursive;
+              font-size: 18px;
+              line-height: 1.2;
+              color: #1a365d;
+            }
+            .esign-note { display: block; font-size: 10px; font-style: italic; color: #444; }
+            .esign-date { display: block; font-size: 11px; color: #222; }
             .sign-table td { height: 180px; width: 50%; font-size: 13px; }
-            .sign-title { font-weight: 700; margin-bottom: 50px; }
-            .sign-meta { margin-top: 24px; line-height: 1.8; }
+            .sign-title { font-weight: 700; margin-bottom: 12px; }
+            .sign-meta { margin-top: 16px; line-height: 1.8; }
+            .sign-esign {
+              font-family: "Segoe Script", "Lucida Handwriting", "Brush Script MT", cursive;
+              font-size: 18px;
+              color: #1a365d;
+              margin: 18px 0 4px;
+            }
+            .sign-note { font-size: 10px; font-style: italic; color: #444; }
           </style>
         </head>
         <body>
@@ -525,24 +857,35 @@ function JdPageInner() {
             </table>
             <p class="handover">
               In case of your absence; hand over your responsibility to
-              <span class="line">&nbsp;</span>
+              ${
+                handoverName
+                  ? `<span class="filled-name">${escapeHtml(handoverName)}</span>`
+                  : `<span class="line">&nbsp;</span>`
+              }
               with intimation to the assignee.
             </p>
-            <p class="ack">Acknowledged by: <span class="line">&nbsp;</span></p>
+            <p class="ack">
+              Acknowledged by:
+              ${
+                handoverAcked && ackName
+                  ? `<span class="esign-block">
+                      <span class="esign">${escapeHtml(ackName)}</span>
+                      <span class="esign-note">Electronically computer-generated signature</span>
+                      ${ackStamp ? `<span class="esign-date">${escapeHtml(ackStamp)}</span>` : ""}
+                    </span>`
+                  : `<span class="line">&nbsp;</span>`
+              }
+            </p>
           </div>
           <div class="page">
             ${headerBlock}
             <table class="sign-table">
               <tr>
                 <td>
-                  <div class="sign-title">Job Responsibility Assigned by:</div>
-                  <div class="sign-meta">(Name, Sign and Date)</div>
-                  <div class="sign-meta">Designation: <span class="line">&nbsp;</span></div>
+                  ${printSignCell("Job Responsibility Assigned by:", record.assignedBy)}
                 </td>
                 <td>
-                  <div class="sign-title">Job Responsibility Accepted by:</div>
-                  <div class="sign-meta">(Name, Sign and Date)</div>
-                  <div class="sign-meta">Designation: <span class="line">&nbsp;</span></div>
+                  ${printSignCell("Job Responsibility Accepted by:", record.acceptedBy)}
                 </td>
               </tr>
             </table>
@@ -571,6 +914,8 @@ function JdPageInner() {
             {deptScopeId && ` · ${departmentLabel(departments, deptScopeId)}`}
           </p>
         </div>
+
+        <JdHandoverPendingCard />
 
         {canWrite && (
           <Card>
@@ -604,7 +949,7 @@ function JdPageInner() {
                 <div className="space-y-2">
                   <Label>Employee</Label>
                   <Select
-                    value={employeeId}
+                    value={employeeId || undefined}
                     onValueChange={setEmployeeId}
                     disabled={Boolean(editingId)}
                   >
@@ -612,6 +957,22 @@ function JdPageInner() {
                       <SelectValue placeholder="Select employee" />
                     </SelectTrigger>
                     <SelectContent>
+                      {employeeId &&
+                        !(editingId
+                          ? scopedEmployees
+                          : eligible.length
+                            ? eligible
+                            : scopedEmployees
+                        ).some((e) => e.id === employeeId) && (
+                          <SelectItem value={employeeId}>
+                            {(() => {
+                              const emp = employees.find((e) => e.id === employeeId);
+                              return emp
+                                ? `${emp.firstName} ${emp.lastName} · ${emp.employeeCode}`
+                                : employeeId;
+                            })()}
+                          </SelectItem>
+                        )}
                       {(editingId
                         ? scopedEmployees.filter((e) => e.id === employeeId)
                         : eligible.length
@@ -665,7 +1026,7 @@ function JdPageInner() {
                 </div>
                 <div className="space-y-2">
                   <Label>Department</Label>
-                  <Select value={departmentId} onValueChange={setDepartmentId}>
+                  <Select value={departmentId || undefined} onValueChange={setDepartmentId}>
                     <SelectTrigger>
                       <SelectValue placeholder="Select department" />
                     </SelectTrigger>
@@ -719,6 +1080,130 @@ function JdPageInner() {
                     onChange={(e) => setEffectiveFrom(e.target.value)}
                   />
                 </div>
+                <div className="space-y-2">
+                  <Label>In case of absence, hand over responsibility to</Label>
+                  <Select
+                    value={handoverEmployeeId || undefined}
+                    onValueChange={setHandoverEmployeeId}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select colleague" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(handoverEmployeeId &&
+                      !handoverCandidates.some((e) => e.id === handoverEmployeeId) &&
+                      selectedHandover
+                        ? [selectedHandover, ...handoverCandidates]
+                        : handoverCandidates
+                      ).map((e) => (
+                        <SelectItem key={e.id} value={e.id}>
+                          {employeeFullName(e)} · {e.employeeCode}
+                          {e.designation ? ` · ${e.designation}` : ""}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {handoverCandidates.length === 0 && (
+                    <p className="text-xs text-muted-foreground">
+                      No other employees available to name as absence handover.
+                    </p>
+                  )}
+                  <p className="text-sm leading-relaxed text-muted-foreground">
+                    In case of your absence; hand over your responsibility to{" "}
+                    <span className="font-semibold text-foreground">
+                      {selectedHandover
+                        ? employeeFullName(selectedHandover)
+                        : "_______________"}
+                    </span>{" "}
+                    with intimation to the assignee.
+                  </p>
+                  {handoverEmployeeId && !selectedHandover?.userId && (
+                    <p className="text-xs text-amber-700">
+                      This person has no login account, so they will not receive a
+                      notification.
+                    </p>
+                  )}
+                </div>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label>Job Responsibility Assigned by</Label>
+                    <Select
+                      value={assignedByEmployeeId || undefined}
+                      onValueChange={setAssignedByEmployeeId}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select assigner" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={SELF_ASSIGNER}>
+                          Me ({profile?.displayName || "current user"})
+                        </SelectItem>
+                        {assignedByEmployeeId &&
+                          assignedByEmployeeId !== SELF_ASSIGNER &&
+                          !signoffCandidates.some((e) => e.id === assignedByEmployeeId) && (
+                            <SelectItem value={assignedByEmployeeId}>
+                              {selectedAssigned
+                                ? `${employeeFullName(selectedAssigned)} · ${selectedAssigned.employeeCode}`
+                                : assignedByEmployeeId}
+                            </SelectItem>
+                          )}
+                        {signoffCandidates.map((e) => (
+                          <SelectItem key={e.id} value={e.id}>
+                            {employeeFullName(e)} · {e.employeeCode}
+                            {e.designation ? ` · ${e.designation}` : ""}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground">
+                      They get a notification and must Approve. Then their e-signature
+                      appears on the JD.
+                    </p>
+                    {selectedAssigned && !selectedAssigned.userId && (
+                      <p className="text-xs text-amber-700">
+                        This person has no login account, so they will not receive a
+                        notification.
+                      </p>
+                    )}
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Job Responsibility Accepted by</Label>
+                    <Select
+                      value={acceptedByEmployeeId || undefined}
+                      onValueChange={setAcceptedByEmployeeId}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select acceptor" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {acceptedByEmployeeId &&
+                          !signoffCandidates.some((e) => e.id === acceptedByEmployeeId) && (
+                            <SelectItem value={acceptedByEmployeeId}>
+                              {selectedAccepted
+                                ? `${employeeFullName(selectedAccepted)} · ${selectedAccepted.employeeCode}`
+                                : acceptedByEmployeeId}
+                            </SelectItem>
+                          )}
+                        {signoffCandidates.map((e) => (
+                          <SelectItem key={e.id} value={e.id}>
+                            {employeeFullName(e)} · {e.employeeCode}
+                            {e.designation ? ` · ${e.designation}` : ""}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground">
+                      They get a notification and must Accept. Then their e-signature
+                      appears on the JD.
+                    </p>
+                    {selectedAccepted && !selectedAccepted.userId && (
+                      <p className="text-xs text-amber-700">
+                        This person has no login account, so they will not receive a
+                        notification.
+                      </p>
+                    )}
+                  </div>
+                </div>
                 <Button type="submit" disabled={busy}>
                   {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                   {editingId ? "Update JD" : "Save JD"}
@@ -764,10 +1249,25 @@ function JdPageInner() {
             ) : (
               visibleRecords.map((record) => {
                 const emp = employees.find((e) => e.id === record.employeeId);
+                const pendingForMe = myPendingSignoffs.filter((row) => row.jdId === record.id);
+                const highlighted = acknowledgeFromUrl === record.id;
+                const signoffLine = (label: string, signoff?: { name?: string; status?: string; acknowledgedAt?: string }) =>
+                  signoff?.name ? (
+                    <p className="text-xs text-muted-foreground">
+                      {label}:{" "}
+                      <span className="font-medium text-foreground">{signoff.name}</span>
+                      {signoff.status === "acknowledged"
+                        ? ` · signed ${formatDate(signoff.acknowledgedAt)}`
+                        : " · pending"}
+                    </p>
+                  ) : null;
                 return (
                   <div
                     key={record.id}
-                    className="flex flex-wrap items-start justify-between gap-3 rounded-md border p-3"
+                    id={`jd-${record.id}`}
+                    className={`flex flex-wrap items-start justify-between gap-3 rounded-md border p-3 ${
+                      highlighted ? "border-primary ring-2 ring-primary/30" : ""
+                    }`}
                   >
                     <div className="space-y-1">
                       <div className="flex flex-wrap items-center gap-2">
@@ -792,6 +1292,40 @@ function JdPageInner() {
                           ? ` · Approved ${formatDate(record.approvedAt)}`
                           : ""}
                       </p>
+                      {record.absenceHandoverName && (
+                        <p className="text-xs text-muted-foreground">
+                          Absence handover:{" "}
+                          <span className="font-medium text-foreground">
+                            {record.absenceHandoverName}
+                          </span>
+                          {record.absenceHandoverStatus === "acknowledged"
+                            ? ` · acknowledged ${formatDate(record.absenceHandoverAcknowledgedAt)}`
+                            : " · pending acknowledgement"}
+                        </p>
+                      )}
+                      {signoffLine("Assigned by", record.assignedBy)}
+                      {signoffLine("Accepted by", record.acceptedBy)}
+                      {record.absenceHandoverStatus === "acknowledged" &&
+                        (record.absenceHandoverAcknowledgedByName ||
+                          record.absenceHandoverSignatureText) && (
+                          <div className="rounded-md border border-dashed bg-muted/40 px-3 py-2">
+                            <p
+                              className="text-base leading-tight text-blue-900"
+                              style={{ fontFamily: '"Segoe Script", "Lucida Handwriting", cursive' }}
+                            >
+                              {record.absenceHandoverAcknowledgedByName ||
+                                record.absenceHandoverName}
+                            </p>
+                            <p className="text-[11px] italic text-muted-foreground">
+                              Electronically computer-generated signature
+                            </p>
+                            {record.absenceHandoverSignatureText && (
+                              <p className="text-[11px] text-muted-foreground">
+                                {record.absenceHandoverSignatureText}
+                              </p>
+                            )}
+                          </div>
+                        )}
                     </div>
                     <div className="flex flex-wrap gap-2">
                       <Button
@@ -803,6 +1337,18 @@ function JdPageInner() {
                         <Printer className="mr-1 h-3.5 w-3.5" />
                         Print
                       </Button>
+                      {pendingForMe.map((row) => (
+                        <Button
+                          key={row.slot}
+                          type="button"
+                          size="sm"
+                          disabled={busy}
+                          onClick={() => void handleAcknowledgeHandover(record, row.slot)}
+                        >
+                          <FileSignature className="mr-1 h-3.5 w-3.5" />
+                          {row.actionLabel}
+                        </Button>
+                      ))}
                       {canApprove && record.status === "draft" && (
                         <Button
                           type="button"
@@ -812,7 +1358,7 @@ function JdPageInner() {
                           onClick={() => void handleApprove(record)}
                         >
                           <CheckCircle2 className="mr-1 h-3.5 w-3.5" />
-                          Approve
+                          Approve JD
                         </Button>
                       )}
                       <Can permission="jd:write">
