@@ -306,7 +306,7 @@ export default function NewEmployeePage() {
               </div>
 
               <div className="space-y-2 sm:col-span-2">
-                <Label htmlFor="mobile">Mobile number</Label>
+                <Label htmlFor="mobile">Mobile number (optional)</Label>
                 <Input id="mobile" {...register("mobile")} placeholder="+91 …" />
                 {errors.mobile && (
                   <p className="text-xs text-destructive">{errors.mobile.message}</p>

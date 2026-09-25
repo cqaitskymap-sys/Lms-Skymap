@@ -42,9 +42,10 @@ export const onboardEmployeeSchema = z.object({
   mobile: z
     .string()
     .trim()
-    .min(7, "Enter a valid mobile number")
     .max(20)
-    .regex(/^[+]?[\d\s()-]{7,20}$/, "Enter a valid mobile number"),
+    .refine((v) => v === "" || /^[+]?[\d\s()-]{7,20}$/.test(v), {
+      message: "Enter a valid mobile number",
+    }),
   departmentId: z.string().min(1, "Department is required"),
   departmentName: z.string().trim().optional(),
   designation: z.string().trim().min(2, "Designation is required").max(80),

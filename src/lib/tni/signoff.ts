@@ -19,8 +19,27 @@ export const TNI_SIGNOFF_SLOTS: Record<
   },
 };
 
+export const TNI_QA_BEFORE_HOD_MESSAGE =
+  "Head-Quality Assurance/Designee can approve only after Department Training Coordinator/HOD has approved.";
+
 export function parseTniSignoffSlot(value: string | null | undefined): TniSignoffSlot {
   return value === "approved_by" ? "approved_by" : "prepared_by";
+}
+
+/** Prepared By (Department Training Coordinator/HOD) must sign before Approved By. */
+export function isTniPreparedAcknowledged(
+  tni: Pick<TrainingNeedIdentification, "preparedBySignoff">
+): boolean {
+  return tni.preparedBySignoff?.status === "acknowledged";
+}
+
+export function tniQaApprovalBlockReason(
+  tni: Pick<TrainingNeedIdentification, "preparedBySignoff">,
+  slot: TniSignoffSlot
+): string | null {
+  if (slot !== "approved_by") return null;
+  if (isTniPreparedAcknowledged(tni)) return null;
+  return TNI_QA_BEFORE_HOD_MESSAGE;
 }
 
 export function getTniSignoff(
@@ -65,7 +84,8 @@ export function actorPendingTniSlots(
   }
   if (
     isJdSignoffParty(tni.approvedBySignoff, actor, extraEmployeeIds) &&
-    isTniSignoffPending(tni, "approved_by")
+    isTniSignoffPending(tni, "approved_by") &&
+    isTniPreparedAcknowledged(tni)
   ) {
     slots.push("approved_by");
   }

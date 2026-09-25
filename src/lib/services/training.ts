@@ -59,9 +59,12 @@ import {
 } from "@/lib/jd/absence-handover";
 import {
   getTniSignoff,
+  isTniPreparedAcknowledged,
   isTniSignoffPending,
   parseTniSignoffSlot,
+  TNI_QA_BEFORE_HOD_MESSAGE,
   TNI_SIGNOFF_SLOTS,
+  tniQaApprovalBlockReason,
 } from "@/lib/tni/signoff";
 
 // Re-export for existing callers
@@ -666,9 +669,14 @@ async function notifyTniSignoff(
 ): Promise<void> {
   const signoff = getTniSignoff(tni, slot);
   if (!signoff || (!signoff.employeeId && !signoff.userId)) return;
+  if (signoff.status === "acknowledged") return;
+  if (slot === "approved_by" && !isTniPreparedAcknowledged(tni)) return;
   const meta = TNI_SIGNOFF_SLOTS[slot];
   const title = `${meta.label} – ${meta.actionLabel.toLowerCase()} required`;
-  const message = `You were named on TNI ${tni.id} for "${meta.label}" (${meta.roleLine}). Please tap ${meta.actionLabel}.`;
+  const message =
+    slot === "approved_by"
+      ? `Department Training Coordinator/HOD approved TNI ${tni.id}. You can now approve as ${meta.roleLine}.`
+      : `You were named on TNI ${tni.id} for "${meta.label}" (${meta.roleLine}). Please tap ${meta.actionLabel}.`;
   const link = `/dashboard/tni?acknowledge=${encodeURIComponent(tni.id)}&slot=${slot}`;
   const metadata = { tniId: tni.id, kind: meta.kind, slot };
 
@@ -706,7 +714,9 @@ async function notifyTniSignoff(
 
 async function notifyAllTniSignoffs(tni: TrainingNeedIdentification, actorId: string): Promise<void> {
   await notifyTniSignoff(tni, "prepared_by", actorId);
-  await notifyTniSignoff(tni, "approved_by", actorId);
+  if (isTniPreparedAcknowledged(tni)) {
+    await notifyTniSignoff(tni, "approved_by", actorId);
+  }
 }
 
 function nextPendingSignoff(
@@ -1208,6 +1218,20 @@ export async function approveTNI(
   id: string,
   actorId: string
 ): Promise<TrainingNeedIdentification> {
+  const existing = await getTNI(id);
+  if (!existing) throw new Error("TNI not found");
+  if (
+    (existing.preparedBySignoff?.employeeId || existing.preparedBySignoff?.userId) &&
+    !isTniPreparedAcknowledged(existing)
+  ) {
+    throw new Error(TNI_QA_BEFORE_HOD_MESSAGE);
+  }
+  if (
+    (existing.approvedBySignoff?.employeeId || existing.approvedBySignoff?.userId) &&
+    existing.approvedBySignoff?.status !== "acknowledged"
+  ) {
+    throw new Error("Head-Quality Assurance/Designee must approve with their e-signature.");
+  }
   const now = nowISO();
   return updateTNI(
     id,
@@ -1305,6 +1329,7 @@ export async function updateTNI(
 
   let preparedChanged = false;
   let approvedChanged = false;
+  let clearApprovalStamp = false;
   if (safeUpdates.preparedBySignoff) {
     const next = await hydrateSignoffUserId(safeUpdates.preparedBySignoff);
     const result = nextPendingSignoff(existing.preparedBySignoff, next);
@@ -1319,6 +1344,23 @@ export async function updateTNI(
     if (result.value) safeUpdates.approvedBySignoff = result.value;
     else delete safeUpdates.approvedBySignoff;
   }
+  if (preparedChanged && existing.approvedBySignoff?.status === "acknowledged") {
+    const kept = safeUpdates.approvedBySignoff || existing.approvedBySignoff;
+    safeUpdates.approvedBySignoff = compactJdSignoff({
+      employeeId: kept.employeeId,
+      userId: kept.userId,
+      name: kept.name,
+      designation: kept.designation,
+      status: "pending",
+    });
+    approvedChanged = false;
+    if (existing.status === "approved") {
+      safeUpdates.status = "submitted";
+      clearApprovalStamp = true;
+      delete safeUpdates.approvedBy;
+      delete safeUpdates.approvedAt;
+    }
+  }
 
   const localPayload = {
     ...safeUpdates,
@@ -1332,21 +1374,34 @@ export async function updateTNI(
     const current = store.tnis.find((t) => t.id === id);
     if (!current) throw new Error("TNI not found");
     const updated: TrainingNeedIdentification = { ...current, ...localPayload };
+    if (clearApprovalStamp) {
+      delete updated.approvedBy;
+      delete updated.approvedAt;
+    }
     store.tnis = store.tnis.map((t) => (t.id === id ? updated : t));
     writeTrainingStore(store);
     if (preparedChanged) await notifyTniSignoff(updated, "prepared_by", actorId);
-    if (approvedChanged) await notifyTniSignoff(updated, "approved_by", actorId);
+    if (approvedChanged && isTniPreparedAcknowledged(updated)) {
+      await notifyTniSignoff(updated, "approved_by", actorId);
+    }
     return updated;
   }
 
   try {
-    await updateDoc(doc(db, COLLECTIONS.tni, id), sanitizeForFirestore(localPayload));
+    const firestorePayload = sanitizeForFirestore(localPayload) as Record<string, unknown>;
+    if (clearApprovalStamp) {
+      firestorePayload.approvedBy = deleteField();
+      firestorePayload.approvedAt = deleteField();
+    }
+    await updateDoc(doc(db, COLLECTIONS.tni, id), firestorePayload);
     const snap = await getDoc(doc(db, COLLECTIONS.tni, id));
     if (snap.exists()) {
       notifyTrainingUpdated();
       const updated = { id: snap.id, ...snap.data() } as TrainingNeedIdentification;
       if (preparedChanged) await notifyTniSignoff(updated, "prepared_by", actorId);
-      if (approvedChanged) await notifyTniSignoff(updated, "approved_by", actorId);
+      if (approvedChanged && isTniPreparedAcknowledged(updated)) {
+        await notifyTniSignoff(updated, "approved_by", actorId);
+      }
       return updated;
     }
     throw new Error("TNI not found");
@@ -1375,6 +1430,8 @@ export async function acknowledgeTniSignoff(
   if (!isTniSignoffPending(tni, slot)) {
     throw new Error("This signature is already approved");
   }
+  const blocked = tniQaApprovalBlockReason(tni, slot);
+  if (blocked) throw new Error(blocked);
 
   const now = nowISO();
   const name = (actor.name || signoff.name || "Assignee").trim();
@@ -1394,7 +1451,11 @@ export async function acknowledgeTniSignoff(
     patch.approvedBy = actor.uid;
     patch.approvedAt = now;
   }
-  return updateTNI(id, patch, actor.uid);
+  const updated = await updateTNI(id, patch, actor.uid);
+  if (slot === "prepared_by") {
+    await notifyTniSignoff(updated, "approved_by", actor.uid);
+  }
+  return updated;
 }
 
 async function clearEmployeeTniLink(employeeId: string, tniId: string): Promise<void> {

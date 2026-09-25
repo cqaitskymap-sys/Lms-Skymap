@@ -23,8 +23,12 @@ import {
 import { resolveLinkedUserUid } from "@/lib/services/notifications";
 import { listUsersByRoles } from "@/lib/services/users";
 import { ROLE_LABELS } from "@/lib/rbac/permissions";
-import { sameJdSignoffPerson } from "@/lib/jd/absence-handover";
-import { TNI_SIGNOFF_SLOTS } from "@/lib/tni/signoff";
+import { isJdSignoffParty, sameJdSignoffPerson } from "@/lib/jd/absence-handover";
+import {
+  isTniPreparedAcknowledged,
+  TNI_QA_BEFORE_HOD_MESSAGE,
+  TNI_SIGNOFF_SLOTS,
+} from "@/lib/tni/signoff";
 import { TRAINING_UPDATED_EVENT } from "@/lib/training/demo-store";
 import {
   createTniLifecycle,
@@ -809,13 +813,14 @@ function TniPageInner() {
         if (hasUid) willNotify.push(name);
         else missingLogin.push(name);
       };
+      const hodChanged =
+        !previous || !sameJdSignoffPerson(previous.preparedBySignoff, preparedBySignoff);
+      const hodAlreadySigned =
+        !hodChanged && previous?.preparedBySignoff?.status === "acknowledged";
+      track(hodChanged, preparedBySignoff.name || "", Boolean(preparedBySignoff.userId));
       track(
-        !previous || !sameJdSignoffPerson(previous.preparedBySignoff, preparedBySignoff),
-        preparedBySignoff.name || "",
-        Boolean(preparedBySignoff.userId)
-      );
-      track(
-        !previous || !sameJdSignoffPerson(previous.approvedBySignoff, approvedBySignoff),
+        hodAlreadySigned &&
+          (!previous || !sameJdSignoffPerson(previous.approvedBySignoff, approvedBySignoff)),
         approvedBySignoff.name || "",
         Boolean(approvedBySignoff.userId)
       );
@@ -1172,8 +1177,8 @@ function TniPageInner() {
                     </SelectContent>
                   </Select>
                   <p className="text-xs text-muted-foreground">
-                    Department Training Coordinator/HOD. They Approve, then their
-                    e-signature appears on the TNI.
+                    Department Training Coordinator/HOD must approve first. Their
+                    e-signature is added, then Head-QA can approve.
                   </p>
                 </div>
                 <div className="space-y-2">
@@ -1205,8 +1210,8 @@ function TniPageInner() {
                     </SelectContent>
                   </Select>
                   <p className="text-xs text-muted-foreground">
-                    Head-Quality Assurance/Designee. They Approve, then their
-                    e-signature appears on the TNI.
+                    Head-Quality Assurance/Designee can approve only after Department
+                    Training Coordinator/HOD has approved.
                   </p>
                   {qaUsers.length === 0 && (
                     <p className="text-xs text-amber-700">
@@ -1266,6 +1271,17 @@ function TniPageInner() {
                 const emp = employees.find((e) => e.id === record.employeeId);
                 const linkedJd = jds.find((j) => j.id === record.jdId);
                 const pendingForMe = myPendingSignoffs.filter((row) => row.tniId === record.id);
+                const qaWaiting =
+                  !!record.approvedBySignoff &&
+                  (!!record.approvedBySignoff.employeeId || !!record.approvedBySignoff.userId) &&
+                  record.approvedBySignoff.status !== "acknowledged" &&
+                  !isTniPreparedAcknowledged(record);
+                const iAmQa =
+                  !!profile &&
+                  isJdSignoffParty(record.approvedBySignoff, {
+                    uid: profile.uid,
+                    employeeId: profile.employeeId,
+                  });
                 const highlighted = acknowledgeFromUrl === record.id;
                 const signoffLine = (label: string, signoff?: JdSignoff) =>
                   signoff?.name ? (
@@ -1302,6 +1318,9 @@ function TniPageInner() {
                       </p>
                       {signoffLine("Prepared by", record.preparedBySignoff)}
                       {signoffLine("Approved by", record.approvedBySignoff)}
+                      {qaWaiting && (
+                        <p className="text-xs text-amber-700">{TNI_QA_BEFORE_HOD_MESSAGE}</p>
+                      )}
                       {record.approvedAt && (
                         <p className="text-xs text-muted-foreground">
                           Approved {formatDateForPrint(record.approvedAt)}
@@ -1330,10 +1349,21 @@ function TniPageInner() {
                           {row.actionLabel} {row.label}
                         </Button>
                       ))}
+                      {qaWaiting && iAmQa && (
+                        <Button type="button" size="sm" disabled title={TNI_QA_BEFORE_HOD_MESSAGE}>
+                          <FileSignature className="mr-1 h-3.5 w-3.5" />
+                          Approve after HOD
+                        </Button>
+                      )}
                       {canApprove &&
                         record.status === "submitted" &&
                         !record.approvedBySignoff?.employeeId &&
-                        !record.approvedBySignoff?.userId && (
+                        !record.approvedBySignoff?.userId &&
+                        (!(
+                          record.preparedBySignoff?.employeeId ||
+                          record.preparedBySignoff?.userId
+                        ) ||
+                          isTniPreparedAcknowledged(record)) && (
                         <Button
                           type="button"
                           variant="secondary"

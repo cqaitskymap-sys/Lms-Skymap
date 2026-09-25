@@ -8,7 +8,13 @@ import {
   compactJdSignoff,
   isJdSignoffParty,
 } from "@/lib/jd/absence-handover";
-import { getTniSignoff, isTniSignoffPending, parseTniSignoffSlot } from "@/lib/tni/signoff";
+import {
+  getTniSignoff,
+  isTniSignoffPending,
+  parseTniSignoffSlot,
+  TNI_SIGNOFF_SLOTS,
+  tniQaApprovalBlockReason,
+} from "@/lib/tni/signoff";
 
 function asTni(id: string, data: Record<string, unknown>): TrainingNeedIdentification {
   return { id, ...data } as TrainingNeedIdentification;
@@ -76,6 +82,8 @@ export async function acknowledgeTniSignoffForUser(
   if (!isTniSignoffPending(tni, slot)) {
     throw new Error("This signature is already approved");
   }
+  const blocked = tniQaApprovalBlockReason(tni, slot);
+  if (blocked) throw new Error(blocked);
 
   const now = new Date().toISOString();
   const name = (actor.name || existing.name || "Assignee").trim();
@@ -100,5 +108,56 @@ export async function acknowledgeTniSignoffForUser(
   }
 
   await ref.update(patch);
-  return { ...tni, ...patch } as TrainingNeedIdentification;
+  const updated = { ...tni, ...patch } as TrainingNeedIdentification;
+  if (slot === "prepared_by") {
+    await notifyQaAfterHodApproval(updated, actor.uid).catch((err) => {
+      console.warn("[tni] QA approval notification failed", err);
+    });
+  }
+  return updated;
+}
+
+async function resolveSignoffUserId(signoff: JdSignoff): Promise<string | null> {
+  if (signoff.userId) return signoff.userId;
+  if (!signoff.employeeId) return null;
+  try {
+    const snap = await adminDb.collection(COLLECTIONS.employees).doc(signoff.employeeId).get();
+    const uid = (snap.data() as { userId?: string } | undefined)?.userId;
+    return uid || null;
+  } catch (err) {
+    console.warn("[tni] employee login lookup failed", err);
+    return null;
+  }
+}
+
+/** Head-QA is notified only after Department Training Coordinator/HOD has approved. */
+async function notifyQaAfterHodApproval(
+  tni: TrainingNeedIdentification,
+  actorId: string
+): Promise<void> {
+  const signoff = tni.approvedBySignoff;
+  if (!signoff || (!signoff.employeeId && !signoff.userId)) return;
+  if (signoff.status === "acknowledged") return;
+  const uid = await resolveSignoffUserId(signoff);
+  if (!uid) return;
+
+  const meta = TNI_SIGNOFF_SLOTS.approved_by;
+  const id = `notif_tni_${tni.id}_approved_by`;
+  const now = new Date().toISOString();
+  await adminDb.collection(COLLECTIONS.notifications).doc(id).set(
+    {
+      id,
+      userId: uid,
+      type: "handover",
+      title: `${meta.label} – approve required`,
+      message: `Department Training Coordinator/HOD approved TNI ${tni.id}. You can now approve as ${meta.roleLine}.`,
+      link: `/dashboard/tni?acknowledge=${encodeURIComponent(tni.id)}&slot=approved_by`,
+      isRead: false,
+      createdAt: now,
+      updatedAt: now,
+      createdBy: actorId,
+      metadata: { tniId: tni.id, kind: meta.kind, slot: "approved_by" },
+    },
+    { merge: true }
+  );
 }
