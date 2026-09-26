@@ -78,9 +78,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { employeeContactEmail } from "@/lib/auth/onboarding-schemas";
 import { formatDateTime } from "@/lib/utils";
 
 const ROLE_LABELS_PROVISION: Record<(typeof PROVISIONABLE_ROLES)[number], string> = {
+  super_admin: "Admin",
   hr: "HR",
   qa: "QA",
   department_head: "Department Head",
@@ -91,8 +93,8 @@ function isBuiltInDemoUser(user: UserProfile): boolean {
   return Object.values(DEMO_USERS).some((entry) => entry.profile.uid === user.uid);
 }
 
-function canManageUser(user: UserProfile, isDemo: boolean): boolean {
-  if (user.role === "super_admin") return false;
+function canManageUser(user: UserProfile, isDemo: boolean, currentUid?: string): boolean {
+  if (user.uid === currentUid) return false;
   if (isDemo && isBuiltInDemoUser(user)) return false;
   return true;
 }
@@ -168,7 +170,7 @@ export default function UserManagementPage() {
   const filteredUsers = users.filter((u) => {
     if (!search.trim()) return true;
     const q = search.trim().toLowerCase();
-    return `${u.displayName} ${u.username || ""} ${u.email} ${u.role} ${u.departmentId || ""}`
+    return `${u.displayName} ${u.username || ""} ${employeeContactEmail(u)} ${u.email} ${u.role} ${u.departmentId || ""}`
       .toLowerCase()
       .includes(q);
   });
@@ -259,7 +261,7 @@ export default function UserManagementPage() {
             User Management
           </h1>
           <p className="text-muted-foreground">
-            Create and manage HR, QA, Department Head, and Trainer accounts
+            Create and manage Admin, HR, QA, Department Head, and Trainer accounts
             {isDemo ? " (demo mode)" : ""}
           </p>
         </div>
@@ -288,7 +290,8 @@ export default function UserManagementPage() {
             </CardTitle>
             <CardDescription>
               Login credentials are the staff ID and a one-time temporary password. Choose which
-              modules this account can open. Work email is optional.
+              modules this account can open. Work email is optional and can be shared by more than
+              one staff account.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -330,6 +333,10 @@ export default function UserManagementPage() {
                 {errors.email && (
                   <p className="text-xs text-destructive">{errors.email.message}</p>
                 )}
+                <p className="text-xs text-muted-foreground">
+                  Contact only. The same address can be used for different employees. Sign-in uses
+                  the staff ID.
+                </p>
               </div>
 
               <div className="space-y-2">
@@ -388,17 +395,23 @@ export default function UserManagementPage() {
                 </div>
               )}
 
-              <div className="md:col-span-2">
-                <ModuleAccessPicker
-                  role={role}
-                  value={(allowedModules ?? []) as AppModule[]}
-                  onChange={(modules) =>
-                    setValue("allowedModules", modules, { shouldValidate: true })
-                  }
-                  error={errors.allowedModules?.message}
-                  disabled={isSubmitting}
-                />
-              </div>
+              {role === "super_admin" ? (
+                <p className="text-sm text-muted-foreground md:col-span-2">
+                  Admin accounts can open every module, including User Management.
+                </p>
+              ) : (
+                <div className="md:col-span-2">
+                  <ModuleAccessPicker
+                    role={role}
+                    value={(allowedModules ?? []) as AppModule[]}
+                    onChange={(modules) =>
+                      setValue("allowedModules", modules, { shouldValidate: true })
+                    }
+                    error={errors.allowedModules?.message}
+                    disabled={isSubmitting}
+                  />
+                </div>
+              )}
 
               <div className="md:col-span-2">
                 <Button type="submit" disabled={isSubmitting}>
@@ -458,7 +471,7 @@ export default function UserManagementPage() {
                 </TableHeader>
                 <TableBody>
                   {filteredUsers.map((user) => {
-                    const manageable = canManageUser(user, isDemo);
+                    const manageable = canManageUser(user, isDemo, profile?.uid);
                     const busy = actionUserId === user.uid;
 
                     return (
@@ -467,7 +480,9 @@ export default function UserManagementPage() {
                         <TableCell className="font-mono text-xs">
                           {user.username || "—"}
                         </TableCell>
-                        <TableCell className="font-mono text-xs">{user.email}</TableCell>
+                        <TableCell className="font-mono text-xs">
+                          {employeeContactEmail(user) || "—"}
+                        </TableCell>
                         <TableCell>
                           <Badge variant="secondary">{ROLE_LABELS[user.role]}</Badge>
                         </TableCell>
@@ -570,7 +585,8 @@ export default function UserManagementPage() {
               <DialogTitle>Delete staff account?</DialogTitle>
               <DialogDescription>
                 This permanently removes{" "}
-                <strong>{deletingUser?.displayName}</strong> ({deletingUser?.email}) from Firebase
+                <strong>{deletingUser?.displayName}</strong>
+                {deletingUser?.username ? ` (${deletingUser.username})` : ""} from Firebase
                 Auth and Firestore. This cannot be undone.
               </DialogDescription>
             </DialogHeader>

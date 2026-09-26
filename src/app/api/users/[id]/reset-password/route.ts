@@ -45,13 +45,6 @@ export async function POST(
 
   const user = { id: snap.id, ...snap.data() } as UserProfile;
 
-  if (user.role === "super_admin") {
-    return NextResponse.json(
-      { success: false, error: "Super Admin passwords must be changed from Settings" },
-      { status: 400 }
-    );
-  }
-
   if (user.isActive === false) {
     return NextResponse.json(
       { success: false, error: "Activate the account before resetting password" },

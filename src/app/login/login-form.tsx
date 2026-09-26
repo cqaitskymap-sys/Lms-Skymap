@@ -152,7 +152,7 @@ function LoginForm() {
             <CardHeader className="space-y-1.5">
               <CardTitle className="font-display text-3xl font-semibold">Sign in</CardTitle>
               <CardDescription>
-                Employees sign in with their employee code. Staff may also use a work email
+                Sign in with your employee code or staff ID.
                 {isDemo && " (Demo mode)"}
               </CardDescription>
             </CardHeader>

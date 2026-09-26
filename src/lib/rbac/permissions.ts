@@ -322,7 +322,7 @@ export function hasAllPermissions(role: UserRole, permissions: Permission[]): bo
 }
 
 export const ROLE_LABELS: Record<UserRole, string> = {
-  super_admin: "Super Admin",
+  super_admin: "Admin",
   hr: "HR",
   qa: "QA",
   department_head: "Department Head",

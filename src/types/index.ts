@@ -166,6 +166,8 @@ export interface UserProfile extends Timestamps {
   id: string;
   uid: string;
   email: string;
+  /** Work mailbox. Not used to sign in, and not unique across staff. */
+  contactEmail?: string;
   /** Login username — staff ID or employee code used at sign-in */
   username?: string;
   displayName: string;

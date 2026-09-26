@@ -12,12 +12,13 @@ import {
   createAdminUserSchema,
   PROVISIONABLE_ROLES,
   resolveStaffAuthEmail,
+  staffContactEmail,
 } from "@/lib/auth/user-admin-schemas";
 import { normalizeAllowedModules } from "@/lib/rbac/modules";
 import { generateTemporaryPassword } from "@/lib/onboarding/temp-password";
 import type { UserProfile } from "@/types";
 
-const STAFF_ROLES = ["super_admin", ...PROVISIONABLE_ROLES] as const;
+const STAFF_ROLES = PROVISIONABLE_ROLES;
 
 export async function GET(request: NextRequest) {
   const verified = await verifyAuthDetailed(request);
@@ -90,7 +91,8 @@ export async function POST(request: NextRequest) {
 
   const input = parsed.data;
   const username = input.username;
-  const email = resolveStaffAuthEmail(input.email, username);
+  const email = resolveStaffAuthEmail(username);
+  const contactEmail = staffContactEmail(input.email);
   const allowedModules = normalizeAllowedModules(input.role, input.allowedModules);
   const now = new Date().toISOString();
   const ip = request.headers.get("x-forwarded-for") || undefined;
@@ -115,7 +117,7 @@ export async function POST(request: NextRequest) {
     .get();
   if (!existingUserSnap.empty) {
     return NextResponse.json(
-      { success: false, error: "A user with this email already exists" },
+      { success: false, error: "A user with this staff ID already exists" },
       { status: 409 }
     );
   }
@@ -162,6 +164,7 @@ export async function POST(request: NextRequest) {
     id: uid,
     uid,
     email,
+    ...(contactEmail ? { contactEmail } : {}),
     username,
     displayName: input.displayName,
     role: input.role,
@@ -234,6 +237,7 @@ export async function POST(request: NextRequest) {
       role: input.role,
       username,
       email,
+      contactEmail: contactEmail || null,
       departmentId: input.departmentId || null,
       allowedModules,
     },

@@ -6,6 +6,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { Loader2 } from "lucide-react";
 import { useDepartments } from "@/hooks/use-departments";
 import { ModuleAccessPicker } from "@/components/auth/module-access-picker";
+import { employeeContactEmail } from "@/lib/auth/onboarding-schemas";
 import {
   PROVISIONABLE_ROLES,
   updateAdminUserSchema,
@@ -38,6 +39,7 @@ import {
 } from "@/components/ui/select";
 
 const ROLE_LABELS: Record<(typeof PROVISIONABLE_ROLES)[number], string> = {
+  super_admin: "Admin",
   hr: "HR",
   qa: "QA",
   department_head: "Department Head",
@@ -80,6 +82,7 @@ export function StaffUserEditDialog({
       : "hr";
     reset({
       displayName: user.displayName,
+      email: employeeContactEmail(user),
       phone: user.phone || "",
       role: nextRole,
       departmentId: user.departmentId || "",
@@ -122,14 +125,28 @@ export function StaffUserEditDialog({
         <DialogHeader>
           <DialogTitle>Edit staff account</DialogTitle>
           <DialogDescription>
-            Update profile and module access for {user?.displayName}. Email cannot be changed here.
+            Update profile and module access for {user?.displayName}. Sign-in stays the staff ID.
+            Work email is contact only and can be shared.
           </DialogDescription>
         </DialogHeader>
 
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4" noValidate>
           <div className="space-y-2">
-            <Label>Email</Label>
-            <Input value={user?.email ?? ""} disabled />
+            <Label htmlFor="edit-email">Work email (optional)</Label>
+            <Input
+              id="edit-email"
+              type="email"
+              placeholder="hr@company.com"
+              autoComplete="off"
+              disabled={isSubmitting}
+              {...register("email")}
+            />
+            {errors.email && (
+              <p className="text-xs text-destructive">{errors.email.message}</p>
+            )}
+            <p className="text-xs text-muted-foreground">
+              The same address can be used for different employees. Sign-in stays the staff ID.
+            </p>
           </div>
 
           <div className="space-y-2">
@@ -191,16 +208,22 @@ export function StaffUserEditDialog({
             </div>
           )}
 
-          {role && (
-            <ModuleAccessPicker
-              role={role}
-              value={(allowedModules ?? []) as AppModule[]}
-              onChange={(modules) =>
-                setValue("allowedModules", modules, { shouldValidate: true })
-              }
-              error={errors.allowedModules?.message}
-              disabled={isSubmitting}
-            />
+          {role === "super_admin" ? (
+            <p className="text-sm text-muted-foreground">
+              Admin accounts can open every module, including User Management.
+            </p>
+          ) : (
+            role && (
+              <ModuleAccessPicker
+                role={role}
+                value={(allowedModules ?? []) as AppModule[]}
+                onChange={(modules) =>
+                  setValue("allowedModules", modules, { shouldValidate: true })
+                }
+                error={errors.allowedModules?.message}
+                disabled={isSubmitting}
+              />
+            )
           )}
 
           <DialogFooter>

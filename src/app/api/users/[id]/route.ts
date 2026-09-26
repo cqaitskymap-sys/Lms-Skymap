@@ -9,9 +9,17 @@ import {
 } from "@/lib/rbac/middleware";
 import { adminAuth, adminDb, isAdminConfigured } from "@/lib/firebase/admin";
 import { COLLECTIONS } from "@/lib/firebase/client";
-import { updateAdminUserSchema } from "@/lib/auth/user-admin-schemas";
+import { staffContactEmail, updateAdminUserSchema } from "@/lib/auth/user-admin-schemas";
 import { normalizeAllowedModules } from "@/lib/rbac/modules";
 import type { UserProfile } from "@/types";
+
+async function countActiveAdmins(): Promise<number> {
+  const snap = await adminDb
+    .collection(COLLECTIONS.users)
+    .where("role", "==", "super_admin")
+    .get();
+  return snap.docs.filter((doc) => doc.data().isActive !== false).length;
+}
 
 export async function PATCH(
   request: NextRequest,
@@ -71,9 +79,9 @@ export async function PATCH(
 
   const before = { id: snap.id, ...snap.data() } as UserProfile;
 
-  if (before.role === "super_admin") {
+  if (input.role && input.role !== before.role && id === verified.auth.uid) {
     return NextResponse.json(
-      { success: false, error: "Super Admin accounts cannot be edited from here" },
+      { success: false, error: "You cannot change your own role" },
       { status: 400 }
     );
   }
@@ -90,6 +98,10 @@ export async function PATCH(
   const updates: Record<string, unknown> = { updatedAt: now };
 
   if (input.displayName !== undefined) updates.displayName = input.displayName;
+  if (input.email !== undefined) {
+    const contactEmail = staffContactEmail(input.email);
+    updates.contactEmail = contactEmail ? contactEmail : FieldValue.delete();
+  }
   if (input.phone !== undefined) {
     updates.phone = input.phone ? input.phone : FieldValue.delete();
   }
@@ -128,6 +140,17 @@ export async function PATCH(
   if ((nextRole === "department_head" || nextRole === "trainer") && !nextDept) {
     return NextResponse.json(
       { success: false, error: "Department is required for this role" },
+      { status: 400 }
+    );
+  }
+
+  const leavingAdmin =
+    before.role === "super_admin" &&
+    before.isActive !== false &&
+    (nextRole !== "super_admin" || input.isActive === false);
+  if (leavingAdmin && (await countActiveAdmins()) <= 1) {
+    return NextResponse.json(
+      { success: false, error: "At least one active Admin account must remain" },
       { status: 400 }
     );
   }
@@ -237,6 +260,11 @@ export async function PATCH(
       if (input.phone) after.phone = input.phone;
       else delete after.phone;
     }
+    if (input.email !== undefined) {
+      const contactEmail = staffContactEmail(input.email);
+      if (contactEmail) after.contactEmail = contactEmail;
+      else delete after.contactEmail;
+    }
     if (!nextDept) {
       delete after.departmentId;
     } else if (input.departmentId !== undefined) {
@@ -319,9 +347,13 @@ export async function DELETE(
 
   const user = { id: snap.id, ...snap.data() } as UserProfile;
 
-  if (user.role === "super_admin") {
+  if (
+    user.role === "super_admin" &&
+    user.isActive !== false &&
+    (await countActiveAdmins()) <= 1
+  ) {
     return NextResponse.json(
-      { success: false, error: "Super Admin accounts cannot be deleted from here" },
+      { success: false, error: "At least one active Admin account must remain" },
       { status: 400 }
     );
   }

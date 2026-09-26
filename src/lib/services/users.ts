@@ -13,7 +13,7 @@ import {
   findDemoAdminUserByUid,
 } from "@/lib/demo/data";
 import type { CreateAdminUserInput, UpdateAdminUserInput } from "@/lib/auth/user-admin-schemas";
-import { resolveStaffAuthEmail } from "@/lib/auth/user-admin-schemas";
+import { resolveStaffAuthEmail, staffContactEmail } from "@/lib/auth/user-admin-schemas";
 import { normalizeAllowedModules } from "@/lib/rbac/modules";
 import type { UserProfile } from "@/types";
 import { generateId } from "@/lib/utils";
@@ -111,10 +111,11 @@ export async function createStaffUser(
 ): Promise<CreateStaffUserResult> {
   if (isDemoMode()) {
     const username = input.username;
-    const email = resolveStaffAuthEmail(input.email, username);
+    const email = resolveStaffAuthEmail(username);
+    const contactEmail = staffContactEmail(input.email);
     const merged = { ...DEMO_USERS, ...getDemoAdminUsers() };
     if (merged[email] || Object.values(merged).some((e) => e.profile.username === username)) {
-      throw new Error("A user with this staff ID or email already exists");
+      throw new Error("A user with this staff ID already exists");
     }
 
     const temporaryPassword = localTempPassword();
@@ -125,6 +126,7 @@ export async function createStaffUser(
       id: uid,
       uid,
       email,
+      ...(contactEmail ? { contactEmail } : {}),
       username,
       displayName: input.displayName,
       role: input.role,
@@ -215,6 +217,11 @@ export async function updateStaffUser(
         : {}),
       updatedAt: now,
     };
+    if (input.email !== undefined) {
+      const contactEmail = staffContactEmail(input.email);
+      if (contactEmail) updated.contactEmail = contactEmail;
+      else delete updated.contactEmail;
+    }
 
     updateDemoAdminUser(email, { ...data, profile: updated });
     return updated;
