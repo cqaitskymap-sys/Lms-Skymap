@@ -30,6 +30,20 @@ export function isoInLocalDateRange(iso: string | undefined, dateFrom?: string, 
   return true;
 }
 
+/** Day before the 3-year anniversary. "2026-09-26" → "2029-09-25". */
+export function reviewDateFromEffective(effective: string): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(effective.trim());
+  if (!match) return "";
+  const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+  if (Number.isNaN(date.getTime())) return "";
+  date.setFullYear(date.getFullYear() + 3);
+  date.setDate(date.getDate() - 1);
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
 export function formatDate(date: string | Date | undefined, opts?: Intl.DateTimeFormatOptions) {
   if (!date) return "—";
   const d = typeof date === "string" ? new Date(date) : date;

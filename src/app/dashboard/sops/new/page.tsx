@@ -1,12 +1,13 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
-import { Loader2 } from "lucide-react";
+import { ArrowLeft, Loader2 } from "lucide-react";
 import { RequirePermission } from "@/components/auth/require-permission";
 import { useDepartments } from "@/hooks/use-departments";
 import { useAuth } from "@/contexts/auth-context";
@@ -18,10 +19,15 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { reviewDateFromEffective } from "@/lib/utils";
 import type { UserRole } from "@/types";
 
 const schema = z.object({
   sopNumber: z.string().min(3, "SOP number required"),
+  versionNumber: z
+    .string()
+    .trim()
+    .regex(/^\d+\.\d+$/, "Use a version like 1.0"),
   title: z.string().min(3, "Title required"),
   category: z.string().min(2, "Category required"),
   changeSummary: z.string().optional(),
@@ -42,14 +48,18 @@ export default function NewSopPage() {
   const {
     register,
     handleSubmit,
+    setValue,
     formState: { errors },
   } = useForm<FormValues>({
     resolver: zodResolver(schema),
     defaultValues: {
+      versionNumber: "1.0",
       changeSummary: "Initial release",
-      reviewDate: new Date(Date.now() + 365 * 86400000).toISOString().slice(0, 10),
+      effectiveDate: "",
+      reviewDate: "",
     },
   });
+  const effectiveField = register("effectiveDate");
 
   const actor: SopActor | null = useMemo(() => {
     if (!profile) return null;
@@ -80,6 +90,7 @@ export default function NewSopPage() {
           title: data.title,
           description: "",
           category: data.category,
+          versionNumber: data.versionNumber,
           departmentIds: depts,
           tags: [],
           changeSummary: data.changeSummary || "Initial release",
@@ -105,7 +116,13 @@ export default function NewSopPage() {
   return (
     <RequirePermission permission="sops:write">
       <div className="mx-auto max-w-3xl space-y-6">
-        <div>
+        <div className="space-y-1">
+          <Button variant="ghost" size="sm" className="-ml-2" asChild>
+            <Link href="/dashboard/sops">
+              <ArrowLeft className="mr-1 h-4 w-4" />
+              All SOPs
+            </Link>
+          </Button>
           <h1 className="text-2xl font-bold tracking-tight">Create SOP</h1>
           <p className="text-muted-foreground">
             Upload PDF, PPT, and video · draft → review → approve
@@ -121,12 +138,19 @@ export default function NewSopPage() {
           </CardHeader>
           <CardContent>
             <form onSubmit={handleSubmit(onSubmit)} className="space-y-5" noValidate>
-              <div className="grid gap-4 sm:grid-cols-2">
+              <div className="grid gap-4 sm:grid-cols-3">
                 <div className="space-y-2">
                   <Label>SOP number</Label>
                   <Input placeholder="SOP-QA-004" {...register("sopNumber")} />
                   {errors.sopNumber && (
                     <p className="text-xs text-destructive">{errors.sopNumber.message}</p>
+                  )}
+                </div>
+                <div className="space-y-2">
+                  <Label>Version number</Label>
+                  <Input placeholder="1.0" {...register("versionNumber")} />
+                  {errors.versionNumber && (
+                    <p className="text-xs text-destructive">{errors.versionNumber.message}</p>
                   )}
                 </div>
                 <div className="space-y-2">
@@ -173,11 +197,21 @@ export default function NewSopPage() {
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
                   <Label>Effective date (optional until approve)</Label>
-                  <Input type="date" {...register("effectiveDate")} />
+                  <Input
+                    type="date"
+                    {...effectiveField}
+                    onChange={(e) => {
+                      void effectiveField.onChange(e);
+                      setValue("reviewDate", reviewDateFromEffective(e.target.value));
+                    }}
+                  />
                 </div>
                 <div className="space-y-2">
                   <Label>Review date</Label>
                   <Input type="date" {...register("reviewDate")} />
+                  <p className="text-xs text-muted-foreground">
+                    Fills automatically: 3 years after the effective date, one day earlier.
+                  </p>
                 </div>
               </div>
 

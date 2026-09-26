@@ -2,12 +2,14 @@
 
 import { use, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import {
   ArrowLeft,
   CheckCircle2,
   Download,
   Loader2,
+  Pencil,
   Send,
   Upload,
 } from "lucide-react";
@@ -20,6 +22,7 @@ import {
   recordSopView,
   reviseSopWithFiles,
   submitSopForReview,
+  updateSopDetails,
   type SopActor,
 } from "@/lib/services/sops";
 import { useSopReadingSession } from "@/hooks/use-sop-reading";
@@ -38,13 +41,18 @@ import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { formatDate, formatDateTime } from "@/lib/utils";
-import type { SopVersion, UserRole } from "@/types";
+import { formatDate, formatDateTime, reviewDateFromEffective } from "@/lib/utils";
+import type { SopDocument, SopVersion, UserRole } from "@/types";
+
+function isoDateInput(value?: string) {
+  return value ? value.slice(0, 10) : "";
+}
 
 export default function SopDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const { profile, can } = useAuth();
-  const { departments } = useDepartments();
+  const searchParams = useSearchParams();
+  const { departments, activeDepartments } = useDepartments();
   const { sop, versions, currentVersion, views, acknowledgements, loading, error, refresh } =
     useSopDetail(id);
 
@@ -53,7 +61,18 @@ export default function SopDetailPage({ params }: { params: Promise<{ id: string
   const [showRevise, setShowRevise] = useState(false);
   const [reviseFiles, setReviseFiles] = useState<File[]>([]);
   const [changeSummary, setChangeSummary] = useState("");
-  const [majorBump, setMajorBump] = useState(false);
+  const [reviseVersion, setReviseVersion] = useState("");
+  const [showEdit, setShowEdit] = useState(false);
+  const [editNumber, setEditNumber] = useState("");
+  const [editTitle, setEditTitle] = useState("");
+  const [editCategory, setEditCategory] = useState("");
+  const [editDepts, setEditDepts] = useState<string[]>([]);
+  const [editVersion, setEditVersion] = useState("");
+  const [editSummary, setEditSummary] = useState("");
+  const [editEffective, setEditEffective] = useState("");
+  const [editReview, setEditReview] = useState("");
+  const [editFiles, setEditFiles] = useState<File[]>([]);
+  const editOpened = useRef(false);
   const [effectiveDate, setEffectiveDate] = useState("");
   const [reviewDate, setReviewDate] = useState("");
   const viewedOnce = useRef(false);
@@ -74,6 +93,24 @@ export default function SopDetailPage({ params }: { params: Promise<{ id: string
   }, [currentVersion]);
 
   const activeVersion = selected || currentVersion;
+
+  useEffect(() => {
+    if (searchParams.get("edit") !== "1" || editOpened.current || !sop || !currentVersion) return;
+    if (!can("sops:write")) return;
+    if (currentVersion.status !== "draft" && currentVersion.status !== "under_review") return;
+    editOpened.current = true;
+    setEditNumber(sop.sopNumber);
+    setEditTitle(sop.title);
+    setEditCategory(sop.category);
+    setEditDepts(sop.departmentIds);
+    setEditVersion(currentVersion.versionNumber);
+    setEditSummary(currentVersion.changeSummary || "");
+    setEditEffective(isoDateInput(currentVersion.effectiveDate || sop.effectiveDate));
+    setEditReview(isoDateInput(currentVersion.reviewDate || sop.reviewDate));
+    setEditFiles([]);
+    setShowEdit(true);
+  }, [searchParams, sop, currentVersion, can]);
+
   const isEmployee = profile?.role === "employee";
   const alreadyAcked = Boolean(
     profile &&
@@ -143,6 +180,29 @@ export default function SopDetailPage({ params }: { params: Promise<{ id: string
   const deptNames = sop.departmentIds
     .map((d) => departments.find((x) => x.id === d)?.name || d)
     .join(", ");
+  const canEditCurrent =
+    can("sops:write") &&
+    activeVersion.id === sop.currentVersionId &&
+    (activeVersion.status === "draft" || activeVersion.status === "under_review");
+  const deptOptions = [...activeDepartments];
+  for (const deptId of sop.departmentIds) {
+    if (!deptOptions.some((d) => d.id === deptId)) {
+      const extra = departments.find((d) => d.id === deptId);
+      if (extra) deptOptions.push(extra);
+    }
+  }
+
+  const fillEditForm = (source: SopDocument, version: SopVersion) => {
+    setEditNumber(source.sopNumber);
+    setEditTitle(source.title);
+    setEditCategory(source.category);
+    setEditDepts(source.departmentIds);
+    setEditVersion(version.versionNumber);
+    setEditSummary(version.changeSummary || "");
+    setEditEffective(isoDateInput(version.effectiveDate || source.effectiveDate));
+    setEditReview(isoDateInput(version.reviewDate || source.reviewDate));
+    setEditFiles([]);
+  };
 
   const run = async (fn: () => Promise<unknown>, ok: string) => {
     if (!actor) return;
@@ -205,6 +265,25 @@ export default function SopDetailPage({ params }: { params: Promise<{ id: string
               Download
             </Button>
 
+            {canEditCurrent && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  setShowRevise(false);
+                  if (showEdit) {
+                    setShowEdit(false);
+                    return;
+                  }
+                  fillEditForm(sop, activeVersion);
+                  setShowEdit(true);
+                }}
+              >
+                <Pencil className="mr-1 h-4 w-4" />
+                Edit
+              </Button>
+            )}
+
             <Can permission="sops:write">
               {(activeVersion.status === "draft" || activeVersion.status === "under_review") && (
                 <Button
@@ -265,7 +344,14 @@ export default function SopDetailPage({ params }: { params: Promise<{ id: string
               <Button
                 size="sm"
                 variant="outline"
-                onClick={() => setShowRevise((v) => !v)}
+                onClick={() => {
+                  setShowRevise((open) => {
+                    if (!open && activeVersion) {
+                      setReviseVersion(`${activeVersion.major}.${activeVersion.minor + 1}`);
+                    }
+                    return !open;
+                  });
+                }}
               >
                 <Upload className="mr-1 h-4 w-4" />
                 Upload revision
@@ -273,6 +359,136 @@ export default function SopDetailPage({ params }: { params: Promise<{ id: string
             </Can>
           </div>
         </div>
+
+        {showEdit && canEditCurrent && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Edit SOP</CardTitle>
+              <CardDescription>
+                Update details or replace the uploaded files. Approved SOPs stay locked.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid gap-4 sm:grid-cols-3">
+                <div className="space-y-2">
+                  <Label>SOP number</Label>
+                  <Input value={editNumber} onChange={(e) => setEditNumber(e.target.value)} />
+                </div>
+                <div className="space-y-2">
+                  <Label>Version number</Label>
+                  <Input
+                    value={editVersion}
+                    onChange={(e) => setEditVersion(e.target.value)}
+                    placeholder="1.0"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Category</Label>
+                  <Input value={editCategory} onChange={(e) => setEditCategory(e.target.value)} />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label>Title</Label>
+                <Input value={editTitle} onChange={(e) => setEditTitle(e.target.value)} />
+              </div>
+              <div className="space-y-2">
+                <Label>Departments</Label>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {deptOptions.map((d) => (
+                    <label key={d.id} className="flex items-center gap-2 text-sm">
+                      <Checkbox
+                        checked={editDepts.includes(d.id)}
+                        onCheckedChange={(c) =>
+                          setEditDepts((prev) =>
+                            c ? [...prev, d.id] : prev.filter((x) => x !== d.id)
+                          )
+                        }
+                      />
+                      {d.name}
+                    </label>
+                  ))}
+                </div>
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <Label>Effective date</Label>
+                  <Input
+                    type="date"
+                    value={editEffective}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      setEditEffective(value);
+                      setEditReview(reviewDateFromEffective(value));
+                    }}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Review date</Label>
+                  <Input
+                    type="date"
+                    value={editReview}
+                    onChange={(e) => setEditReview(e.target.value)}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    3 years after the effective date, one day earlier.
+                  </p>
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label>Change summary</Label>
+                <Textarea
+                  rows={2}
+                  value={editSummary}
+                  onChange={(e) => setEditSummary(e.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Replace documents (optional)</Label>
+                <SopFileDropzone files={editFiles} onChange={setEditFiles} />
+                <p className="text-xs text-muted-foreground">
+                  Leave this empty to keep the files already uploaded.
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  disabled={busy || !editNumber.trim() || !editTitle.trim() || !editVersion.trim()}
+                  onClick={() =>
+                    actor &&
+                    run(async () => {
+                      await updateSopDetails(
+                        sop.id,
+                        {
+                          sopNumber: editNumber,
+                          title: editTitle,
+                          category: editCategory,
+                          departmentIds: editDepts,
+                          versionNumber: editVersion,
+                          changeSummary: editSummary,
+                          effectiveDate: editEffective
+                            ? new Date(editEffective).toISOString()
+                            : undefined,
+                          reviewDate: editReview
+                            ? new Date(editReview).toISOString()
+                            : undefined,
+                          files: editFiles.length ? editFiles : undefined,
+                        },
+                        actor
+                      );
+                      setShowEdit(false);
+                      setEditFiles([]);
+                    }, "SOP updated")
+                  }
+                >
+                  {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  Save changes
+                </Button>
+                <Button variant="ghost" onClick={() => setShowEdit(false)}>
+                  Cancel
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {showRevise && (
           <Card>
@@ -293,20 +509,25 @@ export default function SopDetailPage({ params }: { params: Promise<{ id: string
                   rows={2}
                 />
               </div>
-              <label className="flex items-center gap-2 text-sm">
-                <Checkbox
-                  checked={majorBump}
-                  onCheckedChange={(c) => setMajorBump(Boolean(c))}
+              <div className="space-y-2">
+                <Label>Version number</Label>
+                <Input
+                  value={reviseVersion}
+                  onChange={(e) => setReviseVersion(e.target.value)}
+                  placeholder="1.1"
                 />
-                Major version bump (e.g. 1.2 → 2.0)
-              </label>
+              </div>
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
                   <Label>Proposed effective date</Label>
                   <Input
                     type="date"
                     value={effectiveDate}
-                    onChange={(e) => setEffectiveDate(e.target.value)}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      setEffectiveDate(value);
+                      setReviewDate(reviewDateFromEffective(value));
+                    }}
                   />
                 </div>
                 <div className="space-y-2">
@@ -321,7 +542,7 @@ export default function SopDetailPage({ params }: { params: Promise<{ id: string
               <SopFileDropzone files={reviseFiles} onChange={setReviseFiles} />
               <div className="flex gap-2">
                 <Button
-                  disabled={busy || !changeSummary || !reviseFiles.length}
+                  disabled={busy || !changeSummary || !reviseVersion.trim() || !reviseFiles.length}
                   onClick={() =>
                     actor &&
                     run(async () => {
@@ -330,7 +551,7 @@ export default function SopDetailPage({ params }: { params: Promise<{ id: string
                         {
                           changeSummary,
                           files: reviseFiles,
-                          majorBump,
+                          versionNumber: reviseVersion,
                           effectiveDate: effectiveDate
                             ? new Date(effectiveDate).toISOString()
                             : undefined,
@@ -404,6 +625,7 @@ export default function SopDetailPage({ params }: { params: Promise<{ id: string
                 <CardTitle className="text-base">Metadata</CardTitle>
               </CardHeader>
               <CardContent className="space-y-3 text-sm">
+                <Meta label="Version" value={`v${activeVersion.versionNumber}`} />
                 <Meta label="Category" value={sop.category} />
                 <Meta label="Departments" value={deptNames || "—"} />
                 <Meta label="Effective date" value={formatDate(sop.effectiveDate || activeVersion.effectiveDate)} />

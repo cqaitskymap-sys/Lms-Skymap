@@ -172,7 +172,7 @@ export default function SopsPage() {
                   <TableHead>Review</TableHead>
                   <TableHead>Views / Ack</TableHead>
                   <TableHead>Status</TableHead>
-                  <TableHead className="w-12" />
+                  <TableHead className="w-36" />
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -229,15 +229,24 @@ export default function SopsPage() {
                       <StatusBadge status={s.status} />
                     </TableCell>
                     <TableCell>
-                      <AdminDeleteButton
-                        confirmTitle={`Delete ${s.sopNumber}?`}
-                        confirmDescription="This SOP and its versions, views, and acknowledgements will be removed permanently."
-                        successMessage="SOP deleted"
-                        onDelete={async () => {
-                          await deleteSop(s.id);
-                          await refresh();
-                        }}
-                      />
+                      <div className="flex items-center justify-end gap-1">
+                        {(s.status === "draft" || s.status === "under_review") && (
+                          <RequirePermission permission="sops:write" hideOnDeny>
+                            <Button size="sm" variant="outline" asChild>
+                              <Link href={`/dashboard/sops/${s.id}?edit=1`}>Edit</Link>
+                            </Button>
+                          </RequirePermission>
+                        )}
+                        <AdminDeleteButton
+                          confirmTitle={`Delete ${s.sopNumber}?`}
+                          confirmDescription="This SOP and its versions, views, and acknowledgements will be removed permanently."
+                          successMessage="SOP deleted"
+                          onDelete={async () => {
+                            await deleteSop(s.id);
+                            await refresh();
+                          }}
+                        />
+                      </div>
                     </TableCell>
                   </TableRow>
                   ))

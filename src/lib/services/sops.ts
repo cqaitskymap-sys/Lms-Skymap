@@ -12,6 +12,7 @@ import {
   updateDoc,
   increment,
   deleteDoc,
+  deleteField,
   query,
   where,
   orderBy,
@@ -30,6 +31,7 @@ import type {
   UserRole,
 } from "@/types";
 import { generateId, nowISO, addDays, stripUndefined } from "@/lib/services/helpers";
+import { reviewDateFromEffective } from "@/lib/utils";
 import { assertAllowedUpload, isTrainingEvidence, sanitizeStorageFileName } from "@/lib/uploads/safe-file";
 import { isDemoMode } from "@/lib/demo/data";
 import {
@@ -56,6 +58,20 @@ export interface SopActor {
 /** Prefer local demo store only when demo mode is on. */
 async function preferLocalSopStore(): Promise<boolean> {
   return isDemoMode();
+}
+
+/** Accepts "1.0" or "v1.0" and stores major.minor. */
+export function parseSopVersionNumber(raw: string): {
+  versionNumber: string;
+  major: number;
+  minor: number;
+} {
+  const cleaned = raw.trim().replace(/^v/i, "");
+  const match = /^(\d+)\.(\d+)$/.exec(cleaned);
+  if (!match) throw new Error("Version number must look like 1.0");
+  const major = Number(match[1]);
+  const minor = Number(match[2]);
+  return { versionNumber: `${major}.${minor}`, major, minor };
 }
 
 async function uploadAttachment(
@@ -439,11 +455,13 @@ export async function createSopWithFiles(
     changeSummary: string;
     effectiveDate?: string;
     reviewDate?: string;
+    versionNumber?: string;
     files: File[];
   },
   actor: SopActor
 ): Promise<{ sop: SopDocument; version: SopVersion }> {
   if (!data.files.length) throw new Error("Upload at least one file (PDF recommended)");
+  const parsedVersion = parseSopVersionNumber(data.versionNumber || "1.0");
 
   const sopNumber = data.sopNumber.trim().toUpperCase();
   if (isDemoMode()) {
@@ -464,16 +482,17 @@ export async function createSopWithFiles(
   const attachments: SopAttachment[] = [];
 
   for (const file of data.files) {
-    attachments.push(await uploadAttachment(sopId, "1.0", file, actor.uid));
+    attachments.push(await uploadAttachment(sopId, parsedVersion.versionNumber, file, actor.uid));
   }
 
   const primary = primaryPdf(attachments)!;
+  const computedReview = data.effectiveDate ? reviewDateFromEffective(data.effectiveDate) : "";
   const version: SopVersion = {
     id: versionId,
     sopId,
-    versionNumber: "1.0",
-    major: 1,
-    minor: 0,
+    versionNumber: parsedVersion.versionNumber,
+    major: parsedVersion.major,
+    minor: parsedVersion.minor,
     changeSummary: data.changeSummary || "Initial release",
     storagePath: primary.storagePath,
     downloadUrl: primary.downloadUrl,
@@ -482,7 +501,7 @@ export async function createSopWithFiles(
     status: "draft",
     attachments,
     effectiveDate: data.effectiveDate,
-    reviewDate: data.reviewDate || addDays(now, 365),
+    reviewDate: data.reviewDate || (computedReview ? new Date(computedReview).toISOString() : addDays(now, 365)),
     viewCount: 0,
     acknowledgementCount: 0,
     createdAt: now,
@@ -498,7 +517,7 @@ export async function createSopWithFiles(
     departmentIds: data.departmentIds,
     category: data.category.trim(),
     currentVersionId: versionId,
-    currentVersionNumber: "1.0",
+    currentVersionNumber: parsedVersion.versionNumber,
     status: "draft",
     tags: data.tags,
     effectiveDate: data.effectiveDate,
@@ -525,7 +544,7 @@ export async function createSopWithFiles(
     actor,
     action: "create",
     resourceId: sopId,
-    description: `Created SOP ${sop.sopNumber} v1.0 as draft`,
+    description: `Created SOP ${sop.sopNumber} v${parsedVersion.versionNumber} as draft`,
   });
 
   return { sop, version };
@@ -536,6 +555,7 @@ export async function reviseSopWithFiles(
   params: {
     changeSummary: string;
     files: File[];
+    versionNumber?: string;
     majorBump?: boolean;
     effectiveDate?: string;
     reviewDate?: string;
@@ -546,9 +566,18 @@ export async function reviseSopWithFiles(
   if (!bundle.sop || !bundle.currentVersion) throw new Error("SOP not found");
 
   const current = bundle.currentVersion;
-  const major = params.majorBump ? current.major + 1 : current.major;
-  const minor = params.majorBump ? 0 : current.minor + 1;
-  const versionNumber = `${major}.${minor}`;
+  const parsedVersion = params.versionNumber?.trim()
+    ? parseSopVersionNumber(params.versionNumber)
+    : params.majorBump
+      ? { versionNumber: `${current.major + 1}.0`, major: current.major + 1, minor: 0 }
+      : {
+          versionNumber: `${current.major}.${current.minor + 1}`,
+          major: current.major,
+          minor: current.minor + 1,
+        };
+  const { versionNumber, major, minor } = parsedVersion;
+  const duplicate = bundle.versions.some((v) => v.versionNumber === versionNumber);
+  if (duplicate) throw new Error(`Version ${versionNumber} already exists on this SOP`);
   const versionId = generateId("sopv");
   const now = nowISO();
 
@@ -666,6 +695,220 @@ export async function submitSopForReview(
     action: "submit",
     resourceId: sopId,
     description: "Submitted SOP version for QA approval",
+  });
+}
+
+const LOCKED_VERSION_STATUSES = new Set<SopStatus>(["approved", "obsolete", "superseded"]);
+
+export async function updateSopVersionNumber(
+  sopId: string,
+  versionId: string,
+  versionNumberRaw: string,
+  actor: SopActor
+): Promise<void> {
+  const parsed = parseSopVersionNumber(versionNumberRaw);
+  const now = nowISO();
+
+  if (await preferLocalSopStore()) {
+    const store = readSopStore();
+    const version = store.versions.find((v) => v.id === versionId && v.sopId === sopId);
+    if (!version) throw new Error("SOP version not found");
+    if (LOCKED_VERSION_STATUSES.has(version.status)) {
+      throw new Error("This version number can no longer be changed");
+    }
+    const duplicate = store.versions.some(
+      (v) => v.sopId === sopId && v.id !== versionId && v.versionNumber === parsed.versionNumber
+    );
+    if (duplicate) throw new Error(`Version ${parsed.versionNumber} already exists on this SOP`);
+    store.versions = store.versions.map((v) =>
+      v.id === versionId ? { ...v, ...parsed, updatedAt: now } : v
+    );
+    store.sops = store.sops.map((s) =>
+      s.id === sopId && s.currentVersionId === versionId
+        ? { ...s, currentVersionNumber: parsed.versionNumber, updatedAt: now, updatedBy: actor.uid }
+        : s
+    );
+    writeSopStore(store);
+  } else {
+    const snap = await getDoc(doc(db, COLLECTIONS.sopVersions, versionId));
+    if (!snap.exists()) throw new Error("SOP version not found");
+    const version = snap.data() as SopVersion;
+    if (version.sopId !== sopId) throw new Error("SOP version not found");
+    if (LOCKED_VERSION_STATUSES.has(version.status)) {
+      throw new Error("This version number can no longer be changed");
+    }
+    const siblings = await getDocs(
+      query(collection(db, COLLECTIONS.sopVersions), where("sopId", "==", sopId))
+    );
+    const duplicate = siblings.docs.some(
+      (d) => d.id !== versionId && d.data().versionNumber === parsed.versionNumber
+    );
+    if (duplicate) throw new Error(`Version ${parsed.versionNumber} already exists on this SOP`);
+    await updateDoc(doc(db, COLLECTIONS.sopVersions, versionId), {
+      versionNumber: parsed.versionNumber,
+      major: parsed.major,
+      minor: parsed.minor,
+      updatedAt: now,
+      updatedBy: actor.uid,
+    });
+    const sopSnap = await getDoc(doc(db, COLLECTIONS.sops, sopId));
+    if (sopSnap.exists() && sopSnap.data().currentVersionId === versionId) {
+      await updateDoc(doc(db, COLLECTIONS.sops, sopId), {
+        currentVersionNumber: parsed.versionNumber,
+        updatedAt: now,
+        updatedBy: actor.uid,
+      });
+    }
+  }
+
+  await writeAuditClient({
+    actor,
+    action: "update",
+    resourceId: sopId,
+    description: `Set SOP version number to ${parsed.versionNumber}`,
+  });
+}
+
+export async function updateSopDetails(
+  sopId: string,
+  data: {
+    sopNumber: string;
+    title: string;
+    category: string;
+    departmentIds: string[];
+    versionNumber: string;
+    changeSummary: string;
+    effectiveDate?: string;
+    reviewDate?: string;
+    files?: File[];
+  },
+  actor: SopActor
+): Promise<void> {
+  const sopNumber = data.sopNumber.trim().toUpperCase();
+  const title = data.title.trim();
+  const category = data.category.trim();
+  if (sopNumber.length < 3) throw new Error("SOP number required");
+  if (title.length < 3) throw new Error("Title required");
+  if (category.length < 2) throw new Error("Category required");
+  if (!data.departmentIds.length) throw new Error("Select at least one department");
+
+  const parsed = parseSopVersionNumber(data.versionNumber);
+  const now = nowISO();
+  const bundle = await getSopBundle(sopId);
+  if (!bundle.sop || !bundle.currentVersion) throw new Error("SOP not found");
+  const current = bundle.currentVersion;
+  if (current.status !== "draft" && current.status !== "under_review") {
+    throw new Error("Approved SOPs stay locked. Upload a revision to change them.");
+  }
+  if (bundle.versions.some((v) => v.id !== current.id && v.versionNumber === parsed.versionNumber)) {
+    throw new Error(`Version ${parsed.versionNumber} already exists on this SOP`);
+  }
+
+  if (await preferLocalSopStore()) {
+    const dup = readSopStore().sops.some((s) => s.sopNumber === sopNumber && s.id !== sopId);
+    if (dup) throw new Error(`SOP number "${sopNumber}" already exists`);
+  } else {
+    const dupSnap = await getDocs(
+      query(collection(db, COLLECTIONS.sops), where("sopNumber", "==", sopNumber), limit(5))
+    );
+    if (dupSnap.docs.some((d) => d.id !== sopId)) {
+      throw new Error(`SOP number "${sopNumber}" already exists`);
+    }
+  }
+
+  let attachments = current.attachments;
+  let storagePath = current.storagePath;
+  let downloadUrl = current.downloadUrl;
+  let fileSize = current.fileSize;
+  let mimeType = current.mimeType;
+  if (data.files?.length) {
+    attachments = [];
+    for (const file of data.files) {
+      attachments.push(await uploadAttachment(sopId, parsed.versionNumber, file, actor.uid));
+    }
+    const primary = primaryPdf(attachments);
+    if (!primary) throw new Error("Upload at least one PDF, PPT, or video");
+    storagePath = primary.storagePath;
+    downloadUrl = primary.downloadUrl;
+    fileSize = primary.fileSize;
+    mimeType = primary.mimeType;
+  }
+
+  const effectiveDate = data.effectiveDate
+    ? new Date(data.effectiveDate).toISOString()
+    : undefined;
+  const reviewDate = data.reviewDate ? new Date(data.reviewDate).toISOString() : undefined;
+
+  if (await preferLocalSopStore()) {
+    const store = readSopStore();
+    store.versions = store.versions.map((v) =>
+      v.id === current.id
+        ? {
+            ...v,
+            ...parsed,
+            changeSummary: data.changeSummary.trim() || v.changeSummary,
+            attachments,
+            storagePath,
+            downloadUrl,
+            fileSize,
+            mimeType,
+            effectiveDate,
+            reviewDate: reviewDate || v.reviewDate,
+            updatedAt: now,
+          }
+        : v
+    );
+    store.sops = store.sops.map((s) =>
+      s.id === sopId
+        ? {
+            ...s,
+            sopNumber,
+            title,
+            category,
+            departmentIds: data.departmentIds,
+            currentVersionNumber: parsed.versionNumber,
+            effectiveDate,
+            reviewDate: reviewDate || s.reviewDate,
+            updatedAt: now,
+            updatedBy: actor.uid,
+          }
+        : s
+    );
+    writeSopStore(store);
+  } else {
+    await updateDoc(doc(db, COLLECTIONS.sopVersions, current.id), {
+      versionNumber: parsed.versionNumber,
+      major: parsed.major,
+      minor: parsed.minor,
+      changeSummary: data.changeSummary.trim() || current.changeSummary,
+      attachments,
+      storagePath,
+      downloadUrl,
+      fileSize,
+      mimeType,
+      effectiveDate: effectiveDate ?? deleteField(),
+      reviewDate: reviewDate ?? current.reviewDate ?? deleteField(),
+      updatedAt: now,
+      updatedBy: actor.uid,
+    });
+    await updateDoc(doc(db, COLLECTIONS.sops, sopId), {
+      sopNumber,
+      title,
+      category,
+      departmentIds: data.departmentIds,
+      currentVersionNumber: parsed.versionNumber,
+      effectiveDate: effectiveDate ?? deleteField(),
+      reviewDate: reviewDate ?? bundle.sop.reviewDate ?? deleteField(),
+      updatedAt: now,
+      updatedBy: actor.uid,
+    });
+  }
+
+  await writeAuditClient({
+    actor,
+    action: "update",
+    resourceId: sopId,
+    description: `Edited SOP ${sopNumber} v${parsed.versionNumber}`,
   });
 }
 
