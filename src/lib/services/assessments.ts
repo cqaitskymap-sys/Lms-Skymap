@@ -13,8 +13,6 @@ import {
   deleteField,
   query,
   where,
-  orderBy,
-  limit,
 } from "firebase/firestore/lite";
 import { auth, db, COLLECTIONS } from "@/lib/firebase/client";
 import type {
@@ -681,31 +679,29 @@ export async function getLeaderboard(examId: string, topN = 20): Promise<Leaderb
   }
 
   try {
-    const snap = await getDocs(
-      query(
-        collection(db, COLLECTIONS.examResults),
-        where("examId", "==", examId),
-        orderBy("percentage", "desc"),
-        limit(topN)
-      )
-    );
-    return snap.docs.map((d, i) => {
-      const r = d.data() as ExamResult;
-      return {
-        rank: r.rank || i + 1,
-        employeeId: r.employeeId,
-        employeeName: r.employeeName,
-        percentage: r.percentage,
-        score: r.score,
-        timeSpentSeconds: r.timeSpentSeconds,
-        passed: r.passed,
-        submittedAt: r.createdAt,
-        attemptId: r.attemptId,
-      };
-    });
-  } catch {
-    return [];
+    const board = await getDoc(doc(db, COLLECTIONS.examLeaderboards, examId));
+    const cached = board.exists()
+      ? ((board.data().entries || []) as LeaderboardEntry[])
+      : [];
+    if (cached.length) return cached.slice(0, topN);
+  } catch (err) {
+    console.warn("[getLeaderboard] cache read failed:", err);
   }
+
+  try {
+    const res = await fetch(
+      `/api/assessments/leaderboard?examId=${encodeURIComponent(examId)}&limit=${topN}`,
+      { headers: await authHeaders() }
+    );
+    if (res.ok) {
+      const json = (await res.json()) as { entries?: LeaderboardEntry[] };
+      if (Array.isArray(json.entries)) return json.entries;
+    }
+  } catch (err) {
+    console.warn("[getLeaderboard] api failed:", err);
+  }
+
+  return [];
 }
 
 export async function getExamAnalytics(examId: string): Promise<AssessmentAnalytics | null> {
@@ -721,8 +717,9 @@ export async function getExamAnalytics(examId: string): Promise<AssessmentAnalyt
         query(collection(db, COLLECTIONS.examResults), where("examId", "==", examId))
       );
       results = snap.docs.map((d) => ({ id: d.id, ...d.data() }) as ExamResult);
-    } catch {
-      results = readAssessmentStore().results.filter((r) => r.examId === examId);
+    } catch (err) {
+      console.warn("[getExamAnalytics] results read failed:", err);
+      results = [];
     }
   }
 

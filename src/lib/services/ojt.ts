@@ -15,6 +15,7 @@ import {
   where,
 } from "firebase/firestore/lite";
 import { deleteObject, getDownloadURL, ref, uploadBytes } from "firebase/storage";
+import { assertAllowedUpload, isTrainingEvidence, sanitizeStorageFileName } from "@/lib/uploads/safe-file";
 import { db, storage, COLLECTIONS } from "@/lib/firebase/client";
 import type { Employee, SopDocument, SopVersion } from "@/types";
 import type {
@@ -1927,10 +1928,16 @@ export async function uploadOjtAttachment(params: {
   kind: OjtAttachmentKind;
   actor: OjtActor;
 }): Promise<OjtAssignment> {
+  assertAllowedUpload(params.file, {
+    maxBytes: 25 * 1024 * 1024,
+    label: "OJT evidence",
+    accept: isTrainingEvidence,
+  });
   const assignment = await getOjtAssignment(params.assignmentId);
   if (!assignment) throw new Error("OJT assignment not found");
   const attId = generateId("ojt_attf");
-  const storagePath = `ojt/${assignment.id}/${attId}_${params.file.name}`;
+  const safeName = sanitizeStorageFileName(params.file.name);
+  const storagePath = `ojt/${assignment.id}/${attId}_${safeName}`;
   let downloadUrl = "";
   if (isDemoMode() || preferOjtLocal()) {
     downloadUrl = URL.createObjectURL(params.file);
@@ -1940,7 +1947,7 @@ export async function uploadOjtAttachment(params: {
   }
   const attachment: OjtAttachment = {
     id: attId,
-    fileName: params.file.name,
+    fileName: safeName,
     storagePath,
     downloadUrl,
     fileType: params.file.type || "application/octet-stream",

@@ -203,14 +203,19 @@ export default function EmployeeDetailPage({
             </CardHeader>
             <CardContent className="grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-1">
               <div>
-                <p className="text-muted-foreground">Username</p>
+                <p className="text-muted-foreground">Login ID</p>
                 <p className="font-mono font-medium">
                   {employee.username || employee.employeeCode}
                 </p>
               </div>
               <div>
                 <p className="text-muted-foreground">Email</p>
-                <p className="font-medium">{employee.email}</p>
+                <p className="font-medium">
+                  {employee.contactEmail?.trim() ||
+                    (employee.email?.toLowerCase().endsWith("@pharma.local")
+                      ? "—"
+                      : employee.email)}
+                </p>
               </div>
               <div>
                 <p className="text-muted-foreground">Mobile</p>

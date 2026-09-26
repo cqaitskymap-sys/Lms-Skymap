@@ -30,6 +30,7 @@ import type {
   UserRole,
 } from "@/types";
 import { generateId, nowISO, addDays, stripUndefined } from "@/lib/services/helpers";
+import { assertAllowedUpload, isTrainingEvidence, sanitizeStorageFileName } from "@/lib/uploads/safe-file";
 import { isDemoMode } from "@/lib/demo/data";
 import {
   detectAttachmentType,
@@ -64,8 +65,14 @@ async function uploadAttachment(
   actorId: string,
   title?: string
 ): Promise<SopAttachment> {
+  assertAllowedUpload(file, {
+    maxBytes: 100 * 1024 * 1024,
+    label: "SOP file",
+    accept: isTrainingEvidence,
+  });
   const type = detectAttachmentType(file);
   const attId = generateId("att");
+  const safeName = sanitizeStorageFileName(file.name);
 
   if (isDemoMode()) {
     const url = await fileToDemoUrl(file);
@@ -73,8 +80,8 @@ async function uploadAttachment(
       id: attId,
       type,
       title: title || file.name,
-      fileName: file.name,
-      storagePath: `demo/sops/${sopId}/${versionLabel}_${file.name}`,
+      fileName: safeName,
+      storagePath: `demo/sops/${sopId}/${versionLabel}_${safeName}`,
       downloadUrl: url,
       fileSize: file.size,
       mimeType: file.type || "application/octet-stream",
@@ -83,14 +90,14 @@ async function uploadAttachment(
     };
   }
 
-  const path = `sops/${sopId}/v${versionLabel}_${attId}_${file.name}`;
+  const path = `sops/${sopId}/v${versionLabel}_${attId}_${safeName}`;
   await uploadBytes(ref(storage, path), file);
   const downloadUrl = await getDownloadURL(ref(storage, path));
   return {
     id: attId,
     type,
-    title: title || file.name,
-    fileName: file.name,
+    title: title || safeName,
+    fileName: safeName,
     storagePath: path,
     downloadUrl,
     fileSize: file.size,

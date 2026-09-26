@@ -11,6 +11,7 @@ import { COLLECTIONS } from "@/lib/firebase/client";
 import { generateId } from "@/lib/utils";
 import { generateTemporaryPassword } from "@/lib/onboarding/temp-password";
 import { ensureEmployeeAuthAccount } from "@/lib/onboarding/provision-auth";
+import { employeeContactEmail } from "@/lib/auth/onboarding-schemas";
 import { sendOnboardingCredentialsEmail } from "@/lib/onboarding/email";
 import type { Employee } from "@/types";
 
@@ -93,6 +94,7 @@ export async function POST(
   }
 
   const username = employee.username || employee.employeeCode;
+  const mailbox = employeeContactEmail(employee);
   const loginUrl = `${process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"}/login`;
   let emailResult: { sent: boolean; reason?: string } = {
     sent: false,
@@ -100,14 +102,16 @@ export async function POST(
   };
 
   if (body.emailCredentials !== false) {
+    const recipients = [auth.email];
+    if (mailbox) recipients.push(mailbox);
     emailResult = await sendOnboardingCredentialsEmail({
-      to: auth.email,
+      to: recipients,
       hrName: auth.profile.displayName || auth.email,
       employeeName: `${employee.firstName} ${employee.lastName}`,
       employeeCode: employee.employeeCode,
       username,
       temporaryPassword,
-      email: employee.email,
+      email: mailbox || "—",
       loginUrl,
       designation: employee.designation,
       departmentName: employee.departmentName,
@@ -116,7 +120,7 @@ export async function POST(
     if (emailResult.sent) {
       await adminDb.collection(COLLECTIONS.employees).doc(id).update({
         credentialsEmailedAt: now,
-        credentialsEmailedTo: auth.email,
+        credentialsEmailedTo: recipients.join(", "),
       });
     }
   }
@@ -157,6 +161,7 @@ export async function POST(
         username,
         employeeCode: employee.employeeCode,
         email: employee.email,
+        ...(mailbox ? { contactEmail: mailbox } : {}),
         temporaryPassword,
         loginUrl,
         oneTime: true,

@@ -26,6 +26,7 @@ import type {
   Employee,
 } from "@/types";
 import { generateId, nowISO, stripUndefined } from "@/lib/services/helpers";
+import { assertAllowedUpload, isControlledDocument, sanitizeStorageFileName } from "@/lib/uploads/safe-file";
 import { isDemoMode } from "@/lib/demo/data";
 import {
   readInductionStore,
@@ -118,6 +119,12 @@ export async function uploadInductionDocument(
   title: string,
   actorId: string
 ): Promise<InductionDocument> {
+  assertAllowedUpload(file, {
+    maxBytes: 100 * 1024 * 1024,
+    label: "Induction material",
+    accept: isControlledDocument,
+  });
+  const safeName = sanitizeStorageFileName(file.name);
   const docId = generateId("doc");
   const type =
     file.type.includes("pdf")
@@ -132,13 +139,13 @@ export async function uploadInductionDocument(
   let storagePath: string;
 
   if (isDemoMode() || (await preferLocal())) {
-    storagePath = `demo/induction/${moduleId}/${docId}_${file.name}`;
+    storagePath = `demo/induction/${moduleId}/${docId}_${safeName}`;
     downloadUrl =
       typeof URL !== "undefined"
         ? URL.createObjectURL(file)
         : "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf";
   } else {
-    storagePath = `induction/${moduleId}/${docId}_${file.name}`;
+    storagePath = `induction/${moduleId}/${docId}_${safeName}`;
     const storageRef = ref(storage, storagePath);
     await uploadBytes(storageRef, file);
     downloadUrl = await getDownloadURL(storageRef);
@@ -202,18 +209,19 @@ export async function uploadSignedInductionPaper(params: {
     throw new Error("File too large (max 15 MB)");
   }
 
+  const safeName = sanitizeStorageFileName(file.name);
   const docId = generateId("indpaper");
   let downloadUrl: string;
   let storagePath: string;
 
   if (isDemoMode()) {
-    storagePath = `demo/employees/${employeeId}/induction-signed/${docId}_${file.name}`;
+    storagePath = `demo/employees/${employeeId}/induction-signed/${docId}_${safeName}`;
     downloadUrl =
       typeof URL !== "undefined"
         ? URL.createObjectURL(file)
         : "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf";
   } else {
-    storagePath = `employees/${employeeId}/induction-signed/${docId}_${file.name}`;
+    storagePath = `employees/${employeeId}/induction-signed/${docId}_${safeName}`;
     try {
       const storageRef = ref(storage, storagePath);
       await uploadBytes(storageRef, file, { contentType: file.type });
@@ -221,7 +229,7 @@ export async function uploadSignedInductionPaper(params: {
     } catch (err) {
       console.error("[uploadSignedInductionPaper] storage failed:", err);
       // Fallback so HR can still record the paper locally when Storage is unavailable
-      storagePath = `local/employees/${employeeId}/induction-signed/${docId}_${file.name}`;
+      storagePath = `local/employees/${employeeId}/induction-signed/${docId}_${safeName}`;
       downloadUrl =
         typeof URL !== "undefined"
           ? URL.createObjectURL(file)
@@ -231,7 +239,7 @@ export async function uploadSignedInductionPaper(params: {
   }
 
   const paper: InductionSignedPaper = stripUndefined({
-    fileName: file.name,
+    fileName: safeName,
     storagePath,
     downloadUrl,
     fileSize: file.size,

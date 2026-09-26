@@ -32,7 +32,7 @@ import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { OjtGuide, ojtRoleIntro } from "@/components/ojt/ojt-guide";
 import { OjtEmptyState } from "@/components/ojt/ojt-empty-state";
-import type { OjtAssignment, OjtDashboardStats, OjtFormDocument, OjtTopic } from "@/types/ojt";
+import type { OjtAssignment, OjtDashboardStats, OjtFormDocument } from "@/types/ojt";
 import {
   Bar,
   BarChart,
@@ -47,7 +47,6 @@ export default function OjtDashboardPage() {
   const { profile } = useAuth();
   const { activeDepartments } = useDepartments();
   const [assignments, setAssignments] = useState<OjtAssignment[]>([]);
-  const [topics, setTopics] = useState<OjtTopic[]>([]);
   const [formDocs, setFormDocs] = useState<OjtFormDocument[]>([]);
   const [stats, setStats] = useState<OjtDashboardStats | null>(null);
   const [graceDays, setGraceDays] = useState(0);
@@ -72,7 +71,6 @@ export default function OjtDashboardPage() {
     try {
       if (profile?.role === "employee" && !profile.employeeId) {
         setAssignments([]);
-        setTopics([]);
         setStats(await buildOjtDashboardStats([], []));
         return;
       }
@@ -87,7 +85,6 @@ export default function OjtDashboardPage() {
       const grace = cfg?.overdueGraceDays ?? 0;
       setGraceDays(grace);
       setAssignments(asg);
-      setTopics(tops);
       const yearRows = asg.filter((a) => a.year === year);
       const yearStats = await buildOjtDashboardStats(yearRows, tops, grace);
       setStats({

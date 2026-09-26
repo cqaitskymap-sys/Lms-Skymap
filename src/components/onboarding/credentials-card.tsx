@@ -46,8 +46,8 @@ export function CredentialsCard({
   const copyAll = async () => {
     const block = [
       `Employee: ${employeeName}`,
-      `Username: ${credentials.username}`,
-      `Email: ${credentials.email}`,
+      `Login ID: ${credentials.username}`,
+      ...(credentials.contactEmail ? [`Email: ${credentials.contactEmail}`] : []),
       `Temporary password: ${credentials.temporaryPassword}`,
       `Login: ${credentials.loginUrl}`,
     ].join("\n");
@@ -84,9 +84,9 @@ export function CredentialsCard({
           {(
             [
               ["Employee code", credentials.employeeCode],
-              ["Username", credentials.username],
-              ["Email", credentials.email],
-            ] as const
+              ["Login ID", credentials.username],
+              ...(credentials.contactEmail ? [["Email", credentials.contactEmail]] : []),
+            ] as [string, string][]
           ).map(([label, value]) => (
             <div
               key={label}

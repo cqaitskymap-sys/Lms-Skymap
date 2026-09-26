@@ -703,7 +703,11 @@ export default function OjtAssignmentDetailPage({
                     toast.error("Comments are required when rejecting HOD verification");
                     return;
                   }
-                  actor && run(() => verifyOjtByHod(row.id, "rejected", hodComments, actor), "Rejected");
+                  if (!actor) {
+                    toast.error("Your profile is still loading. Try again in a moment.");
+                    return;
+                  }
+                  run(() => verifyOjtByHod(row.id, "rejected", hodComments, actor), "Rejected");
                 }}
               >
                 Reject
@@ -738,7 +742,11 @@ export default function OjtAssignmentDetailPage({
                     toast.error("Comments are required when rejecting QA approval");
                     return;
                   }
-                  actor && run(() => approveOjtByQa(row.id, "rejected", qaComments, actor), "QA rejected");
+                  if (!actor) {
+                    toast.error("Your profile is still loading. Try again in a moment.");
+                    return;
+                  }
+                  run(() => approveOjtByQa(row.id, "rejected", qaComments, actor), "QA rejected");
                 }}
               >
                 Reject

@@ -95,11 +95,28 @@ export type CompleteOnboardingProfileInput = z.infer<typeof completeOnboardingPr
 export type AcceptPoliciesInput = z.infer<typeof acceptPoliciesSchema>;
 
 /**
- * Firebase Auth requires an email. When HR leaves work email blank,
- * derive a stable login address from the employee code.
+ * Firebase Auth needs an email, but the login ID is the employee code.
+ * The Auth address is always derived from that code, never from the mailbox HR types.
  */
+export function loginEmailFromEmployeeCode(employeeCode: string): string {
+  return `${employeeCode.trim().toLowerCase()}@pharma.local`;
+}
+
+/** @deprecated Login no longer follows a typed mailbox. Use loginEmailFromEmployeeCode. */
 export function resolveOnboardingEmail(email: string | undefined, employeeCode: string): string {
   const trimmed = email?.trim();
   if (trimmed) return trimmed.toLowerCase();
-  return `${employeeCode.trim().toLowerCase()}@pharma.local`;
+  return loginEmailFromEmployeeCode(employeeCode);
+}
+
+/** Address used only for mail. Empty when the stored email is the code-based login. */
+export function employeeContactEmail(employee: {
+  email?: string;
+  contactEmail?: string;
+}): string {
+  const contact = employee.contactEmail?.trim();
+  if (contact) return contact.toLowerCase();
+  const email = employee.email?.trim().toLowerCase() || "";
+  if (!email || email.endsWith("@pharma.local")) return "";
+  return email;
 }

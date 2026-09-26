@@ -10,8 +10,8 @@ import { adminAuth, adminDb, isAdminConfigured } from "@/lib/firebase/admin";
 import { COLLECTIONS } from "@/lib/firebase/client";
 import { generateId } from "@/lib/utils";
 import {
+  loginEmailFromEmployeeCode,
   onboardEmployeeSchema,
-  resolveOnboardingEmail,
 } from "@/lib/auth/onboarding-schemas";
 import { getActiveDepartmentOrThrow } from "@/lib/departments/validate";
 import { generateTemporaryPassword } from "@/lib/onboarding/temp-password";
@@ -80,22 +80,10 @@ export async function POST(request: NextRequest) {
   }
 
   const employeeCode = input.employeeCode;
-  const email = resolveOnboardingEmail(input.email, employeeCode);
+  const email = loginEmailFromEmployeeCode(employeeCode);
+  const contactEmail = input.email?.trim().toLowerCase() || "";
 
-  // Uniqueness: email (only when a real work email was provided, or derived address)
-  const emailSnap = await adminDb
-    .collection(COLLECTIONS.employees)
-    .where("email", "==", email)
-    .limit(1)
-    .get();
-  if (!emailSnap.empty) {
-    return NextResponse.json(
-      { success: false, error: "An employee with this email already exists" },
-      { status: 409 }
-    );
-  }
-
-  // Uniqueness: employee code (HR-provided, normalized)
+  // Uniqueness: employee code (HR-provided, normalized). Mailboxes may be shared.
   const codeSnap = await adminDb
     .collection(COLLECTIONS.employees)
     .where("employeeCode", "==", employeeCode)
@@ -125,7 +113,7 @@ export async function POST(request: NextRequest) {
     const existingAuth = await adminAuth.getUserByEmail(email);
     if (existingAuth) {
       return NextResponse.json(
-        { success: false, error: "An authentication account already exists for this email" },
+        { success: false, error: "A login account for this employee code already exists" },
         { status: 409 }
       );
     }
@@ -172,6 +160,7 @@ export async function POST(request: NextRequest) {
     username,
     userId: authUser!.uid,
     email,
+    ...(contactEmail ? { contactEmail } : {}),
     firstName: input.firstName,
     lastName: input.lastName,
     phone: input.mobile,
@@ -313,14 +302,16 @@ export async function POST(request: NextRequest) {
   };
 
   if (input.emailCredentials) {
+    const recipients = [auth.email];
+    if (contactEmail) recipients.push(contactEmail);
     emailResult = await sendOnboardingCredentialsEmail({
-      to: auth.email,
+      to: recipients,
       hrName: auth.profile.displayName || auth.email,
       employeeName: displayName,
       employeeCode,
       username,
       temporaryPassword,
-      email,
+      email: contactEmail || "—",
       loginUrl,
       designation: input.designation,
       departmentName: input.departmentName,
@@ -329,7 +320,7 @@ export async function POST(request: NextRequest) {
     if (emailResult.sent) {
       await adminDb.collection(COLLECTIONS.employees).doc(employeeId).update({
         credentialsEmailedAt: now,
-        credentialsEmailedTo: auth.email,
+        credentialsEmailedTo: recipients.join(", "),
         updatedAt: now,
       });
 
@@ -377,6 +368,7 @@ export async function POST(request: NextRequest) {
           username,
           employeeCode,
           email,
+          ...(contactEmail ? { contactEmail } : {}),
           temporaryPassword,
           loginUrl,
           /** Shown once — never stored */

@@ -255,7 +255,10 @@ export interface Employee extends Timestamps {
   /** Login username — always equals employeeCode after provisioning */
   username?: string;
   userId?: string;
+  /** Firebase login address. Always `{employeeCode}@pharma.local`. */
   email: string;
+  /** Employee's own mailbox. Does not change the login ID. */
+  contactEmail?: string;
   firstName: string;
   lastName: string;
   phone?: string;

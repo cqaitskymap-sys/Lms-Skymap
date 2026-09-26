@@ -50,7 +50,7 @@ export default function EmployeesPage() {
     return employees.filter((e) => {
       const matchSearch =
         !search ||
-        `${e.firstName} ${e.lastName} ${e.email} ${e.employeeCode}`
+        `${e.firstName} ${e.lastName} ${e.contactEmail || ""} ${e.email} ${e.employeeCode}`
           .toLowerCase()
           .includes(search.toLowerCase());
       const stage = e.lifecycleStage || "created";
@@ -67,7 +67,8 @@ export default function EmployeesPage() {
       filtered.map((e) => ({
         Code: e.employeeCode,
         Name: `${e.firstName} ${e.lastName}`,
-        Email: e.email,
+        Email: e.contactEmail || (e.email?.toLowerCase().endsWith("@pharma.local") ? "" : e.email),
+        "Login ID": e.username || e.employeeCode,
         Designation: e.designation,
         Status: e.status,
         Lifecycle: e.lifecycleStage,

@@ -4,7 +4,8 @@
  */
 
 export interface CredentialsEmailPayload {
-  to: string;
+  /** HR inbox, and the employee's own address when one was entered. */
+  to: string | string[];
   hrName: string;
   employeeName: string;
   employeeCode: string;
@@ -34,12 +35,12 @@ export async function sendOnboardingCredentialsEmail(
   const html = `
     <div style="font-family:Segoe UI,Arial,sans-serif;max-width:560px;margin:0 auto;color:#0f172a">
       <h2 style="margin-bottom:8px">${appName} — New employee credentials</h2>
-      <p>Hello ${escapeHtml(payload.hrName)},</p>
+      <p>Hello,</p>
       <p>An account was provisioned for <strong>${escapeHtml(payload.employeeName)}</strong>
       (${escapeHtml(payload.designation)}${payload.departmentName ? ` · ${escapeHtml(payload.departmentName)}` : ""}).</p>
       <table style="width:100%;border-collapse:collapse;margin:16px 0;background:#f8fafc;border-radius:8px">
         <tr><td style="padding:10px 14px;color:#64748b">Employee code</td><td style="padding:10px 14px;font-weight:600">${escapeHtml(payload.employeeCode)}</td></tr>
-        <tr><td style="padding:10px 14px;color:#64748b">Username</td><td style="padding:10px 14px;font-family:monospace;font-weight:600">${escapeHtml(payload.username)}</td></tr>
+        <tr><td style="padding:10px 14px;color:#64748b">Login ID</td><td style="padding:10px 14px;font-family:monospace;font-weight:600">${escapeHtml(payload.username)}</td></tr>
         <tr><td style="padding:10px 14px;color:#64748b">Email</td><td style="padding:10px 14px">${escapeHtml(payload.email)}</td></tr>
         <tr><td style="padding:10px 14px;color:#64748b">Temporary password</td><td style="padding:10px 14px;font-family:monospace;font-weight:600">${escapeHtml(payload.temporaryPassword)}</td></tr>
       </table>
@@ -57,7 +58,13 @@ export async function sendOnboardingCredentialsEmail(
       },
       body: JSON.stringify({
         from,
-        to: [payload.to],
+        to: [
+          ...new Set(
+            (Array.isArray(payload.to) ? payload.to : [payload.to])
+              .map((address) => address.trim().toLowerCase())
+              .filter(Boolean)
+          ),
+        ],
         subject,
         html,
       }),

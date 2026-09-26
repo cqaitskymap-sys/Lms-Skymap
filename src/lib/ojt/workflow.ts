@@ -81,19 +81,27 @@ export function evaluationOverallRating(criteria: OjtCriterionScore[]): number |
 }
 
 /**
+ * Missing flags mean the approval is required.
+ * Only an explicit `false` skips a gate, matching DEFAULT_OJT_APPROVAL_CONFIG.
+ */
+function approvalRequired(flag: boolean | undefined): boolean {
+  return flag !== false;
+}
+
+/**
  * Next status after trainer evaluation + sign-off, based on configurable approvals.
  */
 export function statusAfterTrainerCompletion(config: OjtApprovalConfig, passed: boolean): OjtStatus {
   if (!passed) return "failed";
-  if (config.requireEmployeeAck) return "trainer_completed";
-  if (config.requireHodVerification) return "verification_pending";
-  if (config.requireQaApproval) return "qa_pending";
+  if (approvalRequired(config.requireEmployeeAck)) return "trainer_completed";
+  if (approvalRequired(config.requireHodVerification)) return "verification_pending";
+  if (approvalRequired(config.requireQaApproval)) return "qa_pending";
   return "completed";
 }
 
 export function statusAfterEmployeeAck(config: OjtApprovalConfig): OjtStatus {
-  if (config.requireHodVerification) return "verification_pending";
-  if (config.requireQaApproval) return "qa_pending";
+  if (approvalRequired(config.requireHodVerification)) return "verification_pending";
+  if (approvalRequired(config.requireQaApproval)) return "qa_pending";
   return "completed";
 }
 
@@ -102,7 +110,7 @@ export function statusAfterHodDecision(
   decision: "approved" | "rejected"
 ): OjtStatus {
   if (decision === "rejected") return "in_progress";
-  if (config.requireQaApproval) return "qa_pending";
+  if (approvalRequired(config.requireQaApproval)) return "qa_pending";
   return "completed";
 }
 

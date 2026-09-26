@@ -152,7 +152,7 @@ function LoginForm() {
             <CardHeader className="space-y-1.5">
               <CardTitle className="font-display text-3xl font-semibold">Sign in</CardTitle>
               <CardDescription>
-                Sign in with employee code (e.g. EMP000001) or work email
+                Employees sign in with their employee code. Staff may also use a work email
                 {isDemo && " (Demo mode)"}
               </CardDescription>
             </CardHeader>
@@ -164,7 +164,7 @@ function LoginForm() {
                     id="email"
                     type="text"
                     autoComplete="username"
-                    placeholder="EMP000001 or name@company.com"
+                    placeholder="EMP1001"
                     aria-invalid={!!errors.email}
                     {...register("email")}
                   />

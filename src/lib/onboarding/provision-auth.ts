@@ -1,6 +1,9 @@
 import { adminAuth, adminDb } from "@/lib/firebase/admin";
 import { COLLECTIONS } from "@/lib/firebase/client";
-import { resolveOnboardingEmail } from "@/lib/auth/onboarding-schemas";
+import {
+  employeeContactEmail,
+  loginEmailFromEmployeeCode,
+} from "@/lib/auth/onboarding-schemas";
 import type { Employee, UserProfile } from "@/types";
 
 function isUserNotFound(err: unknown): boolean {
@@ -26,8 +29,9 @@ export async function ensureEmployeeAuthAccount(
   }
 
   const employeeCode = employee.employeeCode.trim().toUpperCase();
-  const email = resolveOnboardingEmail(employee.email, employeeCode);
-  const username = employee.username || employeeCode;
+  const email = loginEmailFromEmployeeCode(employeeCode);
+  const contact = employeeContactEmail(employee);
+  const username = employeeCode;
   const displayName = `${employee.firstName} ${employee.lastName}`.trim();
   const now = new Date().toISOString();
 
@@ -105,6 +109,7 @@ export async function ensureEmployeeAuthAccount(
     username,
     employeeCode,
     email,
+    ...(contact ? { contactEmail: contact } : {}),
     accountProvisionedAt: employee.accountProvisionedAt || now,
     onboardingStatus: "pending_first_login",
     updatedAt: now,

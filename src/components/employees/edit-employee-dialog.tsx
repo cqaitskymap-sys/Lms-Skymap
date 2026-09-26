@@ -8,6 +8,7 @@ import { Loader2 } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
 import { useDepartments } from "@/hooks/use-departments";
 import {
+  employeeContactEmail,
   updateEmployeeProfileSchema,
   type UpdateEmployeeProfileInput,
 } from "@/lib/auth/onboarding-schemas";
@@ -34,9 +35,7 @@ import {
 } from "@/components/ui/select";
 
 function editableEmail(employee: Employee): string {
-  const derived = `${employee.employeeCode.trim().toLowerCase()}@pharma.local`;
-  if (employee.email.trim().toLowerCase() === derived) return "";
-  return employee.email;
+  return employeeContactEmail(employee);
 }
 
 function toFormValues(employee: Employee): UpdateEmployeeProfileInput {
@@ -285,11 +284,17 @@ export function EditEmployeeDialog({
             <Input id="edit-employmentType" value="Permanent" readOnly disabled />
           </div>
           <div className="space-y-2 sm:col-span-2">
-            <Label htmlFor="edit-email">Email (optional)</Label>
-            <Input id="edit-email" type="email" {...register("email")} autoComplete="off" />
+            <Label htmlFor="edit-email">Employee email</Label>
+            <Input
+              id="edit-email"
+              type="email"
+              {...register("email")}
+              autoComplete="off"
+              placeholder="name@company.com"
+            />
             {errors.email && <p className="text-xs text-destructive">{errors.email.message}</p>}
             <p className="text-xs text-muted-foreground">
-              Leave blank to keep login as <span className="font-mono">code@pharma.local</span>
+              Optional mailbox. The same address can be shared by more than one employee. Login ID stays the employee code.
             </p>
           </div>
           <div className="space-y-2 sm:col-span-2">

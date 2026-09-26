@@ -97,6 +97,35 @@ service cloud.firestore {
       );
     }
 
+    // Employee acknowledgement cannot skip HOD/QA. Missing flags default to required.
+    function isOjtEmployeeAcknowledgement() {
+      return isActive()
+        && userDoc().keys().hasAny(['employeeId'])
+        && resource.data.employeeId == userDoc().employeeId
+        && resource.data.status == 'trainer_completed'
+        && request.resource.data.acknowledgement is map
+        && request.resource.data.acknowledgement.acknowledged == true
+        && request.resource.data.acknowledgement.userId == request.auth.uid
+        && onlyUpdating(['acknowledgement', 'status', 'updatedAt', 'updatedBy'])
+        && (
+          request.resource.data.status == 'employee_acknowledged'
+          || (
+            resource.data.get('requireHodVerification', true) == true
+            && request.resource.data.status == 'verification_pending'
+          )
+          || (
+            resource.data.get('requireHodVerification', true) == false
+            && resource.data.get('requireQaApproval', true) == true
+            && request.resource.data.status == 'qa_pending'
+          )
+          || (
+            resource.data.get('requireHodVerification', true) == false
+            && resource.data.get('requireQaApproval', true) == false
+            && request.resource.data.status == 'completed'
+          )
+        );
+    }
+
     // Named absence-cover person may only stamp acknowledgement + e-signature fields.
     function isJdAbsenceHandoverAck() {
       return isJdAbsenceHandoverAssignee()
@@ -238,9 +267,21 @@ service cloud.firestore {
             'documentsViewed', 'progressPercent', 'status',
             'startedAt', 'updatedAt', 'updatedBy'
           ])
+          && resource.data.status in ['assigned', 'not_started', 'in_progress', 'assessment_pending']
           && request.resource.data.status in [
             'assigned', 'not_started', 'in_progress', 'assessment_pending'
           ]
+          && request.resource.data.progressPercent is number
+          && request.resource.data.progressPercent >= currentNum('progressPercent')
+          && request.resource.data.progressPercent <= 100
+          && (
+            request.resource.data.status != 'assessment_pending'
+            || request.resource.data.progressPercent == 100
+          )
+          && !(
+            resource.data.status == 'assessment_pending'
+            && request.resource.data.status in ['assigned', 'not_started', 'in_progress']
+          )
         );
       allow delete: if isSuperAdmin();
     }
@@ -350,9 +391,10 @@ service cloud.firestore {
           isActive()
           && userDoc().keys().hasAny(['employeeId'])
           && resource.data.employeeId == userDoc().employeeId
+          && resource.data.status in ['assigned', 'in_progress', 'training_completed']
           && onlyUpdating(['status', 'startedAt', 'trainingCompletedAt', 'updatedAt', 'updatedBy'])
           && request.resource.data.status in [
-            'assigned', 'in_progress', 'training_completed', 'assessment_pending'
+            'in_progress', 'training_completed', 'assessment_pending'
           ]
         );
       allow delete: if isSuperAdmin();
@@ -388,16 +430,7 @@ service cloud.firestore {
       );
       allow create: if hasRole(['super_admin', 'qa', 'department_head']);
       allow update: if hasRole(['super_admin', 'qa', 'department_head', 'trainer'])
-        || (
-          isActive()
-          && userDoc().keys().hasAny(['employeeId'])
-          && resource.data.employeeId == userDoc().employeeId
-          && onlyUpdating(['acknowledgement', 'status', 'updatedAt', 'updatedBy'])
-          && request.resource.data.status in [
-            'trainer_completed', 'employee_acknowledged', 'verification_pending',
-            'qa_pending', 'completed'
-          ]
-        );
+        || isOjtEmployeeAcknowledgement();
       allow delete: if isSuperAdmin();
     }
 
@@ -466,8 +499,13 @@ service cloud.firestore {
     }
 
     match /exam_results/{id} {
-      // Scores/ranks only (no question keys). Written via Admin SDK submit API.
-      allow read: if isActive();
+      // Full result rows are staff or the learner who sat the exam.
+      // Cross-employee leaderboards use exam_leaderboards (Admin SDK aggregate).
+      allow read: if isActive() && (
+        hasRole(['super_admin', 'hr', 'qa', 'department_head', 'trainer']) ||
+        resource.data.employeeId == userDoc().employeeId ||
+        resource.data.employeeId == request.auth.uid
+      );
       allow create, update: if false;
       allow delete: if isSuperAdmin();
     }
@@ -487,7 +525,9 @@ service cloud.firestore {
         resource.data.employeeId == userDoc().employeeId
       );
       allow create: if false; // Admin SDK issue API only
-      allow update: if hasRole(['super_admin', 'qa']);
+      // PDF location only. Revocation and issuance go through Admin SDK APIs.
+      allow update: if hasRole(['super_admin', 'qa', 'hr'])
+        && onlyUpdating(['pdfStoragePath', 'pdfDownloadUrl', 'updatedAt']);
       allow delete: if isSuperAdmin();
     }
 
@@ -504,8 +544,7 @@ service cloud.firestore {
     match /audit_logs/{id} {
       allow read: if hasRole(['super_admin', 'hr', 'qa']);
       allow create: if false; // Admin SDK / API only for integrity
-      allow update: if false;
-      allow delete: if isSuperAdmin();
+      allow update, delete: if false; // Append-only, including for Super Admin clients
     }
 
     match /lifecycle_events/{id} {

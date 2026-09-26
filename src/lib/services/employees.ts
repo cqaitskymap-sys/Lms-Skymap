@@ -14,7 +14,7 @@ import {
 import { auth, db, COLLECTIONS } from "@/lib/firebase/client";
 import { isDemoMode } from "@/lib/demo/data";
 import {
-  resolveOnboardingEmail,
+  loginEmailFromEmployeeCode,
   type UpdateEmployeeProfileInput,
 } from "@/lib/auth/onboarding-schemas";
 import { readLifecycleStore, writeLifecycleStore } from "@/lib/lifecycle/demo-store";
@@ -64,7 +64,7 @@ export interface EmployeeProfileActor {
 
 /**
  * Correct an employee profile after onboarding.
- * Login username follows the employee code; a blank email keeps code@pharma.local.
+ * Login ID follows the employee code. The email field is only the employee's mailbox.
  */
 export async function saveEmployeeProfile(
   employeeId: string,
@@ -115,7 +115,8 @@ function saveEmployeeProfileLocally(
   if (!current) throw new Error("Employee not found");
 
   const employeeCode = input.employeeCode;
-  const email = resolveOnboardingEmail(input.email, employeeCode);
+  const email = loginEmailFromEmployeeCode(employeeCode);
+  const contactEmail = input.email?.trim().toLowerCase() || "";
   if (
     store.employees.some(
       (e) => e.id !== employeeId && e.employeeCode.toUpperCase() === employeeCode
@@ -126,7 +127,7 @@ function saveEmployeeProfileLocally(
   if (
     store.employees.some((e) => e.id !== employeeId && e.email.toLowerCase() === email)
   ) {
-    throw new Error("An employee with this email already exists");
+    throw new Error("A login account for this employee code already exists");
   }
 
   const now = nowISO();
@@ -136,6 +137,7 @@ function saveEmployeeProfileLocally(
     employeeCode,
     username: employeeCode,
     email,
+    contactEmail,
     firstName: input.firstName,
     lastName: input.lastName,
     phone: input.mobile,
@@ -198,6 +200,7 @@ export async function listEmployees(params: {
         e.firstName.toLowerCase().includes(s) ||
         e.lastName.toLowerCase().includes(s) ||
         e.email.toLowerCase().includes(s) ||
+        (e.contactEmail || "").toLowerCase().includes(s) ||
         e.employeeCode.toLowerCase().includes(s)
     );
   }

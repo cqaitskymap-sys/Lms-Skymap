@@ -19,6 +19,7 @@ import type {
   AssessmentAttempt,
   Exam,
   ExamResult,
+  LeaderboardEntry,
   LifecycleStage,
   Question,
   TrainingAssignment,
@@ -268,6 +269,34 @@ export async function startAssessmentServer(
   }
 
   const prior = await listAttemptsForEmployee(input.examId, input.employeeId);
+  const nowMs = Date.now();
+  const staleClaims = prior.filter(
+    (a) =>
+      a.status === "submitted" &&
+      nowMs - new Date(a.updatedAt).getTime() >= 2 * 60 * 1000
+  );
+  for (const stale of staleClaims) {
+    await adminDb.collection(COLLECTIONS.assessmentAttempts).doc(stale.id).set(
+      {
+        status: "in_progress",
+        updatedAt: new Date().toISOString(),
+        updatedBy: input.actorId,
+      },
+      { merge: true }
+    );
+    stale.status = "in_progress";
+  }
+  const scoring = prior.filter(
+    (a) => a.status === "submitted" && !staleClaims.some((s) => s.id === a.id)
+  );
+  if (scoring.length) {
+    return {
+      ok: false,
+      status: 409,
+      error: "Your previous submission is still being scored. Wait a moment, then refresh.",
+    };
+  }
+
   const open = prior
     .filter((a) => a.status === "in_progress")
     .sort((a, b) => b.startedAt.localeCompare(a.startedAt));
@@ -376,20 +405,103 @@ export type SubmitAssessmentServerResult =
   | { ok: true; attempt: AssessmentAttempt }
   | { ok: false; status: number; error: string };
 
+function toLeaderboardEntries(results: ExamResult[]): LeaderboardEntry[] {
+  return [...results]
+    .sort((a, b) => {
+      if (b.percentage !== a.percentage) return b.percentage - a.percentage;
+      return a.timeSpentSeconds - b.timeSpentSeconds;
+    })
+    .slice(0, 50)
+    .map((r, i) => ({
+      rank: i + 1,
+      employeeId: r.employeeId,
+      employeeName: r.employeeName,
+      percentage: r.percentage,
+      score: r.score,
+      timeSpentSeconds: r.timeSpentSeconds,
+      passed: r.passed,
+      submittedAt: r.createdAt,
+      attemptId: r.attemptId,
+    }));
+}
+
+async function persistExamLeaderboard(examId: string, results: ExamResult[]): Promise<void> {
+  const entries = toLeaderboardEntries(results);
+  await adminDb.collection(COLLECTIONS.examLeaderboards).doc(examId).set({
+    examId,
+    entries,
+    updatedAt: new Date().toISOString(),
+  });
+}
+
+/** Slim public leaderboard. Builds the aggregate from result rows when the cache is empty. */
+export async function getOrBuildExamLeaderboard(
+  examId: string,
+  topN = 20
+): Promise<LeaderboardEntry[]> {
+  const boardRef = adminDb.collection(COLLECTIONS.examLeaderboards).doc(examId);
+  const existing = await boardRef.get();
+  const cached = existing.exists
+    ? ((existing.data()?.entries || []) as LeaderboardEntry[])
+    : [];
+  if (cached.length) return cached.slice(0, topN);
+
+  const peersSnap = await adminDb
+    .collection(COLLECTIONS.examResults)
+    .where("examId", "==", examId)
+    .get();
+  const peers = peersSnap.docs.map((d) => ({ id: d.id, ...d.data() }) as ExamResult);
+  if (!peers.length) return [];
+  const entries = toLeaderboardEntries(peers);
+  await boardRef.set({
+    examId,
+    entries,
+    updatedAt: new Date().toISOString(),
+  });
+  return entries.slice(0, topN);
+}
+
+async function claimAttemptForSubmit(
+  attemptId: string,
+  actorId: string
+): Promise<
+  | { ok: true; attempt: AssessmentAttempt }
+  | { ok: false; status: number; error: string }
+> {
+  const attemptRef = adminDb.collection(COLLECTIONS.assessmentAttempts).doc(attemptId);
+  return adminDb.runTransaction(async (tx) => {
+    const snap = await tx.get(attemptRef);
+    if (!snap.exists) {
+      return { ok: false as const, status: 404, error: "Attempt not found" };
+    }
+    const attempt = { id: snap.id, ...snap.data() } as AssessmentAttempt;
+    const staleClaim =
+      attempt.status === "submitted" &&
+      Date.now() - new Date(attempt.updatedAt).getTime() >= 2 * 60 * 1000;
+    if (attempt.status !== "in_progress" && !staleClaim) {
+      return { ok: false as const, status: 400, error: "Attempt already submitted" };
+    }
+    const now = new Date().toISOString();
+    tx.set(
+      attemptRef,
+      { status: "submitted", updatedAt: now, updatedBy: actorId },
+      { merge: true }
+    );
+    return { ok: true as const, attempt };
+  });
+}
+
 export async function submitAssessmentServer(
   input: SubmitAssessmentServerInput
 ): Promise<SubmitAssessmentServerResult> {
   const attemptRef = adminDb.collection(COLLECTIONS.assessmentAttempts).doc(input.attemptId);
-  const attemptSnap = await attemptRef.get();
-  if (!attemptSnap.exists) {
-    return { ok: false, status: 404, error: "Attempt not found" };
-  }
+  const claimed = await claimAttemptForSubmit(input.attemptId, input.actorId);
+  if (!claimed.ok) return claimed;
 
-  const attempt = { id: attemptSnap.id, ...attemptSnap.data() } as AssessmentAttempt;
-  if (attempt.status !== "in_progress") {
-    return { ok: false, status: 400, error: "Attempt already submitted" };
-  }
+  const attempt = claimed.attempt;
+  let finalized = false;
 
+  try {
   const exam = await loadExam(attempt.examId);
   if (!exam) {
     return { ok: false, status: 404, error: "Exam not found" };
@@ -476,25 +588,44 @@ export async function submitAssessmentServer(
 
   await attemptRef.set(stripUndefined(attemptForPersistence(updated)));
   await adminDb.collection(COLLECTIONS.examResults).doc(result.id).set(stripUndefined(result));
+  finalized = true;
+
+  try {
+    await persistExamLeaderboard(exam.id, peers);
+  } catch (err) {
+    console.error("[submitAssessmentServer] leaderboard update failed:", err);
+  }
 
   // Best-effort rank refresh for peers
   for (const peer of peers) {
     if (peer.attemptId === result.attemptId) continue;
     const peerDoc = peersSnap.docs.find((d) => d.data().attemptId === peer.attemptId);
     if (peerDoc) {
-      await peerDoc.ref.set({ rank: peer.rank, updatedAt: now.toISOString() }, { merge: true });
+      try {
+        await peerDoc.ref.set({ rank: peer.rank, updatedAt: now.toISOString() }, { merge: true });
+      } catch (err) {
+        console.error("[submitAssessmentServer] peer rank update failed:", err);
+      }
     }
   }
 
   if (attempt.assignmentId) {
-    await handleTrainingResultServer(attempt.assignmentId, updated, input.actorId);
+    try {
+      await handleTrainingResultServer(attempt.assignmentId, updated, input.actorId);
+    } catch (err) {
+      console.error("[submitAssessmentServer] training result update failed:", err);
+    }
   }
 
   if (attempt.inductionAssignmentId) {
     try {
       const nowIso = now.toISOString();
       const priorAttempts = await listAttemptsForEmployee(attempt.examId, attempt.employeeId);
-      const finishedBefore = priorAttempts.filter((a) => a.status !== "in_progress").length;
+      const finishedBefore = priorAttempts.filter(
+        (a) =>
+          a.id !== attempt.id &&
+          (a.status === "passed" || a.status === "failed" || a.status === "expired")
+      ).length;
       const attemptsExhausted = finishedBefore + 1 >= (exam.maxAttempts || 1);
       const inductionStatus = updated.passed
         ? "passed"
@@ -540,6 +671,29 @@ export async function submitAssessmentServer(
       questions: sanitizeAttemptForClient(updated.questions, reveal),
     },
   };
+  } catch (err) {
+    console.error("[submitAssessmentServer]", err);
+    return {
+      ok: false,
+      status: 500,
+      error: "Could not score this attempt. Try again.",
+    };
+  } finally {
+    if (!finalized) {
+      await attemptRef
+        .set(
+          {
+            status: "in_progress",
+            updatedAt: new Date().toISOString(),
+            updatedBy: input.actorId,
+          },
+          { merge: true }
+        )
+        .catch((releaseErr) => {
+          console.error("[submitAssessmentServer] release claim failed:", releaseErr);
+        });
+    }
+  }
 }
 
 async function handleTrainingResultServer(

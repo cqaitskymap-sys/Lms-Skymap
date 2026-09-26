@@ -6,7 +6,7 @@ import { auth } from "@/lib/firebase/client";
 import { isDemoMode, DEMO_DEPARTMENTS } from "@/lib/demo/data";
 import { createEmployeeWithLifecycle, type LifecycleActor } from "@/lib/services/lifecycle";
 import type { OnboardEmployeeInput } from "@/lib/auth/onboarding-schemas";
-import { resolveOnboardingEmail } from "@/lib/auth/onboarding-schemas";
+import { loginEmailFromEmployeeCode } from "@/lib/auth/onboarding-schemas";
 import type { Employee, EmploymentType } from "@/types";
 import { readLifecycleStore } from "@/lib/lifecycle/demo-store";
 
@@ -14,6 +14,8 @@ export interface OnboardingCredentials {
   username: string;
   employeeCode: string;
   email: string;
+  /** Employee mailbox. Login ID is the employee code, not this address. */
+  contactEmail?: string;
   temporaryPassword: string;
   loginUrl: string;
   oneTime: boolean;
@@ -46,13 +48,14 @@ async function onboardLocally(
   emailReason: string
 ): Promise<OnboardResult> {
   const employeeCode = input.employeeCode;
-  const email = resolveOnboardingEmail(input.email, employeeCode);
+  const email = loginEmailFromEmployeeCode(employeeCode);
+  const contactEmail = input.email?.trim().toLowerCase() || "";
   const existing = readLifecycleStore().employees;
   if (existing.some((e) => e.employeeCode.toUpperCase() === employeeCode)) {
     throw new Error("An employee with this employee code already exists");
   }
   if (existing.some((e) => e.email.toLowerCase() === email)) {
-    throw new Error("An employee with this email already exists");
+    throw new Error("A login account for this employee code already exists");
   }
 
   const temporaryPassword = localTempPassword();
@@ -63,6 +66,7 @@ async function onboardLocally(
       employeeCode,
       username: employeeCode,
       email,
+      ...(contactEmail ? { contactEmail } : {}),
       firstName: input.firstName,
       lastName: input.lastName,
       phone: input.mobile,
@@ -94,6 +98,7 @@ async function onboardLocally(
       username: employeeCode,
       employeeCode,
       email,
+      ...(contactEmail ? { contactEmail } : {}),
       temporaryPassword,
       loginUrl: `${typeof window !== "undefined" ? window.location.origin : ""}/login`,
       oneTime: true,

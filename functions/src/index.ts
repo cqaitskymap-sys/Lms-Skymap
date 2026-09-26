@@ -218,7 +218,7 @@ export const submitAssessment = onCall(async (request) => {
   if (!attemptSnap.exists) throw new HttpsError("not-found", "Attempt not found");
 
   const attempt = attemptSnap.data()!;
-  if (attempt.status !== "in_progress") {
+  if (attempt.status !== "in_progress" && attempt.status !== "submitted") {
     throw new HttpsError("failed-precondition", "Attempt already submitted");
   }
 
@@ -235,8 +235,30 @@ export const submitAssessment = onCall(async (request) => {
     }
   }
 
+  const claimed = await db.runTransaction(async (tx) => {
+    const snap = await tx.get(attemptRef);
+    if (!snap.exists) return "missing" as const;
+    const current = snap.data()!;
+    if (current.status !== "in_progress") return "taken" as const;
+    tx.update(attemptRef, {
+      status: "submitted",
+      updatedAt: new Date().toISOString(),
+    });
+    return "ok" as const;
+  });
+  if (claimed === "missing") throw new HttpsError("not-found", "Attempt not found");
+  if (claimed === "taken") {
+    throw new HttpsError("failed-precondition", "Attempt already submitted");
+  }
+
   const examSnap = await db.collection("exams").doc(attempt.examId).get();
-  if (!examSnap.exists) throw new HttpsError("not-found", "Exam not found");
+  if (!examSnap.exists) {
+    await attemptRef.update({
+      status: "in_progress",
+      updatedAt: new Date().toISOString(),
+    });
+    throw new HttpsError("not-found", "Exam not found");
+  }
   const exam = examSnap.data()!;
   const now = new Date();
   const expired = now > new Date(attempt.expiresAt);
@@ -293,7 +315,8 @@ export const submitAssessment = onCall(async (request) => {
     return {
       ...q,
       selectedOptionIds: selected,
-      correctOptionIds: correctIds,
+      correctOptionIds: [],
+      explanation: null,
       earnedMarks: earned,
       isCorrect,
       isAnswered: selected.length > 0,
@@ -388,11 +411,9 @@ export const verifyCertificate = onCall(async (request) => {
   return {
     valid: true,
     certificateNumber: cert.certificateNumber,
-    employeeId: cert.employeeId,
-    sopId: cert.sopId,
+    employeeName: cert.employeeName,
     percentage: cert.percentage,
     issuedAt: cert.issuedAt,
-    verificationHash: cert.verificationHash,
   };
 });
 

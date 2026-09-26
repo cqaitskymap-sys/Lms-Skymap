@@ -206,7 +206,7 @@ export default function NewEmployeePage() {
                   <p className="text-xs text-destructive">{errors.employeeCode.message}</p>
                 )}
                 <p className="text-xs text-muted-foreground">
-                  Assigned by HR — also used as the login username.
+                  This is the login ID. The employee signs in with this code, not with email.
                 </p>
               </div>
               <div className="space-y-2 sm:col-span-2">
@@ -277,13 +277,19 @@ export default function NewEmployeePage() {
               </div>
 
               <div className="space-y-2 sm:col-span-2">
-                <Label htmlFor="email">Email (optional)</Label>
-                <Input id="email" type="email" {...register("email")} autoComplete="off" />
+                <Label htmlFor="email">Employee email</Label>
+                <Input
+                  id="email"
+                  type="email"
+                  {...register("email")}
+                  autoComplete="off"
+                  placeholder="name@company.com"
+                />
                 {errors.email && (
                   <p className="text-xs text-destructive">{errors.email.message}</p>
                 )}
                 <p className="text-xs text-muted-foreground">
-                  If blank, login email becomes <span className="font-mono">code@pharma.local</span>
+                  Optional. Used only to email this employee. The same address can be used for more than one employee. It does not become the login ID.
                 </p>
               </div>
 
@@ -343,7 +349,9 @@ export default function NewEmployeePage() {
                     Email login credentials to me (HR)
                   </Label>
                   <p className="text-xs text-muted-foreground">
-                    Requires RESEND_API_KEY. Credentials are always shown on the next screen.
+                    Sends the temporary password to you. If you entered an email, the employee
+                    gets the same message. They still sign in with the employee code. Credentials
+                    stay on the next screen.
                   </p>
                 </div>
               </div>

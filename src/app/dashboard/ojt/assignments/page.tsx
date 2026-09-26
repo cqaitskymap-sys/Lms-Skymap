@@ -96,7 +96,7 @@ export default function OjtAssignmentsPage() {
     } finally {
       setLoading(false);
     }
-  }, [filters]);
+  }, [filters, profile]);
 
   useEffect(() => {
     void refresh();

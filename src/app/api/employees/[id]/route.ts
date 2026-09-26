@@ -10,7 +10,7 @@ import { adminAuth, adminDb, isAdminConfigured } from "@/lib/firebase/admin";
 import { COLLECTIONS } from "@/lib/firebase/client";
 import { generateId } from "@/lib/utils";
 import {
-  resolveOnboardingEmail,
+  loginEmailFromEmployeeCode,
   updateEmployeeProfileSchema,
 } from "@/lib/auth/onboarding-schemas";
 import { getActiveDepartmentOrThrow } from "@/lib/departments/validate";
@@ -97,7 +97,8 @@ export async function PATCH(
   const previousEmployee = empSnap.data() as Record<string, unknown>;
   const employee = { id: empSnap.id, ...previousEmployee } as Employee;
   const employeeCode = input.employeeCode;
-  const email = resolveOnboardingEmail(input.email, employeeCode);
+  const email = loginEmailFromEmployeeCode(employeeCode);
+  const contactEmail = input.email?.trim().toLowerCase() || "";
   const displayName = `${input.firstName} ${input.lastName}`.trim();
   const previousEmail = (employee.email || "").toLowerCase();
   const previousDisplayName = `${employee.firstName || ""} ${employee.lastName || ""}`.trim();
@@ -158,7 +159,7 @@ export async function PATCH(
       .get();
     if (!emailSnap.empty && emailSnap.docs[0]!.id !== id) {
       return NextResponse.json(
-        { success: false, error: "An employee with this email already exists" },
+        { success: false, error: "A login account for this employee code already exists" },
         { status: 409 }
       );
     }
@@ -169,7 +170,7 @@ export async function PATCH(
       .get();
     if (!userEmailSnap.empty && userEmailSnap.docs[0]!.id !== employee.userId) {
       return NextResponse.json(
-        { success: false, error: "An account with this email already exists" },
+        { success: false, error: "A login account for this employee code already exists" },
         { status: 409 }
       );
     }
@@ -180,6 +181,7 @@ export async function PATCH(
     employeeCode,
     username: employeeCode,
     email,
+    contactEmail,
     firstName: input.firstName,
     lastName: input.lastName,
     phone: input.mobile || "",
@@ -291,7 +293,7 @@ export async function PATCH(
         await eventRef.delete().catch(() => undefined);
         if (code === "auth/email-already-exists") {
           return NextResponse.json(
-            { success: false, error: "An authentication account already exists for this email" },
+            { success: false, error: "A login account for this employee code already exists" },
             { status: 409 }
           );
         }
