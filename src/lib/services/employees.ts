@@ -11,8 +11,14 @@ import {
   limit,
   type QueryConstraint,
 } from "firebase/firestore/lite";
-import { db, COLLECTIONS } from "@/lib/firebase/client";
-import type { Employee, PaginatedResult } from "@/types";
+import { auth, db, COLLECTIONS } from "@/lib/firebase/client";
+import { isDemoMode } from "@/lib/demo/data";
+import {
+  resolveOnboardingEmail,
+  type UpdateEmployeeProfileInput,
+} from "@/lib/auth/onboarding-schemas";
+import { readLifecycleStore, writeLifecycleStore } from "@/lib/lifecycle/demo-store";
+import type { Employee, LifecycleEvent, PaginatedResult, UserRole } from "@/types";
 import { generateId, nowISO } from "@/lib/services/helpers";
 
 export async function createEmployee(
@@ -48,6 +54,120 @@ export async function updateEmployee(
     updatedAt: nowISO(),
     updatedBy: actorId,
   });
+}
+
+export interface EmployeeProfileActor {
+  uid: string;
+  name: string;
+  role: UserRole;
+}
+
+/**
+ * Correct an employee profile after onboarding.
+ * Login username follows the employee code; a blank email keeps code@pharma.local.
+ */
+export async function saveEmployeeProfile(
+  employeeId: string,
+  input: UpdateEmployeeProfileInput & { departmentName?: string },
+  actor: EmployeeProfileActor
+): Promise<void> {
+  if (isDemoMode()) {
+    saveEmployeeProfileLocally(employeeId, input, actor);
+    return;
+  }
+
+  const user = auth.currentUser;
+  if (!user) throw new Error("You must be signed in to edit employees");
+  const token = await user.getIdToken();
+  const res = await fetch(`/api/employees/${employeeId}`, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(input),
+  });
+  const json = (await res.json().catch(() => ({}))) as {
+    success?: boolean;
+    error?: string;
+    details?: Record<string, string[] | undefined>;
+  };
+  if (!res.ok || json.success === false) {
+    const details = json.details;
+    if (details) {
+      const first = Object.entries(details).find(([, msgs]) => msgs && msgs.length > 0);
+      if (first?.[1]?.[0]) throw new Error(`${first[0]}: ${first[1][0]}`);
+    }
+    throw new Error(json.error || `Failed to update employee (${res.status})`);
+  }
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event("pharma-lifecycle-updated"));
+  }
+}
+
+function saveEmployeeProfileLocally(
+  employeeId: string,
+  input: UpdateEmployeeProfileInput & { departmentName?: string },
+  actor: EmployeeProfileActor
+): void {
+  const store = readLifecycleStore();
+  const current = store.employees.find((e) => e.id === employeeId);
+  if (!current) throw new Error("Employee not found");
+
+  const employeeCode = input.employeeCode;
+  const email = resolveOnboardingEmail(input.email, employeeCode);
+  if (
+    store.employees.some(
+      (e) => e.id !== employeeId && e.employeeCode.toUpperCase() === employeeCode
+    )
+  ) {
+    throw new Error("An employee with this employee code already exists");
+  }
+  if (
+    store.employees.some((e) => e.id !== employeeId && e.email.toLowerCase() === email)
+  ) {
+    throw new Error("An employee with this email already exists");
+  }
+
+  const now = nowISO();
+  const displayName = `${input.firstName} ${input.lastName}`.trim();
+  const next: Employee = {
+    ...current,
+    employeeCode,
+    username: employeeCode,
+    email,
+    firstName: input.firstName,
+    lastName: input.lastName,
+    phone: input.mobile,
+    mobile: input.mobile,
+    designation: input.designation,
+    departmentId: input.departmentId,
+    departmentName: input.departmentName || current.departmentName,
+    dateOfJoining: input.dateOfJoining,
+    employmentType: "permanent",
+    reportingManagerId: input.reportingManagerId || undefined,
+    reportingManagerName: input.reportingManagerName || undefined,
+    updatedAt: now,
+    updatedBy: actor.uid,
+  };
+  store.employees = store.employees.map((e) => (e.id === employeeId ? next : e));
+
+  const event: LifecycleEvent = {
+    id: generateId("lev"),
+    employeeId,
+    stage: current.lifecycleStage || "created",
+    title: "Profile updated",
+    description: `Updated profile for ${displayName} (${employeeCode})`,
+    status: "completed",
+    actorId: actor.uid,
+    actorName: actor.name,
+    actorRole: actor.role,
+    completedAt: now,
+    createdAt: now,
+    metadata: { kind: "profile_update" },
+  };
+  store.events = [event, ...store.events];
+  writeLifecycleStore(store);
 }
 
 export async function listEmployees(params: {

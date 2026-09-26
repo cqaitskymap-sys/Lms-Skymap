@@ -63,7 +63,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const input = parsed.data;
+  const input = { ...parsed.data, employmentType: "permanent" as const };
   const now = new Date().toISOString();
   const ip = request.headers.get("x-forwarded-for") || undefined;
   const ua = request.headers.get("user-agent") || undefined;

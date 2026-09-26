@@ -3,7 +3,7 @@
 import { use, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
-import { KeyRound, Loader2, ArrowRight, FileUp, ExternalLink, Trash2 } from "lucide-react";
+import { KeyRound, Loader2, ArrowRight, FileUp, ExternalLink, Trash2, Pencil } from "lucide-react";
 import { listDepartments, departmentLabel } from "@/lib/services/departments";
 import { useAuth } from "@/contexts/auth-context";
 import { useEmployeeLifecycle } from "@/hooks/use-employee-lifecycle";
@@ -16,6 +16,7 @@ import {
 import { deleteSignedInductionPaper, uploadSignedInductionPaper } from "@/lib/services/induction";
 import { reissueCredentials, type OnboardingCredentials } from "@/lib/services/onboarding";
 import { CredentialsCard } from "@/components/onboarding/credentials-card";
+import { EditEmployeeDialog } from "@/components/employees/edit-employee-dialog";
 import { getStageDefinition, nextStage } from "@/lib/lifecycle/stages";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { RequirePermission, RequireRole } from "@/components/auth/require-permission";
@@ -51,6 +52,7 @@ export default function EmployeeDetailPage({
   const [assignedSops, setAssignedSops] = useState<(SopDocument & { version?: unknown })[]>([]);
   const [sopsLoading, setSopsLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState(false);
   const [uploadingPaper, setUploadingPaper] = useState(false);
   const paperInputRef = useRef<HTMLInputElement>(null);
   const [credentials, setCredentials] = useState<{
@@ -156,12 +158,20 @@ export default function EmployeeDetailPage({
               {employee.employeeCode} · {employee.designation}
             </p>
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {can("employees:write") && (
+              <Button variant="outline" onClick={() => setEditing(true)}>
+                <Pencil className="mr-2 h-4 w-4" />
+                Edit
+              </Button>
+            )}
             <StatusBadge status={employee.status} />
             <StatusBadge status={employee.inductionStatus} />
             <StatusBadge status={stage} />
           </div>
         </div>
+
+        <EditEmployeeDialog employee={employee} open={editing} onOpenChange={setEditing} />
 
         {credentials && (
           <CredentialsCard

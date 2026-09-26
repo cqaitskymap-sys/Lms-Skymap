@@ -2,12 +2,13 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Plus, Download, Loader2 } from "lucide-react";
+import { Plus, Download, Loader2, Pencil } from "lucide-react";
 import { listDepartments, departmentLabel } from "@/lib/services/departments";
 import { useLifecycleDirectory } from "@/hooks/use-employee-lifecycle";
 import { deleteEmployeeLifecycle } from "@/lib/services/lifecycle";
 import { RequirePermission, Can } from "@/components/auth/require-permission";
 import { AdminDeleteButton } from "@/components/auth/admin-delete-button";
+import { EditEmployeeDialog } from "@/components/employees/edit-employee-dialog";
 import { DataToolbar } from "@/components/shared/data-toolbar";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { Pagination } from "@/components/shared/pagination";
@@ -25,7 +26,7 @@ import {
 import { formatDate } from "@/lib/utils";
 import { toast } from "sonner";
 import * as XLSX from "xlsx";
-import type { Department } from "@/types";
+import type { Department, Employee } from "@/types";
 
 export default function EmployeesPage() {
   const { employees, loading, error, refresh } = useLifecycleDirectory();
@@ -33,6 +34,7 @@ export default function EmployeesPage() {
   const [status, setStatus] = useState("");
   const [page, setPage] = useState(1);
   const [departments, setDepartments] = useState<Department[]>([]);
+  const [editing, setEditing] = useState<Employee | null>(null);
   const pageSize = 10;
 
   useEffect(() => {
@@ -171,7 +173,7 @@ export default function EmployeesPage() {
                   <TableHead>Lifecycle</TableHead>
                   <TableHead>Progress</TableHead>
                   <TableHead>DOJ</TableHead>
-                  <TableHead className="w-12" />
+                  <TableHead className="w-24" />
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -210,15 +212,29 @@ export default function EmployeesPage() {
                     </TableCell>
                     <TableCell>{formatDate(e.dateOfJoining)}</TableCell>
                     <TableCell>
-                      <AdminDeleteButton
-                        confirmTitle={`Delete ${e.firstName} ${e.lastName}?`}
-                        confirmDescription="Employee profile, lifecycle records, and linked login account (if any) will be removed permanently."
-                        successMessage="Employee deleted"
-                        onDelete={async () => {
-                          await deleteEmployeeLifecycle(e.id);
-                          await refresh();
-                        }}
-                      />
+                      <div className="flex items-center justify-end gap-1">
+                        <Can permission="employees:write">
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            title="Edit employee"
+                            aria-label={`Edit ${e.firstName} ${e.lastName}`}
+                            onClick={() => setEditing(e)}
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                        </Can>
+                        <AdminDeleteButton
+                          confirmTitle={`Delete ${e.firstName} ${e.lastName}?`}
+                          confirmDescription="Employee profile, lifecycle records, and linked login account (if any) will be removed permanently."
+                          successMessage="Employee deleted"
+                          onDelete={async () => {
+                            await deleteEmployeeLifecycle(e.id);
+                            await refresh();
+                          }}
+                        />
+                      </div>
                     </TableCell>
                   </TableRow>
                   ))
@@ -230,6 +246,14 @@ export default function EmployeesPage() {
             </div>
           </CardContent>
         </Card>
+
+        <EditEmployeeDialog
+          employee={editing}
+          open={Boolean(editing)}
+          onOpenChange={(open) => {
+            if (!open) setEditing(null);
+          }}
+        />
       </div>
     </RequirePermission>
   );

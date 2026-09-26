@@ -12,7 +12,6 @@ import { useDepartments } from "@/hooks/use-departments";
 import { useAuth } from "@/contexts/auth-context";
 import {
   onboardEmployeeSchema,
-  EMPLOYMENT_TYPES,
   type OnboardEmployeeInput,
 } from "@/lib/auth/onboarding-schemas";
 import { onboardEmployee, type OnboardResult } from "@/lib/services/onboarding";
@@ -31,20 +30,13 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
-const EMPLOYMENT_LABELS: Record<(typeof EMPLOYMENT_TYPES)[number], string> = {
-  permanent: "Permanent",
-  contract: "Contract",
-  intern: "Intern",
-  consultant: "Consultant",
-  temporary: "Temporary",
-};
-
 export default function NewEmployeePage() {
   const router = useRouter();
   const { profile } = useAuth();
   const { activeDepartments, loading: deptLoading } = useDepartments();
   const [result, setResult] = useState<OnboardResult | null>(null);
   const [departmentHeads, setDepartmentHeads] = useState<UserProfile[]>([]);
+  const [employeeName, setEmployeeName] = useState("");
 
   const {
     register,
@@ -72,7 +64,6 @@ export default function NewEmployeePage() {
   });
 
   const departmentId = watch("departmentId");
-  const employmentType = watch("employmentType");
   const reportingManagerId = watch("reportingManagerId");
   const emailCredentials = watch("emailCredentials");
 
@@ -114,6 +105,7 @@ export default function NewEmployeePage() {
       const onboarded = await onboardEmployee(
         {
           ...data,
+          employmentType: "permanent",
           departmentName: dept?.name,
           reportingManagerName: manager?.displayName || data.reportingManagerName,
         },
@@ -217,18 +209,26 @@ export default function NewEmployeePage() {
                   Assigned by HR — also used as the login username.
                 </p>
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="firstName">Employee name (first)</Label>
-                <Input id="firstName" {...register("firstName")} autoComplete="off" />
-                {errors.firstName && (
-                  <p className="text-xs text-destructive">{errors.firstName.message}</p>
-                )}
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="lastName">Last name</Label>
-                <Input id="lastName" {...register("lastName")} autoComplete="off" />
-                {errors.lastName && (
-                  <p className="text-xs text-destructive">{errors.lastName.message}</p>
+              <div className="space-y-2 sm:col-span-2">
+                <Label htmlFor="employeeName">Employee name</Label>
+                <Input
+                  id="employeeName"
+                  value={employeeName}
+                  autoComplete="name"
+                  placeholder="Full name"
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setEmployeeName(value);
+                    const trimmed = value.trim().replace(/\s+/g, " ");
+                    const [first = "", ...rest] = trimmed ? trimmed.split(" ") : [];
+                    setValue("firstName", first, { shouldValidate: true });
+                    setValue("lastName", rest.join(" "), { shouldValidate: true });
+                  }}
+                />
+                {(errors.firstName || errors.lastName) && (
+                  <p className="text-xs text-destructive">
+                    {errors.firstName?.message || errors.lastName?.message}
+                  </p>
                 )}
               </div>
 
@@ -272,26 +272,8 @@ export default function NewEmployeePage() {
               </div>
 
               <div className="space-y-2">
-                <Label>Employment type</Label>
-                <Select
-                  value={employmentType}
-                  onValueChange={(v) =>
-                    setValue("employmentType", v as OnboardEmployeeInput["employmentType"], {
-                      shouldValidate: true,
-                    })
-                  }
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {EMPLOYMENT_TYPES.map((t) => (
-                      <SelectItem key={t} value={t}>
-                        {EMPLOYMENT_LABELS[t]}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <Label htmlFor="employmentType">Employment type</Label>
+                <Input id="employmentType" value="Permanent" readOnly disabled />
               </div>
 
               <div className="space-y-2 sm:col-span-2">

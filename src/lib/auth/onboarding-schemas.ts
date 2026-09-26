@@ -25,13 +25,10 @@ export const onboardEmployeeSchema = z.object({
   firstName: z
     .string()
     .trim()
-    .min(1, "First name is required")
-    .max(60, "First name is too long"),
-  lastName: z
-    .string()
-    .trim()
-    .min(1, "Last name is required")
-    .max(60, "Last name is too long"),
+    .min(1, "Employee name is required")
+    .max(60, "Employee name is too long"),
+  /** Remainder after the first word. Empty when the hire has a single name. */
+  lastName: z.string().trim().max(80, "Employee name is too long"),
   email: z
     .string()
     .trim()
@@ -87,7 +84,13 @@ export const resolveLoginSchema = z.object({
   identifier: z.string().trim().min(1, "Username or email is required").max(120),
 });
 
+/** Profile fields HR can correct after the employee account already exists. */
+export const updateEmployeeProfileSchema = onboardEmployeeSchema.omit({
+  emailCredentials: true,
+});
+
 export type OnboardEmployeeInput = z.infer<typeof onboardEmployeeSchema>;
+export type UpdateEmployeeProfileInput = z.infer<typeof updateEmployeeProfileSchema>;
 export type CompleteOnboardingProfileInput = z.infer<typeof completeOnboardingProfileSchema>;
 export type AcceptPoliciesInput = z.infer<typeof acceptPoliciesSchema>;
 

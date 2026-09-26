@@ -20,6 +20,8 @@ export function LifecycleTimeline({
 }: LifecycleTimelineProps) {
   const eventByStage = new Map<LifecycleStage, LifecycleEvent>();
   for (const e of events) {
+    // Profile edits are activity only — they must not replace the stage description.
+    if (e.metadata?.kind === "profile_update") continue;
     const existing = eventByStage.get(e.stage);
     if (!existing || (e.completedAt && !existing.completedAt) || e.status === "completed") {
       eventByStage.set(e.stage, e);
