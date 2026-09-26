@@ -57,7 +57,7 @@ export function SopVersionHistory({
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
                   <GitBranch className="h-3.5 w-3.5 text-muted-foreground" />
-                  <span className="text-sm font-semibold">v{v.versionNumber}</span>
+                  <span className="text-sm font-semibold">{v.versionNumber}</span>
                   {isCurrent && (
                     <span className="rounded bg-primary/15 px-1.5 py-0.5 text-[10px] font-medium text-primary">
                       CURRENT

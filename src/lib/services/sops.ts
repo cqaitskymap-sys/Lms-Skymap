@@ -60,18 +60,35 @@ async function preferLocalSopStore(): Promise<boolean> {
   return isDemoMode();
 }
 
-/** Accepts "1.0" or "v1.0" and stores major.minor. */
+/** Accepts "1", "01", or "1.2". The stored label is the number entered, without a v prefix. */
 export function parseSopVersionNumber(raw: string): {
   versionNumber: string;
   major: number;
   minor: number;
 } {
   const cleaned = raw.trim().replace(/^v/i, "");
-  const match = /^(\d+)\.(\d+)$/.exec(cleaned);
-  if (!match) throw new Error("Version number must look like 1.0");
-  const major = Number(match[1]);
-  const minor = Number(match[2]);
-  return { versionNumber: `${major}.${minor}`, major, minor };
+  const decimal = /^(\d+)\.(\d+)$/.exec(cleaned);
+  if (decimal) {
+    return {
+      versionNumber: cleaned,
+      major: Number(decimal[1]),
+      minor: Number(decimal[2]),
+    };
+  }
+  const whole = /^(\d+)$/.exec(cleaned);
+  if (whole) {
+    return { versionNumber: cleaned, major: Number(whole[1]), minor: 0 };
+  }
+  throw new Error("Enter a version number like 1");
+}
+
+export function nextSopVersionNumber(current: {
+  versionNumber: string;
+  major: number;
+  minor: number;
+}): string {
+  if (!current.versionNumber.includes(".")) return String(current.major + 1);
+  return `${current.major}.${current.minor + 1}`;
 }
 
 async function uploadAttachment(
@@ -544,7 +561,7 @@ export async function createSopWithFiles(
     actor,
     action: "create",
     resourceId: sopId,
-    description: `Created SOP ${sop.sopNumber} v${parsedVersion.versionNumber} as draft`,
+    description: `Created SOP ${sop.sopNumber} version ${parsedVersion.versionNumber} as draft`,
   });
 
   return { sop, version };
@@ -569,12 +586,8 @@ export async function reviseSopWithFiles(
   const parsedVersion = params.versionNumber?.trim()
     ? parseSopVersionNumber(params.versionNumber)
     : params.majorBump
-      ? { versionNumber: `${current.major + 1}.0`, major: current.major + 1, minor: 0 }
-      : {
-          versionNumber: `${current.major}.${current.minor + 1}`,
-          major: current.major,
-          minor: current.minor + 1,
-        };
+      ? { versionNumber: String(current.major + 1), major: current.major + 1, minor: 0 }
+      : parseSopVersionNumber(nextSopVersionNumber(current));
   const { versionNumber, major, minor } = parsedVersion;
   const duplicate = bundle.versions.some((v) => v.versionNumber === versionNumber);
   if (duplicate) throw new Error(`Version ${versionNumber} already exists on this SOP`);
@@ -908,7 +921,7 @@ export async function updateSopDetails(
     actor,
     action: "update",
     resourceId: sopId,
-    description: `Edited SOP ${sopNumber} v${parsed.versionNumber}`,
+    description: `Edited SOP ${sopNumber} version ${parsed.versionNumber}`,
   });
 }
 

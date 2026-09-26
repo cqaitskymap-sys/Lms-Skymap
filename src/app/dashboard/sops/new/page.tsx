@@ -27,7 +27,7 @@ const schema = z.object({
   versionNumber: z
     .string()
     .trim()
-    .regex(/^\d+\.\d+$/, "Use a version like 1.0"),
+    .regex(/^\d+(\.\d+)?$/, "Enter a number like 1"),
   title: z.string().min(3, "Title required"),
   category: z.string().min(2, "Category required"),
   changeSummary: z.string().optional(),
@@ -53,7 +53,7 @@ export default function NewSopPage() {
   } = useForm<FormValues>({
     resolver: zodResolver(schema),
     defaultValues: {
-      versionNumber: "1.0",
+      versionNumber: "1",
       changeSummary: "Initial release",
       effectiveDate: "",
       reviewDate: "",
@@ -148,7 +148,7 @@ export default function NewSopPage() {
                 </div>
                 <div className="space-y-2">
                   <Label>Version number</Label>
-                  <Input placeholder="1.0" {...register("versionNumber")} />
+                  <Input placeholder="1" {...register("versionNumber")} />
                   {errors.versionNumber && (
                     <p className="text-xs text-destructive">{errors.versionNumber.message}</p>
                   )}

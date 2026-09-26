@@ -76,7 +76,7 @@ export function SopAcknowledgementPanel({
             <div>
               <p className="font-medium">Acknowledged</p>
               <p className="text-sm text-muted-foreground">
-                You acknowledged v{mine.versionNumber} on {formatDateTime(mine.acknowledgedAt)}
+                You acknowledged version {mine.versionNumber} on {formatDateTime(mine.acknowledgedAt)}
               </p>
             </div>
           </div>
@@ -88,7 +88,7 @@ export function SopAcknowledgementPanel({
             <p className="text-sm font-medium">Digital acknowledgement</p>
           </div>
           <p className="text-xs text-muted-foreground">
-            I have read and understood this Standard Operating Procedure (v
+            I have read and understood this Standard Operating Procedure (version{" "}
             {version.versionNumber}) and agree to comply with its requirements in my role.
           </p>
           {blockedByReading && (
@@ -129,7 +129,7 @@ export function SopAcknowledgementPanel({
           <div key={a.id} className="rounded-md border px-3 py-2 text-sm">
             <p className="font-medium">{a.userName}</p>
             <p className="text-xs text-muted-foreground">
-              v{a.versionNumber} · {formatDateTime(a.acknowledgedAt)}
+              {a.versionNumber} · {formatDateTime(a.acknowledgedAt)}
             </p>
           </div>
         ))}

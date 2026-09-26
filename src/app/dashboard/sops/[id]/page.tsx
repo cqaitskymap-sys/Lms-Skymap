@@ -235,7 +235,7 @@ export default function SopDetailPage({ params }: { params: Promise<{ id: string
             <div className="flex flex-wrap items-center gap-2 pt-1">
               <StatusBadge status={sop.status} />
               <span className="font-mono text-xs text-muted-foreground">
-                v{activeVersion.versionNumber}
+                {activeVersion.versionNumber}
               </span>
               <ViewerBadge count={sop.viewCount || 0} />
               <span className="text-xs text-muted-foreground">
@@ -347,7 +347,11 @@ export default function SopDetailPage({ params }: { params: Promise<{ id: string
                 onClick={() => {
                   setShowRevise((open) => {
                     if (!open && activeVersion) {
-                      setReviseVersion(`${activeVersion.major}.${activeVersion.minor + 1}`);
+                      setReviseVersion(
+                        activeVersion.versionNumber.includes(".")
+                          ? `${activeVersion.major}.${activeVersion.minor + 1}`
+                          : String(activeVersion.major + 1)
+                      );
                     }
                     return !open;
                   });
@@ -379,7 +383,7 @@ export default function SopDetailPage({ params }: { params: Promise<{ id: string
                   <Input
                     value={editVersion}
                     onChange={(e) => setEditVersion(e.target.value)}
-                    placeholder="1.0"
+                    placeholder="1"
                   />
                 </div>
                 <div className="space-y-2">
@@ -514,7 +518,7 @@ export default function SopDetailPage({ params }: { params: Promise<{ id: string
                 <Input
                   value={reviseVersion}
                   onChange={(e) => setReviseVersion(e.target.value)}
-                  placeholder="1.1"
+                    placeholder="2"
                 />
               </div>
               <div className="grid gap-4 sm:grid-cols-2">
@@ -583,7 +587,7 @@ export default function SopDetailPage({ params }: { params: Promise<{ id: string
             <CardHeader>
               <CardTitle>Document preview</CardTitle>
               <CardDescription>
-                PDF / video / PPT for v{activeVersion.versionNumber}
+                PDF / video / PPT for version {activeVersion.versionNumber}
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
@@ -625,7 +629,7 @@ export default function SopDetailPage({ params }: { params: Promise<{ id: string
                 <CardTitle className="text-base">Metadata</CardTitle>
               </CardHeader>
               <CardContent className="space-y-3 text-sm">
-                <Meta label="Version" value={`v${activeVersion.versionNumber}`} />
+                <Meta label="Version" value={activeVersion.versionNumber} />
                 <Meta label="Category" value={sop.category} />
                 <Meta label="Departments" value={deptNames || "—"} />
                 <Meta label="Effective date" value={formatDate(sop.effectiveDate || activeVersion.effectiveDate)} />
@@ -665,7 +669,7 @@ export default function SopDetailPage({ params }: { params: Promise<{ id: string
                     run(
                       () =>
                         archiveSopVersion(v.id, "Archived from SOP detail", actor),
-                      `Archived v${v.versionNumber}`
+                      `Archived version ${v.versionNumber}`
                     )
                   }
                 />
@@ -737,7 +741,7 @@ export default function SopDetailPage({ params }: { params: Promise<{ id: string
                     <div>
                       <p className="font-medium">{v.userName}</p>
                       <p className="text-xs text-muted-foreground">
-                        {v.userEmail} · v{v.versionNumber} · {v.source}
+                        {v.userEmail} · {v.versionNumber} · {v.source}
                       </p>
                     </div>
                     <p className="text-xs text-muted-foreground">
@@ -762,7 +766,7 @@ export default function SopDetailPage({ params }: { params: Promise<{ id: string
                 {versions.map((v) => (
                   <div key={v.id} className="rounded-md border px-3 py-2">
                     <p className="font-medium">
-                      v{v.versionNumber} · {v.status}
+                      {v.versionNumber} · {v.status}
                     </p>
                     <p className="text-xs text-muted-foreground">{v.changeSummary}</p>
                     <p className="text-xs text-muted-foreground">

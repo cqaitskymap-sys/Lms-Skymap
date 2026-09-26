@@ -207,7 +207,7 @@ export default function OjtAssignmentsPage() {
                       <div>{a.trainingTopic}</div>
                       <div className="font-mono text-xs text-muted-foreground">
                         {a.sopNumber || a.referenceDocumentNumber}
-                        {a.sopVersionNumber ? ` · v${a.sopVersionNumber}` : ""}
+                        {a.sopVersionNumber ? ` · ${a.sopVersionNumber}` : ""}
                       </div>
                     </TableCell>
                     <TableCell className="text-sm">

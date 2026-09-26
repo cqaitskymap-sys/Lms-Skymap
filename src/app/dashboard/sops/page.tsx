@@ -217,7 +217,7 @@ export default function SopsPage() {
                       </div>
                     </TableCell>
                     <TableCell className="font-mono text-sm">
-                      v{s.currentVersionNumber || s.version?.versionNumber || "—"}
+                      {s.currentVersionNumber || s.version?.versionNumber || "—"}
                     </TableCell>
                     <TableCell className="text-xs">{deptLabel(s.departmentIds)}</TableCell>
                     <TableCell>{formatDate(s.effectiveDate)}</TableCell>
