@@ -80,6 +80,10 @@ export default function BulkSopPage() {
   const departmentKey = activeDepartments.map((d) => `${d.id}:${d.name}:${d.code}`).join("|");
 
   useEffect(() => {
+    folderRef.current?.setAttribute("webkitdirectory", "");
+  }, []);
+
+  useEffect(() => {
     const departments = departmentsRef.current;
     if (!departments.length) return;
     setRows((current) => {
@@ -318,7 +322,6 @@ export default function BulkSopPage() {
               type="file"
               multiple
               className="hidden"
-              webkitdirectory=""
               onChange={(e) => onFiles(e.target.files)}
             />
           </CardContent>
