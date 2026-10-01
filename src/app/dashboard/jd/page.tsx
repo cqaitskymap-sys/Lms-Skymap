@@ -564,11 +564,11 @@ function JdPageInner() {
     setJdNo(record.jdNo || "");
     setRevisionNo(String(record.version ?? 1));
     setJobTitle(record.title);
-    setResponsibilities(record.responsibilities.map((r, i) => `${i + 1}. ${r}`).join("\n"));
-    setQualifications(record.qualifications.join("\n"));
+    setResponsibilities((record.responsibilities || []).map((r, i) => `${i + 1}. ${r}`).join("\n"));
+    setQualifications((record.qualifications || []).join("\n"));
     setExperience(record.experience || "");
     setSupersedesNo(record.supersedesNo || "");
-    setEffectiveFrom(record.effectiveFrom.slice(0, 10));
+    setEffectiveFrom((record.effectiveFrom || "").slice(0, 10));
     setHandoverEmployeeId(record.absenceHandoverEmployeeId || "");
     setAssignedByEmployeeId(
       record.assignedBy?.userId && profile?.uid === record.assignedBy.userId
@@ -695,7 +695,7 @@ function JdPageInner() {
       `;
     };
 
-    const responsibilityRows = (record.responsibilities.length
+    const responsibilityRows = ((record.responsibilities || []).length
       ? record.responsibilities
       : ["—"]
     )
@@ -1292,6 +1292,16 @@ function JdPageInner() {
                           ? ` · Approved ${formatDate(record.approvedAt)}`
                           : ""}
                       </p>
+                      {record.sourceDocument?.downloadUrl && (
+                        <a
+                          href={record.sourceDocument.downloadUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-xs font-medium text-primary hover:underline"
+                        >
+                          Uploaded file: {record.sourceDocument.fileName}
+                        </a>
+                      )}
                       {record.absenceHandoverName && (
                         <p className="text-xs text-muted-foreground">
                           Absence handover:{" "}

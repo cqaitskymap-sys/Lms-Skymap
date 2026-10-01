@@ -553,8 +553,8 @@ export async function createSopWithFiles(
     store.versions.unshift(version);
     writeSopStore(store);
   } else {
-    await setDoc(doc(db, COLLECTIONS.sops, sopId), sop);
-    await setDoc(doc(db, COLLECTIONS.sopVersions, versionId), version);
+    await setDoc(doc(db, COLLECTIONS.sops, sopId), stripUndefined(sop));
+    await setDoc(doc(db, COLLECTIONS.sopVersions, versionId), stripUndefined(version));
   }
 
   await writeAuditClient({
@@ -645,7 +645,7 @@ export async function reviseSopWithFiles(
     );
     writeSopStore(store);
   } else {
-    await setDoc(doc(db, COLLECTIONS.sopVersions, versionId), version);
+    await setDoc(doc(db, COLLECTIONS.sopVersions, versionId), stripUndefined(version));
     await updateDoc(doc(db, COLLECTIONS.sops, sopId), {
       currentVersionId: versionId,
       currentVersionNumber: versionNumber,

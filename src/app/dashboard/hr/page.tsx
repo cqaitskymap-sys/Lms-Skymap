@@ -53,9 +53,14 @@ export default function HrDashboardPage() {
               title="Pending approvals"
               description="Verification & handover gates"
               action={
-                <Button size="sm" asChild>
-                  <Link href="/dashboard/employees/new">Onboard employee</Link>
-                </Button>
+                <div className="flex flex-wrap gap-2">
+                  <Button size="sm" variant="outline" asChild>
+                    <Link href="/dashboard/employees/new/legacy">Bulk entry</Link>
+                  </Button>
+                  <Button size="sm" asChild>
+                    <Link href="/dashboard/employees/new">Onboard employee</Link>
+                  </Button>
+                </div>
               }
             />
             {profile && (

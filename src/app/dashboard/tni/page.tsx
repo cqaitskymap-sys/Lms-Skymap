@@ -872,7 +872,7 @@ function TniPageInner() {
     setJobTitle(linkedJd?.title || "");
     setResponsibilities((linkedJd?.responsibilities || []).join("\n"));
     setNeeds(
-      record.needs.map((n) => ({
+      (record.needs || []).map((n) => ({
         id: n.id || crypto.randomUUID(),
         topic: n.topic,
         sopId: n.sopId || "",
@@ -947,7 +947,7 @@ function TniPageInner() {
         jds.find((j) => j.id === record.jdId) ||
         jds.find((j) => j.id === emp.jdId) ||
         jds.find((j) => j.employeeId === emp.id),
-      selectedNeeds: record.needs.map((n) => ({
+      selectedNeeds: (record.needs || []).map((n) => ({
         id: n.id,
         topic: n.topic,
         sopId: n.sopId || "",
@@ -1314,8 +1314,18 @@ function TniPageInner() {
                         <span className="text-xs text-muted-foreground">v{record.version}</span>
                       </div>
                       <p className="text-xs text-muted-foreground">
-                        JD: {linkedJd?.title || record.jdId} · {record.needs.length} need(s)
+                        JD: {linkedJd?.title || record.jdId} · {(record.needs || []).length} need(s)
                       </p>
+                      {record.sourceDocument?.downloadUrl && (
+                        <a
+                          href={record.sourceDocument.downloadUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-xs font-medium text-primary hover:underline"
+                        >
+                          Uploaded file: {record.sourceDocument.fileName}
+                        </a>
+                      )}
                       {signoffLine("Prepared by", record.preparedBySignoff)}
                       {signoffLine("Approved by", record.approvedBySignoff)}
                       {qaWaiting && (

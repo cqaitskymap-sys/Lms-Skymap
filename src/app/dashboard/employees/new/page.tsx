@@ -1,11 +1,12 @@
 "use client";
 
 import { useMemo, useState, useEffect } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { toast } from "sonner";
-import { Loader2, UserPlus } from "lucide-react";
+import { FolderInput, Loader2, UserPlus } from "lucide-react";
 import { RequirePermission } from "@/components/auth/require-permission";
 import { CredentialsCard } from "@/components/onboarding/credentials-card";
 import { useDepartments } from "@/hooks/use-departments";
@@ -168,6 +169,24 @@ export default function NewEmployeePage() {
             Creates profile & credentials. Enter the employee code assigned by HR.
           </p>
         </div>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <FolderInput className="h-5 w-5" />
+              Already onboarded before this software
+            </CardTitle>
+            <CardDescription>
+              For employees whose onboarding, Job Description, and TNI were completed before this
+              LMS. Enter their employee codes in bulk and upload the existing JD and TNI files.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button variant="outline" asChild>
+              <Link href="/dashboard/employees/new/legacy">Bulk entry</Link>
+            </Button>
+          </CardContent>
+        </Card>
 
         <Card>
           <CardHeader>

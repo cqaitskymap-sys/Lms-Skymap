@@ -51,9 +51,14 @@ export default function QaDashboardPage() {
             title="SOP register"
             description="Controlled documents"
             action={
-              <Button size="sm" asChild>
-                <Link href="/dashboard/sops/new">New SOP</Link>
-              </Button>
+              <div className="flex flex-wrap gap-2">
+                <Button size="sm" variant="outline" asChild>
+                  <Link href="/dashboard/sops/new/bulk">Bulk entry</Link>
+                </Button>
+                <Button size="sm" asChild>
+                  <Link href="/dashboard/sops/new">New SOP</Link>
+                </Button>
+              </div>
             }
           />
           <div className="overflow-x-auto">

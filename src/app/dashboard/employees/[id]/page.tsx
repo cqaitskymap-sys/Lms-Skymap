@@ -157,6 +157,12 @@ export default function EmployeeDetailPage({
             <p className="text-muted-foreground">
               {employee.employeeCode} · {employee.designation}
             </p>
+            {employee.recordSource === "pre_system" && (
+              <p className="text-sm text-muted-foreground">
+                Imported from records created before this software. Existing JD and TNI files are on
+                file.
+              </p>
+            )}
           </div>
           <div className="flex flex-wrap items-center gap-2">
             {can("employees:write") && (
@@ -288,6 +294,17 @@ export default function EmployeeDetailPage({
                 ) : (
                   <p className="font-medium">Not created</p>
                 )}
+                {employee.legacyJdDocument?.downloadUrl && (
+                  <a
+                    href={employee.legacyJdDocument.downloadUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="mt-1 inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline"
+                  >
+                    {employee.legacyJdDocument.fileName}
+                    <ExternalLink className="h-3.5 w-3.5" />
+                  </a>
+                )}
               </div>
               <div>
                 <p className="text-muted-foreground">TNI</p>
@@ -301,6 +318,17 @@ export default function EmployeeDetailPage({
                   </Link>
                 ) : (
                   <p className="font-medium">Not created</p>
+                )}
+                {employee.legacyTniDocument?.downloadUrl && (
+                  <a
+                    href={employee.legacyTniDocument.downloadUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="mt-1 inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline"
+                  >
+                    {employee.legacyTniDocument.fileName}
+                    <ExternalLink className="h-3.5 w-3.5" />
+                  </a>
                 )}
               </div>
               <div>

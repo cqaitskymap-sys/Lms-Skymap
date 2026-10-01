@@ -89,7 +89,67 @@ export const updateEmployeeProfileSchema = onboardEmployeeSchema.omit({
   emailCredentials: true,
 });
 
+/** Production download URLs are https. The Storage emulator serves http on localhost. */
+function isAllowedStorageUrl(value: string): boolean {
+  if (value.startsWith("https://")) return true;
+  try {
+    const url = new URL(value);
+    return (
+      url.protocol === "http:" &&
+      (url.hostname === "127.0.0.1" || url.hostname === "localhost")
+    );
+  } catch {
+    return false;
+  }
+}
+
+export const legacyUploadedFileSchema = z.object({
+  fileName: z.string().trim().min(1).max(180),
+  storagePath: z.string().trim().min(1).max(400),
+  downloadUrl: z.string().trim().url().max(4000),
+  fileSize: z.number().int().positive().max(15 * 1024 * 1024),
+  mimeType: z.string().trim().min(1).max(160),
+});
+
+/** Employee who was onboarded, with JD and TNI, before this LMS existed. */
+export const legacyEmployeeSchema = onboardEmployeeSchema
+  .omit({
+    reportingManagerId: true,
+    reportingManagerName: true,
+    emailCredentials: true,
+    employmentType: true,
+  })
+  .extend({
+    jdNo: z.string().trim().max(40).optional().or(z.literal("")),
+    jdDocument: legacyUploadedFileSchema,
+    tniDocument: legacyUploadedFileSchema,
+  })
+  .superRefine((data, ctx) => {
+    const expect = (kind: "jd" | "tni", path: string, field: "jdDocument" | "tniDocument") => {
+      const prefix = `legacy-records/${data.employeeCode}/${kind}/`;
+      if (!path.startsWith(prefix)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Upload the ${kind.toUpperCase()} file again before import`,
+          path: [field, "storagePath"],
+        });
+      }
+    };
+    expect("jd", data.jdDocument.storagePath, "jdDocument");
+    expect("tni", data.tniDocument.storagePath, "tniDocument");
+    for (const field of ["jdDocument", "tniDocument"] as const) {
+      if (!isAllowedStorageUrl(data[field].downloadUrl)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Document link must be a secure storage URL",
+          path: [field, "downloadUrl"],
+        });
+      }
+    }
+  });
+
 export type OnboardEmployeeInput = z.infer<typeof onboardEmployeeSchema>;
+export type LegacyEmployeeInput = z.infer<typeof legacyEmployeeSchema>;
 export type UpdateEmployeeProfileInput = z.infer<typeof updateEmployeeProfileSchema>;
 export type CompleteOnboardingProfileInput = z.infer<typeof completeOnboardingProfileSchema>;
 export type AcceptPoliciesInput = z.infer<typeof acceptPoliciesSchema>;

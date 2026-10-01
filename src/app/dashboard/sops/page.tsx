@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { Plus, FileText, Eye, PenLine } from "lucide-react";
+import { Plus, FileText, Eye, PenLine, Layers } from "lucide-react";
 import { RequirePermission } from "@/components/auth/require-permission";
 import { AdminDeleteButton } from "@/components/auth/admin-delete-button";
 import { StatusBadge } from "@/components/shared/status-badge";
@@ -80,12 +80,20 @@ export default function SopsPage() {
             </p>
           </div>
           <RequirePermission permission="sops:write" hideOnDeny>
-            <Button asChild>
-              <Link href="/dashboard/sops/new">
-                <Plus className="mr-2 h-4 w-4" />
-                New SOP
-              </Link>
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              <Button variant="outline" asChild>
+                <Link href="/dashboard/sops/new/bulk">
+                  <Layers className="mr-2 h-4 w-4" />
+                  Bulk entry
+                </Link>
+              </Button>
+              <Button asChild>
+                <Link href="/dashboard/sops/new">
+                  <Plus className="mr-2 h-4 w-4" />
+                  New SOP
+                </Link>
+              </Button>
+            </div>
           </RequirePermission>
         </div>
 
@@ -144,16 +152,6 @@ export default function SopsPage() {
           onFilterChange={(key, value) => {
             if (key === "status") setStatus(value);
           }}
-          actions={
-            <RequirePermission permission="sops:write" hideOnDeny>
-              <Button size="sm" variant="outline" asChild>
-                <Link href="/dashboard/sops/new">
-                  <Plus className="mr-2 h-4 w-4" />
-                  New SOP
-                </Link>
-              </Button>
-            </RequirePermission>
-          }
         />
 
         <Card>
@@ -188,9 +186,14 @@ export default function SopsPage() {
                           </p>
                           {!isEmployee && (
                             <RequirePermission permission="sops:write" hideOnDeny>
-                              <Button size="sm" asChild>
-                                <Link href="/dashboard/sops/new">Create first SOP</Link>
-                              </Button>
+                              <div className="flex flex-wrap justify-center gap-2">
+                                <Button size="sm" variant="outline" asChild>
+                                  <Link href="/dashboard/sops/new/bulk">Bulk entry</Link>
+                                </Button>
+                                <Button size="sm" asChild>
+                                  <Link href="/dashboard/sops/new">Create first SOP</Link>
+                                </Button>
+                              </div>
                             </RequirePermission>
                           )}
                         </div>

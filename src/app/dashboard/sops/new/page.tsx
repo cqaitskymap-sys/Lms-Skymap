@@ -7,7 +7,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
-import { ArrowLeft, Loader2 } from "lucide-react";
+import { ArrowLeft, Layers, Loader2 } from "lucide-react";
 import { RequirePermission } from "@/components/auth/require-permission";
 import { useDepartments } from "@/hooks/use-departments";
 import { useAuth } from "@/contexts/auth-context";
@@ -128,6 +128,24 @@ export default function NewSopPage() {
             Upload PDF, PPT, and video · draft → review → approve
           </p>
         </div>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Layers className="h-5 w-5" />
+              Several SOPs at once
+            </CardTitle>
+            <CardDescription>
+              Load an Excel list of SOP numbers, titles, and departments, then upload the matching
+              PDF, PPT, or video files in one batch.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button variant="outline" asChild>
+              <Link href="/dashboard/sops/new/bulk">Open bulk SOP entry</Link>
+            </Button>
+          </CardContent>
+        </Card>
 
         <Card>
           <CardHeader>

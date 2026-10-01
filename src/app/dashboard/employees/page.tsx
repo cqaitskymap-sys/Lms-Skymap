@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Plus, Download, Loader2, Pencil } from "lucide-react";
+import { Plus, Download, Loader2, Pencil, Layers } from "lucide-react";
 import { listDepartments, departmentLabel } from "@/lib/services/departments";
 import { useLifecycleDirectory } from "@/hooks/use-employee-lifecycle";
 import { deleteEmployeeLifecycle } from "@/lib/services/lifecycle";
@@ -110,16 +110,24 @@ export default function EmployeesPage() {
   return (
     <RequirePermission permission="employees:read">
       <div className="space-y-6">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h1 className="text-2xl font-bold tracking-tight">Employees</h1>
             <p className="text-muted-foreground">Manage workforce profiles & lifecycle</p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <Button variant="outline" onClick={exportExcel}>
               <Download className="mr-2 h-4 w-4" />
               Export
             </Button>
+            <Can permission={["employees:onboard", "employees:write"]}>
+              <Button variant="outline" asChild>
+                <Link href="/dashboard/employees/new/legacy">
+                  <Layers className="mr-2 h-4 w-4" />
+                  Bulk entry
+                </Link>
+              </Button>
+            </Can>
             <Can permission="employees:write">
               <Button asChild>
                 <Link href="/dashboard/employees/new">

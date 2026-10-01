@@ -64,6 +64,15 @@ service firebase.storage {
       allow delete: if isSuperAdmin();
     }
 
+    // JD and TNI files for employees onboarded before this LMS
+    match /legacy-records/{employeeCode}/{kind}/{fileName} {
+      allow read: if isSignedIn();
+      allow write: if hasRole(['super_admin', 'hr'])
+        && request.resource.size < 15 * 1024 * 1024
+        && isTrainingFile();
+      allow delete: if isSuperAdmin() || hasRole(['hr']);
+    }
+
     // Signed physical induction papers (HR uploads after dept-head signatures)
     match /employees/{employeeId}/induction-signed/{fileName} {
       allow read: if hasRole(['super_admin', 'hr', 'qa', 'department_head'])

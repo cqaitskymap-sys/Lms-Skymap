@@ -295,6 +295,10 @@ export interface Employee extends Timestamps {
   photoURL?: string;
   address?: string;
   emergencyContact?: string;
+  /** Person was onboarded before this LMS; JD and TNI files were imported. */
+  recordSource?: "pre_system";
+  legacyJdDocument?: InductionSignedPaper;
+  legacyTniDocument?: InductionSignedPaper;
   /** Auth + first-login onboarding gate */
   onboardingStatus?: OnboardingStatus;
   accountProvisionedAt?: string;
@@ -411,6 +415,9 @@ export interface JobDescription extends Timestamps {
   assignedBy?: JdSignoff;
   /** Page-2 signature: Job Responsibility Accepted by */
   acceptedBy?: JdSignoff;
+  /** PDF/Office file uploaded for a JD that already existed before this LMS */
+  sourceDocument?: InductionSignedPaper;
+  importedFrom?: "pre_system";
 }
 
 export type JdSignoffSlot = "absence_handover" | "assigned_by" | "accepted_by";
@@ -453,6 +460,9 @@ export interface TrainingNeedIdentification extends Timestamps {
   preparedBySignoff?: JdSignoff;
   /** Print box: Approved By (Head-Quality Assurance/Designee) */
   approvedBySignoff?: JdSignoff;
+  /** PDF/Office file uploaded for a TNI that already existed before this LMS */
+  sourceDocument?: InductionSignedPaper;
+  importedFrom?: "pre_system";
 }
 
 export interface SopDocument extends Timestamps {
