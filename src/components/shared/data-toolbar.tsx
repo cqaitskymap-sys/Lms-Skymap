@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Search } from "lucide-react";
+import { Search, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import {
@@ -19,6 +19,8 @@ interface FilterOption {
 
 interface DataToolbarProps {
   searchPlaceholder?: string;
+  /** When set, the field stays in sync with the parent filter. */
+  searchValue?: string;
   onSearch: (value: string) => void;
   filters?: { key: string; label: string; options: FilterOption[]; value?: string }[];
   onFilterChange?: (key: string, value: string) => void;
@@ -27,12 +29,19 @@ interface DataToolbarProps {
 
 export function DataToolbar({
   searchPlaceholder = "Search…",
+  searchValue,
   onSearch,
   filters,
   onFilterChange,
   actions,
 }: DataToolbarProps) {
-  const [search, setSearch] = useState("");
+  const [innerSearch, setInnerSearch] = useState("");
+  const search = searchValue !== undefined ? searchValue : innerSearch;
+
+  const applySearch = (value: string) => {
+    if (searchValue === undefined) setInnerSearch(value);
+    onSearch(value);
+  };
 
   return (
     <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -41,11 +50,21 @@ export function DataToolbar({
           <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
           <Input
             placeholder={searchPlaceholder}
-            className="pl-8"
+            className={search ? "pl-8 pr-8" : "pl-8"}
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => applySearch(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && onSearch(search)}
           />
+          {search ? (
+            <button
+              type="button"
+              aria-label="Clear search"
+              className="absolute right-2 top-2.5 rounded-sm text-muted-foreground hover:text-foreground"
+              onClick={() => applySearch("")}
+            >
+              <X className="h-4 w-4" />
+            </button>
+          ) : null}
         </div>
         <Button variant="secondary" size="sm" onClick={() => onSearch(search)}>
           Search

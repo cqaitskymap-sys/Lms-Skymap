@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useAuth } from "@/contexts/auth-context";
 import {
   employeeCanAccessSop,
@@ -20,11 +20,12 @@ export function useSopDirectory() {
   const [sops, setSops] = useState<(SopDocument & { version?: SopVersion })[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const hasLoaded = useRef(false);
 
   const refresh = useCallback(
     async (filters?: Parameters<typeof listSopsDetailed>[0]) => {
       if (authLoading) return;
-      setLoading(true);
+      if (!hasLoaded.current) setLoading(true);
       setError(null);
       try {
         if (profile?.role === "employee") {
@@ -47,6 +48,7 @@ export function useSopDirectory() {
         setError(err instanceof Error ? err.message : "Failed to load SOPs");
         setSops([]);
       } finally {
+        hasLoaded.current = true;
         setLoading(false);
       }
     },

@@ -23,7 +23,6 @@ import {
 } from "@/components/ui/table";
 import { formatDate } from "@/lib/utils";
 import { SopLoading } from "@/components/sops/sop-media-preview";
-import type { SopStatus } from "@/types";
 
 export default function SopsPage() {
   const { profile } = useAuth();
@@ -132,10 +131,8 @@ export default function SopsPage() {
 
         <DataToolbar
           searchPlaceholder="Search SOPs…"
-          onSearch={(v) => {
-            setSearch(v);
-            void refresh({ search: v, status: status as SopStatus | "" });
-          }}
+          searchValue={search}
+          onSearch={setSearch}
           filters={[
             {
               key: "status",
