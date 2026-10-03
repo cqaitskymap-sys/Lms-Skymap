@@ -6,7 +6,6 @@ export { recordAuditEvent, notifyAuditUpdated, AUDIT_UPDATED_EVENT } from "@/lib
 export type { AuditListFilters } from "@/lib/services/audit-logs";
 
 import type { AuditAction, UserRole } from "@/types";
-import { generateId } from "@/lib/utils";
 import { recordAuditEvent } from "@/lib/services/audit-logs";
 
 /**
@@ -26,7 +25,7 @@ export async function logAuditClient(params: {
   void params.actorId;
   void params.actorEmail;
   void params.actorRole;
-  const id = await recordAuditEvent({
+  return recordAuditEvent({
     action: params.action,
     resourceType: params.resourceType,
     resourceId: params.resourceId,
@@ -34,7 +33,6 @@ export async function logAuditClient(params: {
     before: params.before,
     after: params.after,
   });
-  return id || generateId("audit");
 }
 
 export function nowISO() {

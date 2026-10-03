@@ -119,8 +119,9 @@ export default function AuditPage() {
   }, [allLogs, action, resourceType, dateFrom, dateTo, search]);
 
   const todayCount = useMemo(() => {
-    const day = new Date().toISOString().slice(0, 10);
-    return logs.filter((l) => l.timestamp.startsWith(day)).length;
+    const now = new Date();
+    const day = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+    return logs.filter((l) => isoInLocalDateRange(l.timestamp, day, day)).length;
   }, [logs]);
 
   const actorCount = useMemo(
@@ -131,14 +132,20 @@ export default function AuditPage() {
   const handleExport = async () => {
     try {
       exportAuditLogsCsv(logs);
-      await recordAuditEvent({
+      const auditId = await recordAuditEvent({
         action: "export",
         resourceType: "audit_logs",
         resourceId: "trail",
         description: `Exported ${logs.length} audit log row(s) as CSV`,
         after: { rowCount: logs.length },
       });
-      toast.success(`Exported ${logs.length} rows`);
+      if (!auditId) {
+        toast.warning(
+          `Exported ${logs.length} rows. The audit trail could not record this export.`
+        );
+      } else {
+        toast.success(`Exported ${logs.length} rows`);
+      }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Export failed");
     }

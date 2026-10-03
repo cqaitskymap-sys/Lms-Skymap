@@ -58,9 +58,8 @@ export async function POST(request: NextRequest) {
     attempt.employeeId === profileEmployeeId ||
     attempt.employeeId === auth.uid ||
     attempt.createdBy === auth.uid;
-  const isStaff = hasPermission(auth.role, "assessments:write") || auth.role === "super_admin";
 
-  if (!ownsAttempt && !isStaff) {
+  if (!ownsAttempt) {
     return NextResponse.json(
       { success: false, error: "Forbidden: not your attempt" },
       { status: 403 }

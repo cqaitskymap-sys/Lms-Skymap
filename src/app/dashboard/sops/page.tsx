@@ -41,13 +41,39 @@ function approverNameOf(sop: SopRow) {
   return sop.assignedApproverName || sop.version?.assignedApproverName || "";
 }
 
+function workflowOf(sop: SopRow): "draft" | "under_review" | null {
+  if (sop.status === "draft" || sop.status === "under_review") return sop.status;
+  if (
+    sop.status === "approved" &&
+    sop.pendingVersionId &&
+    (sop.pendingStatus === "draft" || sop.pendingStatus === "under_review")
+  ) {
+    return sop.pendingStatus;
+  }
+  return null;
+}
+
+/** Draft and in-review filters must include a revision sitting on a still-approved SOP. */
+function matchesStatusFilter(sop: SopRow, status: string) {
+  if (!status) return true;
+  if (status === "draft" || status === "under_review") {
+    return sop.status === status || workflowOf(sop) === status;
+  }
+  return sop.status === status;
+}
+
 function toTarget(sop: SopRow): SopBulkTarget {
+  const pending = workflowOf(sop) !== null && sop.status === "approved" && sop.pendingVersionId;
   return {
     sopId: sop.id,
-    versionId: sop.currentVersionId || sop.version?.id || "",
+    versionId: pending ? sop.pendingVersionId! : sop.currentVersionId || sop.version?.id || "",
     sopNumber: sop.sopNumber,
-    effectiveDate: sop.effectiveDate || sop.version?.effectiveDate,
-    reviewDate: sop.reviewDate || sop.version?.reviewDate,
+    ...(pending
+      ? {}
+      : {
+          effectiveDate: sop.effectiveDate || sop.version?.effectiveDate,
+          reviewDate: sop.reviewDate || sop.version?.reviewDate,
+        }),
   };
 }
 
@@ -70,7 +96,10 @@ export default function SopsPage() {
   const [approveTargets, setApproveTargets] = useState<SopRow[]>([]);
 
   const mine = useMemo(
-    () => sops.filter((sop) => sop.status === "under_review" && approverIdOf(sop) === profile?.uid),
+    () =>
+      sops.filter(
+        (sop) => workflowOf(sop) === "under_review" && approverIdOf(sop) === profile?.uid
+      ),
     [sops, profile?.uid]
   );
 
@@ -81,14 +110,15 @@ export default function SopsPage() {
         `${s.sopNumber} ${s.title} ${s.category} ${(s.tags || []).join(" ")}`
           .toLowerCase()
           .includes(search.toLowerCase());
-      const matchStatus = !status || s.status === status;
-      const matchMine = !mineOnly || (s.status === "under_review" && approverIdOf(s) === profile?.uid);
+      const matchStatus = matchesStatusFilter(s, status);
+      const matchMine =
+        !mineOnly || (workflowOf(s) === "under_review" && approverIdOf(s) === profile?.uid);
       return matchSearch && matchStatus && matchMine;
     });
   }, [sops, search, status, mineOnly, profile?.uid]);
 
   const selectable = useMemo(
-    () => filtered.filter((sop) => sop.status === "draft" || sop.status === "under_review"),
+    () => filtered.filter((sop) => workflowOf(sop) !== null),
     [filtered]
   );
   const selectedRows = useMemo(
@@ -98,13 +128,13 @@ export default function SopsPage() {
   const sendTargets = selectedRows.filter(
     (sop) =>
       canWrite &&
-      (sop.status === "draft" || sop.status === "under_review") &&
-      Boolean(sop.currentVersionId || sop.version?.id)
+      workflowOf(sop) !== null &&
+      Boolean(toTarget(sop).versionId)
   );
   const readyToApprove = selectedRows.filter(
     (sop) =>
       canApprove &&
-      sop.status === "under_review" &&
+      workflowOf(sop) === "under_review" &&
       (!approverIdOf(sop) || approverIdOf(sop) === profile?.uid)
   );
   const allSelected = selectable.length > 0 && selectable.every((sop) => selected.has(sop.id));
@@ -305,7 +335,7 @@ export default function SopsPage() {
             },
             {
               label: "Under review",
-              value: sops.filter((s) => s.status === "under_review").length,
+              value: sops.filter((s) => workflowOf(s) === "under_review").length,
               icon: Eye,
             },
             {
@@ -426,7 +456,8 @@ export default function SopsPage() {
                   </TableRow>
                 ) : (
                   filtered.map((s) => {
-                    const canSelect = s.status === "draft" || s.status === "under_review";
+                    const canSelect = workflowOf(s) !== null;
+                    const pendingWorkflow = workflowOf(s);
                     const approverName = approverNameOf(s);
                     return (
                   <TableRow key={s.id} data-state={selected.has(s.id) ? "selected" : undefined}>
@@ -465,13 +496,19 @@ export default function SopsPage() {
                     </TableCell>
                     <TableCell>
                       <StatusBadge status={s.status} />
-                      {s.status === "under_review" && approverName && (
+                      {s.status === "approved" && pendingWorkflow && (
+                        <p className="mt-1 text-[11px] text-muted-foreground">
+                          Revision {s.pendingVersionNumber || ""} ·{" "}
+                          {pendingWorkflow === "under_review" ? "under review" : "draft"}
+                        </p>
+                      )}
+                      {pendingWorkflow === "under_review" && approverName && (
                         <p className="mt-1 text-[11px] text-muted-foreground">For {approverName}</p>
                       )}
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center justify-end gap-1">
-                        {(s.status === "draft" || s.status === "under_review") && (
+                        {canSelect && (
                           <RequirePermission permission="sops:write" hideOnDeny>
                             <Button size="sm" variant="outline" asChild>
                               <Link href={`/dashboard/sops/${s.id}?edit=1`}>Edit</Link>

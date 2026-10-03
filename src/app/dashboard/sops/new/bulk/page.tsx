@@ -115,12 +115,16 @@ export default function BulkSopPage() {
     );
   }, [rows]);
 
-  const issuesFor = (row: BulkRow) =>
-    row.status === "done"
-      ? []
-      : sopBulkRowIssues(row, duplicateNumbers.has(row.sopNumber.trim().toUpperCase()));
+  const rowIssues = (row: BulkRow) =>
+    sopBulkRowIssues(row, duplicateNumbers.has(row.sopNumber.trim().toUpperCase()));
 
-  const readyCount = rows.filter((row) => issuesFor(row).length === 0).length;
+  const issuesFor = (row: BulkRow) =>
+    row.status === "done" || row.status === "creating" ? [] : rowIssues(row);
+
+  const canCreate = (row: BulkRow) =>
+    row.status !== "done" && row.status !== "creating" && rowIssues(row).length === 0;
+
+  const readyCount = rows.filter(canCreate).length;
 
   const updateRow = (key: string, patch: Partial<BulkRow>) => {
     setRows((current) => current.map((row) => (row.key === key ? { ...row, ...patch } : row)));
@@ -195,7 +199,7 @@ export default function BulkSopPage() {
       role: profile.role as UserRole,
       employeeId: profile.employeeId,
     };
-    const pending = rows.filter((row) => issuesFor(row).length === 0);
+    const pending = rows.filter(canCreate);
     if (!pending.length) {
       toast.error("Add SOP rows with a department and at least one file first");
       return;

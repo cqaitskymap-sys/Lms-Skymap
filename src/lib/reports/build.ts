@@ -1094,7 +1094,7 @@ export async function buildReport(
   try {
     return buildFromType(type, filters);
   } finally {
-    if (!snapshot) snap = null;
+    snap = null;
   }
 }
 

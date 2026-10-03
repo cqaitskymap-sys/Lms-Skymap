@@ -341,18 +341,37 @@ export default function OjtReportsPage() {
   }, [assignments, canAudit, employees, profile, type, year, graceDays]);
 
   const [special, setSpecial] = useState<ReportDataset | null>(null);
+  const [specialError, setSpecialError] = useState<string | null>(null);
+
+  const specialType =
+    type === "ojt_monthly_planner" || type === "ojt_matrix" || type === "ojt_audit";
 
   useEffect(() => {
-    if (type === "ojt_monthly_planner" || type === "ojt_matrix" || type === "ojt_audit") {
-      void loadSpecial()
-        .then(setSpecial)
-        .catch((err) => toast.error(err instanceof Error ? err.message : "Report failed"));
-    } else {
+    if (!specialType) {
       setSpecial(null);
+      setSpecialError(null);
+      return;
     }
-  }, [loadSpecial, type]);
+    let cancelled = false;
+    setSpecial(null);
+    setSpecialError(null);
+    void loadSpecial()
+      .then((data) => {
+        if (!cancelled) setSpecial(data);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setSpecial(null);
+        const message = err instanceof Error ? err.message : "Report failed";
+        setSpecialError(message);
+        toast.error(message);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [loadSpecial, specialType, type]);
 
-  const active = special || dataset;
+  const active = specialType ? special : dataset;
   const catalog = CATALOG.filter((c) => c.id !== "ojt_audit" || canAudit);
 
   return (
@@ -382,7 +401,9 @@ export default function OjtReportsPage() {
         value={search}
         onChange={(e) => setSearch(e.target.value)}
       />
-      {loading || !active ? (
+      {specialError && !active ? (
+        <p className="text-sm text-destructive">{specialError}</p>
+      ) : loading || !active ? (
         <div className="flex items-center gap-2 text-muted-foreground">
           <Loader2 className="h-4 w-4 animate-spin" /> Loading report…
         </div>

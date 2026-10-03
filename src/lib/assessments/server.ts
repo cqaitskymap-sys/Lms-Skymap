@@ -156,7 +156,11 @@ async function listAttemptsForEmployee(
   return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as AssessmentAttempt);
 }
 
-function attemptForPersistence(attempt: AssessmentAttempt): AssessmentAttempt {
+function attemptForPersistence(
+  attempt: AssessmentAttempt,
+  keepAnswerKey = false
+): AssessmentAttempt {
+  if (keepAnswerKey) return attempt;
   return {
     ...attempt,
     questions: attempt.questions.map((q) => ({
@@ -586,7 +590,8 @@ export async function submitAssessmentServer(
   result.rank = peers.find((r) => r.attemptId === result.attemptId)?.rank;
   updated.rank = result.rank;
 
-  await attemptRef.set(stripUndefined(attemptForPersistence(updated)));
+  const revealAnswers = !!exam.allowReview && !!exam.showResultsImmediately;
+  await attemptRef.set(stripUndefined(attemptForPersistence(updated, revealAnswers)));
   await adminDb.collection(COLLECTIONS.examResults).doc(result.id).set(stripUndefined(result));
   finalized = true;
 
@@ -609,11 +614,21 @@ export async function submitAssessmentServer(
     }
   }
 
+  let trainingOutOfSync = false;
   if (attempt.assignmentId) {
-    try {
-      await handleTrainingResultServer(attempt.assignmentId, updated, input.actorId);
-    } catch (err) {
-      console.error("[submitAssessmentServer] training result update failed:", err);
+    let trainingOk = false;
+    let lastTrainingError: unknown;
+    for (let tryNo = 0; tryNo < 3 && !trainingOk; tryNo++) {
+      try {
+        await handleTrainingResultServer(attempt.assignmentId, updated, input.actorId);
+        trainingOk = true;
+      } catch (err) {
+        lastTrainingError = err;
+      }
+    }
+    if (!trainingOk) {
+      trainingOutOfSync = true;
+      console.error("[submitAssessmentServer] training result update failed:", lastTrainingError);
     }
   }
 
@@ -663,7 +678,15 @@ export async function submitAssessmentServer(
     }
   }
 
-  const reveal = !!exam.allowReview && !!exam.showResultsImmediately;
+  const reveal = revealAnswers;
+  if (trainingOutOfSync) {
+    return {
+      ok: false,
+      status: 500,
+      error:
+        "Your exam was scored, but the training record did not update. Do not retake it — ask QA to refresh this assignment.",
+    };
+  }
   return {
     ok: true,
     attempt: {

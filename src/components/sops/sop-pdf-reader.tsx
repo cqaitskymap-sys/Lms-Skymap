@@ -34,7 +34,9 @@ export function SopPdfReader({
   const [width, setWidth] = useState(640);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
+  const [renderedCount, setRenderedCount] = useState(0);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const renderedRef = useRef<Set<number>>(new Set());
   const seenRef = useRef<Set<number>>(new Set());
   const lastPageRef = useRef(false);
   const objectUrlRef = useRef<string | null>(null);
@@ -44,7 +46,9 @@ export function SopPdfReader({
     setLoading(true);
     setFailed(false);
     setNumPages(0);
+    setRenderedCount(0);
     seenRef.current = new Set();
+    renderedRef.current = new Set();
     lastPageRef.current = false;
 
     const apply = (next: string) => {
@@ -125,9 +129,15 @@ export function SopPdfReader({
     }
   };
 
+  const markRendered = useCallback((pageNumber: number) => {
+    if (renderedRef.current.has(pageNumber)) return;
+    renderedRef.current.add(pageNumber);
+    setRenderedCount(renderedRef.current.size);
+  }, []);
+
   useEffect(() => {
     const el = scrollRef.current;
-    if (!el || numPages <= 0 || !trackPages) return;
+    if (!el || numPages <= 0 || !trackPages || renderedCount < numPages) return;
     const frame = window.requestAnimationFrame(() => {
       if (el.scrollHeight <= el.clientHeight + 8) {
         for (let i = 1; i <= numPages; i++) seenRef.current.add(i);
@@ -136,7 +146,7 @@ export function SopPdfReader({
       }
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [numPages, trackPages, emit, width]);
+  }, [numPages, trackPages, emit, width, renderedCount]);
 
   if (failed) {
     return (
@@ -145,6 +155,11 @@ export function SopPdfReader({
           <FileText className="h-4 w-4 text-primary" />
           {title || "Document Viewer"}
         </div>
+        {trackPages && (
+          <p className="border-b bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-200">
+            This preview cannot track pages, so acknowledgement stays locked until the document loads in the reader.
+          </p>
+        )}
         <iframe src={`${url}#toolbar=1`} title={title || "PDF"} className="h-full w-full min-h-[480px]" />
       </div>
     );
@@ -193,10 +208,10 @@ export function SopPdfReader({
             setLoading(false);
             if (trackPages) {
               onPagesProgress?.({
-                pageCount: 1,
-                pagesSeen: [1],
-                reachedLastPage: true,
-                allPagesViewed: true,
+                pageCount: 0,
+                pagesSeen: [],
+                reachedLastPage: false,
+                allPagesViewed: false,
               });
             }
           }}
@@ -211,6 +226,7 @@ export function SopPdfReader({
               root={scrollRef}
               onVisible={markPage}
               onBottomVisible={markLastPage}
+              onRendered={markRendered}
             />
           ))}
         </Document>
@@ -226,6 +242,7 @@ function TrackedPage({
   root,
   onVisible,
   onBottomVisible,
+  onRendered,
 }: {
   pageNumber: number;
   last: boolean;
@@ -233,6 +250,7 @@ function TrackedPage({
   root: RefObject<HTMLDivElement | null>;
   onVisible: (page: number) => void;
   onBottomVisible: () => void;
+  onRendered?: (page: number) => void;
 }) {
   const topRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -264,6 +282,7 @@ function TrackedPage({
         width={width}
         renderTextLayer={false}
         renderAnnotationLayer={false}
+        onRenderSuccess={() => onRendered?.(pageNumber)}
         className="overflow-hidden rounded-sm bg-white"
       />
       <div ref={bottomRef} className="h-1 w-full" />

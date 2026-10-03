@@ -42,7 +42,8 @@ export async function userExistsForEmail(email: string): Promise<boolean> {
       .get();
     return !snap.empty;
   } catch {
-    return true;
+    // Unknown lookup must not create lockout rows for every typed address.
+    return false;
   }
 }
 

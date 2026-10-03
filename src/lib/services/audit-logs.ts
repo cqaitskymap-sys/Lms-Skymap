@@ -2,7 +2,7 @@
  * Client-side audit log listing + optional API-backed recording.
  */
 
-import { collection, getDocs, orderBy, query, limit } from "firebase/firestore/lite";
+import { collection, getDocs, orderBy, query, limit, where } from "firebase/firestore/lite";
 import { db, COLLECTIONS, auth } from "@/lib/firebase/client";
 import type { AuditAction, AuditLog, UserProfile, UserRole } from "@/types";
 import { isoInLocalDateRange } from "@/lib/utils";
@@ -87,14 +87,36 @@ function mapDoc(d: { id: string; data: () => Record<string, unknown> }): AuditLo
   };
 }
 
-async function fetchRemoteAuditLogs(max: number): Promise<AuditLog[]> {
+async function fetchRemoteAuditLogs(max: number, resourceType?: string): Promise<AuditLog[]> {
+  const mapSnap = (docs: { id: string; data: () => Record<string, unknown> }[]) =>
+    docs.map((d) => mapDoc(d));
+
+  if (resourceType && resourceType !== "all") {
+    try {
+      const scoped = query(
+        collection(db, COLLECTIONS.auditLogs),
+        where("resourceType", "==", resourceType),
+        orderBy("timestamp", "desc"),
+        limit(max)
+      );
+      const snap = await getDocs(scoped);
+      return mapSnap(
+        snap.docs.map((d) => ({ id: d.id, data: () => d.data() as Record<string, unknown> }))
+      );
+    } catch (err) {
+      console.warn("[audit] filtered query failed; using the recent window", err);
+    }
+  }
+
   const q = query(
     collection(db, COLLECTIONS.auditLogs),
     orderBy("timestamp", "desc"),
     limit(max)
   );
   const snap = await getDocs(q);
-  return snap.docs.map((d) => mapDoc({ id: d.id, data: () => d.data() as Record<string, unknown> }));
+  return mapSnap(
+    snap.docs.map((d) => ({ id: d.id, data: () => d.data() as Record<string, unknown> }))
+  );
 }
 
 function inDateRange(iso: string, dateFrom?: string, dateTo?: string): boolean {
@@ -170,7 +192,7 @@ export async function listAuditLogs(
     const local = lifecycleToAudit(readLifecycleStore().events);
     let remote: AuditLog[] = [];
     try {
-      remote = await fetchRemoteAuditLogs(max);
+      remote = await fetchRemoteAuditLogs(max, filters.resourceType);
     } catch {
       /* demo: remote optional when Admin wrote login/onboard audits */
     }
@@ -182,7 +204,9 @@ export async function listAuditLogs(
     return applyFilters(await enrichAuditActors(merged), filters).slice(0, max);
   }
 
-  const remote = await enrichAuditActors(await fetchRemoteAuditLogs(max));
+  const remote = await enrichAuditActors(
+    await fetchRemoteAuditLogs(max, filters.resourceType)
+  );
   return applyFilters(remote, filters);
 }
 

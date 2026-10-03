@@ -483,6 +483,13 @@ export interface SopDocument extends Timestamps {
   assignedApproverName?: string;
   /** Denormalized current version label e.g. "1.2" */
   currentVersionNumber?: string;
+  /**
+   * Draft or in-review revision uploaded while the approved version stays current.
+   * Cleared when that revision is approved.
+   */
+  pendingVersionId?: string;
+  pendingVersionNumber?: string;
+  pendingStatus?: SopStatus;
   viewCount?: number;
   acknowledgementCount?: number;
   archivedAt?: string;

@@ -91,6 +91,8 @@ export type DashboardSnapshotOpts = {
   /** Used to avoid Firestore list queries the role cannot read. */
   role?: UserRole | "super_admin" | string;
   employeeId?: string;
+  /** Department heads only see this department. */
+  departmentId?: string;
 };
 
 export async function fetchDashboardSnapshot(
@@ -99,7 +101,7 @@ export async function fetchDashboardSnapshot(
   // Back-compat: older callers passed userId as a bare string.
   const normalized: DashboardSnapshotOpts =
     typeof opts === "string" ? { userId: opts } : opts || {};
-  const { userId, role, employeeId } = normalized;
+  const { userId, role, employeeId, departmentId } = normalized;
   // Missing role → treat as restricted (avoid collection-wide lists that 403).
   const isEmployee = !role || role === "employee";
   const canListOrg =
@@ -169,15 +171,47 @@ export async function fetchDashboardSnapshot(
     auditPromise,
   ]);
 
+  let scopedEmployees = employees;
+  let scopedAssignments = assignments;
+  let scopedSessions = sessions;
+  let scopedCertificates = certificates;
+  let scopedSops = sops;
+  let scopedJds = jds;
+  let scopedTnis = tnis;
+
+  if (role === "department_head" && departmentId) {
+    scopedEmployees = employees.filter((e) => e.departmentId === departmentId);
+    const memberIds = new Set(scopedEmployees.map((e) => e.id));
+    scopedAssignments = assignments.filter(
+      (a) => a.departmentId === departmentId || memberIds.has(a.employeeId)
+    );
+    scopedSessions = sessions.filter((s) => s.departmentId === departmentId);
+    scopedCertificates = certificates.filter(
+      (c) => c.departmentId === departmentId || memberIds.has(c.employeeId)
+    );
+    scopedSops = sops.filter((s) => s.departmentIds?.includes(departmentId));
+    scopedJds = jds.filter((j) => j.departmentId === departmentId);
+    scopedTnis = tnis.filter((t) => t.departmentId === departmentId);
+  } else if (isEmployee && employeeId) {
+    const mine = new Set(
+      assignments.filter((a) => a.employeeId === employeeId).map((a) => a.sessionId).filter(Boolean)
+    );
+    scopedSessions = sessions.filter(
+      (s) =>
+        mine.has(s.id) ||
+        (s.attendance || []).some((row) => row.employeeId === employeeId)
+    );
+  }
+
   return {
-    employees,
+    employees: scopedEmployees,
     departments,
-    sops,
-    assignments,
-    sessions,
-    certificates,
-    jds,
-    tnis,
+    sops: scopedSops,
+    assignments: scopedAssignments,
+    sessions: scopedSessions,
+    certificates: scopedCertificates,
+    jds: scopedJds,
+    tnis: scopedTnis,
     trainers,
     notifications,
     audit,

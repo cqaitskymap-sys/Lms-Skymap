@@ -74,6 +74,7 @@ export default function SopDetailPage({ params }: { params: Promise<{ id: string
   const [editReview, setEditReview] = useState("");
   const [editFiles, setEditFiles] = useState<File[]>([]);
   const editOpened = useRef(false);
+  const pendingFocus = useRef<string | null>(null);
   const [effectiveDate, setEffectiveDate] = useState("");
   const [reviewDate, setReviewDate] = useState("");
   const [sendOpen, setSendOpen] = useState(false);
@@ -91,27 +92,52 @@ export default function SopDetailPage({ params }: { params: Promise<{ id: string
   }, [profile]);
 
   useEffect(() => {
-    if (currentVersion) setSelected(currentVersion);
-  }, [currentVersion]);
+    if (!currentVersion) return;
+    setSelected((prev) => {
+      const focusId = pendingFocus.current;
+      if (focusId) {
+        const focused = versions.find((v) => v.id === focusId);
+        if (focused) {
+          pendingFocus.current = null;
+          return focused;
+        }
+      }
+      if (prev) {
+        const match = versions.find((v) => v.id === prev.id);
+        if (match && match.updatedAt === prev.updatedAt && match.status === prev.status) return prev;
+        if (match) return match;
+      }
+      return currentVersion;
+    });
+  }, [currentVersion, versions]);
 
   const activeVersion = selected || currentVersion;
 
   useEffect(() => {
     if (searchParams.get("edit") !== "1" || editOpened.current || !sop || !currentVersion) return;
     if (!can("sops:write")) return;
-    if (currentVersion.status !== "draft" && currentVersion.status !== "under_review") return;
+    const editable =
+      currentVersion.status === "draft" || currentVersion.status === "under_review"
+        ? currentVersion
+        : versions.find(
+            (v) =>
+              v.id !== sop.currentVersionId &&
+              (v.status === "draft" || v.status === "under_review")
+          );
+    if (!editable) return;
     editOpened.current = true;
+    setSelected(editable);
     setEditNumber(sop.sopNumber);
     setEditTitle(sop.title);
     setEditCategory(sop.category);
     setEditDepts(sop.departmentIds);
-    setEditVersion(currentVersion.versionNumber);
-    setEditSummary(currentVersion.changeSummary || "");
-    setEditEffective(isoDateInput(currentVersion.effectiveDate || sop.effectiveDate));
-    setEditReview(isoDateInput(currentVersion.reviewDate || sop.reviewDate));
+    setEditVersion(editable.versionNumber);
+    setEditSummary(editable.changeSummary || "");
+    setEditEffective(isoDateInput(editable.effectiveDate || sop.effectiveDate));
+    setEditReview(isoDateInput(editable.reviewDate || sop.reviewDate));
     setEditFiles([]);
     setShowEdit(true);
-  }, [searchParams, sop, currentVersion, can]);
+  }, [searchParams, sop, currentVersion, versions, can]);
 
   const isEmployee = profile?.role === "employee";
   const alreadyAcked = Boolean(
@@ -184,8 +210,12 @@ export default function SopDetailPage({ params }: { params: Promise<{ id: string
     .join(", ");
   const canEditCurrent =
     can("sops:write") &&
-    activeVersion.id === sop.currentVersionId &&
     (activeVersion.status === "draft" || activeVersion.status === "under_review");
+  const pendingRevision = versions.find(
+    (v) =>
+      v.id !== sop.currentVersionId &&
+      (v.status === "draft" || v.status === "under_review")
+  );
   const deptOptions = [...activeDepartments];
   for (const deptId of sop.departmentIds) {
     if (!deptOptions.some((d) => d.id === deptId)) {
@@ -250,7 +280,12 @@ export default function SopDetailPage({ params }: { params: Promise<{ id: string
             <Button
               variant="outline"
               size="sm"
+              disabled={!activeVersion.downloadUrl}
               onClick={() => {
+                if (!activeVersion.downloadUrl) {
+                  toast.error("This version has no file to download");
+                  return;
+                }
                 if (actor) {
                   void recordSopView({
                     sopId: sop.id,
@@ -260,7 +295,7 @@ export default function SopDetailPage({ params }: { params: Promise<{ id: string
                     source: "download",
                   });
                 }
-                window.open(activeVersion.downloadUrl, "_blank");
+                window.open(activeVersion.downloadUrl, "_blank", "noopener,noreferrer");
               }}
             >
               <Download className="mr-1 h-4 w-4" />
@@ -302,7 +337,8 @@ export default function SopDetailPage({ params }: { params: Promise<{ id: string
 
             <Can permission="sops:approve">
               {activeVersion.status === "under_review" &&
-                (!activeVersion.assignedApproverId || activeVersion.assignedApproverId === profile?.uid) && (
+                (!(activeVersion.assignedApproverId || sop.assignedApproverId) ||
+                  (activeVersion.assignedApproverId || sop.assignedApproverId) === profile?.uid) && (
                 <Button
                   size="sm"
                   disabled={busy}
@@ -314,12 +350,8 @@ export default function SopDetailPage({ params }: { params: Promise<{ id: string
                         activeVersion.id,
                         actor,
                         {
-                          effectiveDate: effectiveDate
-                            ? new Date(effectiveDate).toISOString()
-                            : activeVersion.effectiveDate,
-                          reviewDate: reviewDate
-                            ? new Date(reviewDate).toISOString()
-                            : activeVersion.reviewDate,
+                          effectiveDate: activeVersion.effectiveDate,
+                          reviewDate: activeVersion.reviewDate,
                           triggerRetrain: true,
                         }
                       );
@@ -360,6 +392,19 @@ export default function SopDetailPage({ params }: { params: Promise<{ id: string
             </Can>
           </div>
         </div>
+
+        {pendingRevision && activeVersion.id !== pendingRevision.id && (
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-primary/20 bg-primary/5 px-4 py-3">
+            <p className="text-sm">
+              Revision {pendingRevision.versionNumber} is{" "}
+              {pendingRevision.status === "under_review" ? "under review" : "a draft"}. The
+              approved version stays effective until that revision is approved.
+            </p>
+            <Button size="sm" variant="outline" onClick={() => setSelected(pendingRevision)}>
+              Open revision
+            </Button>
+          </div>
+        )}
 
         {showEdit && canEditCurrent && (
           <Card>
@@ -465,6 +510,7 @@ export default function SopDetailPage({ params }: { params: Promise<{ id: string
                           departmentIds: editDepts,
                           versionNumber: editVersion,
                           changeSummary: editSummary,
+                          versionId: activeVersion.id,
                           effectiveDate: editEffective
                             ? new Date(editEffective).toISOString()
                             : undefined,
@@ -547,7 +593,7 @@ export default function SopDetailPage({ params }: { params: Promise<{ id: string
                   onClick={() =>
                     actor &&
                     run(async () => {
-                      await reviseSopWithFiles(
+                      const created = await reviseSopWithFiles(
                         sop.id,
                         {
                           changeSummary,
@@ -562,9 +608,12 @@ export default function SopDetailPage({ params }: { params: Promise<{ id: string
                         },
                         actor
                       );
+                      pendingFocus.current = created.id;
                       setShowRevise(false);
                       setReviseFiles([]);
                       setChangeSummary("");
+                      setEffectiveDate("");
+                      setReviewDate("");
                     }, "Revision uploaded as draft")
                   }
                 >
@@ -712,7 +761,10 @@ export default function SopDetailPage({ params }: { params: Promise<{ id: string
                       (a) => a.versionId === activeVersion.id
                     )}
                     onDone={() => void refresh()}
-                    canAcknowledge={Boolean(profile)}
+                    canAcknowledge={
+                      activeVersion.status === "approved" &&
+                      activeVersion.id === sop.currentVersionId
+                    }
                     readingRequired={enforceReading}
                     readingComplete={reading.readingComplete}
                     readingHint={

@@ -59,8 +59,9 @@ export function DashboardShell({ role, title, subtitle, children }: DashboardShe
         userId: profile.uid,
         role: dataRole,
         employeeId: profile.employeeId,
+        departmentId: profile.departmentId,
       });
-      setView(buildDashboardView(snap, role));
+      setView(buildDashboardView(snap, dataRole || role));
     } finally {
       setLoading(false);
     }

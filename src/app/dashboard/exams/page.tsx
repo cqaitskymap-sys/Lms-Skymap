@@ -228,7 +228,9 @@ function ExamsPageInner() {
 
   const assignmentForExam = (sopId?: string) =>
     myAssignments.find(
-      (a) => a.sopId === sopId && a.status !== "passed" && a.status !== "failed"
+      (a) =>
+        a.sopId === sopId &&
+        (a.status === "assessment_pending" || a.status === "retraining")
     );
 
   const handleAssignExam = async () => {
@@ -288,10 +290,15 @@ function ExamsPageInner() {
     setBusy(true);
     try {
       const result = await submitAssessment(attempt.id, answersRef.current, profile.uid);
-      const full = await getAttempt(result.id, {
-        revealAnswers: !!(exam?.allowReview && exam?.showResultsImmediately),
+      const reveal = !!(exam?.allowReview && exam?.showResultsImmediately);
+      const full = await getAttempt(result.id, { revealAnswers: reveal });
+      const resultHasKey = result.questions.some((q) => q.correctOptionIds.length > 0);
+      setAttempt({
+        ...(full || {}),
+        ...result,
+        questions:
+          reveal && resultHasKey ? result.questions : full?.questions || result.questions,
       });
-      setAttempt(full || result);
       unlockExam();
       if (exam?.showResultsImmediately) {
         setPhase("result");

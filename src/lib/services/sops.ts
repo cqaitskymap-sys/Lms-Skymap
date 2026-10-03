@@ -60,6 +60,62 @@ async function preferLocalSopStore(): Promise<boolean> {
   return isDemoMode();
 }
 
+/**
+ * Older revisions pointed the live SOP at the new draft immediately.
+ * Put the still-approved version back in front and keep the draft as pending.
+ */
+function restoredApprovedSop(
+  sop: SopDocument,
+  draft: SopVersion,
+  previous: SopVersion
+): SopDocument {
+  return {
+    ...sop,
+    status: "approved",
+    currentVersionId: previous.id,
+    currentVersionNumber: previous.versionNumber,
+    pendingVersionId: draft.id,
+    pendingVersionNumber: draft.versionNumber,
+    pendingStatus: draft.status === "under_review" ? "under_review" : "draft",
+  };
+}
+
+function needsApprovedRestore(
+  sop: SopDocument,
+  version?: SopVersion | null
+): version is SopVersion & { supersedesVersionId: string } {
+  return Boolean(
+    version?.supersedesVersionId &&
+      sop.currentVersionId === version.id &&
+      (sop.status === "draft" || sop.status === "under_review") &&
+      (version.status === "draft" || version.status === "under_review")
+  );
+}
+
+async function persistApprovedRestore(sop: SopDocument, draft: SopVersion, previous: SopVersion) {
+  const next = restoredApprovedSop(sop, draft, previous);
+  if (isDemoMode()) {
+    const store = readSopStore();
+    store.sops = store.sops.map((row) => (row.id === sop.id ? next : row));
+    writeSopStore(store);
+    return next;
+  }
+  try {
+    await updateDoc(doc(db, COLLECTIONS.sops, sop.id), {
+      status: "approved",
+      currentVersionId: previous.id,
+      currentVersionNumber: previous.versionNumber,
+      pendingVersionId: draft.id,
+      pendingVersionNumber: draft.versionNumber,
+      pendingStatus: next.pendingStatus,
+      updatedAt: nowISO(),
+    });
+  } catch (err) {
+    console.warn("[sops] could not persist restored approved version", err);
+  }
+  return next;
+}
+
 /** Accepts "1", "01", or "1.2". The stored label is the number entered, without a v prefix. */
 export function parseSopVersionNumber(raw: string): {
   versionNumber: string;
@@ -201,12 +257,23 @@ export async function listSopsDetailed(filters?: {
 
   if (isDemoMode()) {
     const store = readSopStore();
-    return applyFilters(
-      store.sops.map((s) => ({
-        ...s,
-        version: store.versions.find((v) => v.id === s.currentVersionId),
-      }))
-    );
+    const rows = store.sops.map((s) => {
+      const version = store.versions.find((v) => v.id === s.currentVersionId);
+      if (!needsApprovedRestore(s, version)) return { ...s, version };
+      const previous = store.versions.find((v) => v.id === version.supersedesVersionId);
+      if (!previous || previous.status !== "approved") return { ...s, version };
+      return { ...restoredApprovedSop(s, version, previous), version: previous };
+    });
+    const healed = rows.some((row, index) => row.id === store.sops[index]?.id && row.status !== store.sops[index]?.status);
+    if (healed) {
+      store.sops = rows.map((row) => {
+        const copy = { ...row };
+        delete copy.version;
+        return copy;
+      });
+      writeSopStore(store);
+    }
+    return applyFilters(rows);
   }
 
   try {
@@ -226,12 +293,21 @@ export async function listSopsDetailed(filters?: {
     const byVersion = new Map(
       versions.filter((v): v is SopVersion => Boolean(v)).map((v) => [v.id, v])
     );
-    return applyFilters(
-      list.map((s) => ({
-        ...s,
-        version: s.currentVersionId ? byVersion.get(s.currentVersionId) : undefined,
-      }))
+    const rows = await Promise.all(
+      list.map(async (s) => {
+        const version = s.currentVersionId ? byVersion.get(s.currentVersionId) : undefined;
+        if (!needsApprovedRestore(s, version)) {
+          return { ...s, version };
+        }
+        const prevSnap = await getDoc(doc(db, COLLECTIONS.sopVersions, version.supersedesVersionId));
+        if (!prevSnap.exists()) return { ...s, version };
+        const previous = { id: prevSnap.id, ...prevSnap.data() } as SopVersion;
+        if (previous.status !== "approved") return { ...s, version };
+        const sop = await persistApprovedRestore(s, version, previous);
+        return { ...sop, version: previous };
+      })
     );
+    return applyFilters(rows);
   } catch (err) {
     throw new Error(err instanceof Error ? err.message : "Failed to load SOPs");
   }
@@ -395,10 +471,21 @@ export async function getSopBundle(
 }> {
   const fromStore = () => {
     const store = readSopStore();
-    const sop = store.sops.find((s) => s.id === sopId) || null;
+    let sop = store.sops.find((s) => s.id === sopId) || null;
     const versions = store.versions
       .filter((v) => v.sopId === sopId)
       .sort((a, b) => b.major - a.major || b.minor - a.minor);
+    if (sop) {
+      const pointed = versions.find((v) => v.id === sop?.currentVersionId);
+      if (needsApprovedRestore(sop, pointed)) {
+        const previous = versions.find((v) => v.id === pointed.supersedesVersionId);
+        if (previous?.status === "approved") {
+          sop = restoredApprovedSop(sop, pointed, previous);
+          store.sops = store.sops.map((row) => (row.id === sop?.id ? sop! : row));
+          writeSopStore(store);
+        }
+      }
+    }
     return {
       sop,
       versions,
@@ -438,6 +525,14 @@ export async function getSopBundle(
     const versions = versionsSnap.docs.map(
       (d) => ({ id: d.id, ...d.data() }) as SopVersion
     );
+    let liveSop = sop;
+    const pointed = versions.find((v) => v.id === sop.currentVersionId);
+    if (needsApprovedRestore(sop, pointed)) {
+      const previous = versions.find((v) => v.id === pointed.supersedesVersionId);
+      if (previous?.status === "approved") {
+        liveSop = await persistApprovedRestore(sop, pointed, previous);
+      }
+    }
 
     // Views / acks must not break SOP load; scope by role to avoid console 403s.
     const [views, acknowledgements] = await Promise.all([
@@ -450,9 +545,9 @@ export async function getSopBundle(
     ]);
 
     return {
-      sop,
+      sop: liveSop,
       versions,
-      currentVersion: versions.find((v) => v.id === sop.currentVersionId) || null,
+      currentVersion: versions.find((v) => v.id === liveSop.currentVersionId) || null,
       views,
       acknowledgements,
     };
@@ -595,8 +690,20 @@ export async function reviseSopWithFiles(
   const now = nowISO();
 
   if (!params.files.length) throw new Error("Upload revision files");
-  if (current.status === "under_review") {
-    throw new Error("Complete or withdraw the in-review version before uploading a new revision");
+  if (current.status !== "approved") {
+    throw new Error(
+      current.status === "under_review"
+        ? "Complete or withdraw the in-review version before uploading a new revision"
+        : "Approve this SOP before uploading a revision. Edit the draft instead."
+    );
+  }
+  const openRevision = bundle.versions.find(
+    (v) => v.id !== current.id && (v.status === "draft" || v.status === "under_review")
+  );
+  if (openRevision) {
+    throw new Error(
+      `Version ${openRevision.versionNumber} is still ${openRevision.status.replaceAll("_", " ")}. Finish it before uploading another revision.`
+    );
   }
 
   const attachments: SopAttachment[] = [];
@@ -628,31 +735,53 @@ export async function reviseSopWithFiles(
     createdBy: actor.uid,
   };
 
+  const keepApprovedLive = current.status === "approved";
+
   if (await preferLocalSopStore()) {
     const store = readSopStore();
     store.versions.unshift(version);
-    store.sops = store.sops.map((s) =>
-      s.id === sopId
+    store.sops = store.sops.map((s) => {
+      if (s.id !== sopId) return s;
+      if (keepApprovedLive) {
+        return {
+          ...s,
+          pendingVersionId: versionId,
+          pendingVersionNumber: versionNumber,
+          pendingStatus: "draft" as const,
+          updatedAt: now,
+          updatedBy: actor.uid,
+        };
+      }
+      return {
+        ...s,
+        currentVersionId: versionId,
+        currentVersionNumber: versionNumber,
+        status: "draft" as const,
+        updatedAt: now,
+        updatedBy: actor.uid,
+      };
+    });
+    writeSopStore(store);
+  } else {
+    await setDoc(doc(db, COLLECTIONS.sopVersions, versionId), stripUndefined(version));
+    await updateDoc(
+      doc(db, COLLECTIONS.sops, sopId),
+      keepApprovedLive
         ? {
-            ...s,
+            pendingVersionId: versionId,
+            pendingVersionNumber: versionNumber,
+            pendingStatus: "draft",
+            updatedAt: now,
+            updatedBy: actor.uid,
+          }
+        : {
             currentVersionId: versionId,
             currentVersionNumber: versionNumber,
             status: "draft",
             updatedAt: now,
             updatedBy: actor.uid,
           }
-        : s
     );
-    writeSopStore(store);
-  } else {
-    await setDoc(doc(db, COLLECTIONS.sopVersions, versionId), stripUndefined(version));
-    await updateDoc(doc(db, COLLECTIONS.sops, sopId), {
-      currentVersionId: versionId,
-      currentVersionNumber: versionNumber,
-      status: "draft",
-      updatedAt: now,
-      updatedBy: actor.uid,
-    });
   }
 
   await writeAuditClient({
@@ -768,6 +897,7 @@ export async function bulkSubmitSopsForReview(
     const store = readSopStore();
     const versionById = new Map(store.versions.map((v) => [v.id, v]));
     const touched = new Set<string>();
+    const pendingIds = new Set<string>();
     for (const item of targets) {
       const version = versionById.get(item.versionId);
       if (!version || version.sopId !== item.sopId) {
@@ -777,6 +907,10 @@ export async function bulkSubmitSopsForReview(
       if (version.status !== "draft" && version.status !== "under_review") {
         failed.push(`${item.sopNumber} is already ${version.status.replaceAll("_", " ")}`);
         continue;
+      }
+      const sop = store.sops.find((s) => s.id === item.sopId);
+      if (sop?.status === "approved" && sop.currentVersionId !== item.versionId) {
+        pendingIds.add(item.sopId);
       }
       touched.add(item.sopId);
       done += 1;
@@ -791,7 +925,23 @@ export async function bulkSubmitSopsForReview(
           submittedBy: v.submittedBy || actor.uid,
         };
       });
-      store.sops = store.sops.map((s) => (touched.has(s.id) ? { ...applyAssignment(s), updatedBy: actor.uid } : s));
+      store.sops = store.sops.map((s) => {
+        if (!touched.has(s.id)) return s;
+        if (pendingIds.has(s.id)) {
+          const item = targets.find((t) => t.sopId === s.id);
+          return {
+            ...s,
+            pendingVersionId: item?.versionId || s.pendingVersionId,
+            pendingStatus: "under_review" as const,
+            updatedAt: now,
+            updatedBy: actor.uid,
+            ...(approver
+              ? { assignedApproverId: approver.uid, assignedApproverName: approver.name }
+              : {}),
+          };
+        }
+        return { ...applyAssignment(s), updatedBy: actor.uid };
+      });
       writeSopStore(store);
     }
     onProgress?.(targets.length, targets.length);
@@ -808,6 +958,10 @@ export async function bulkSubmitSopsForReview(
           if (version.status !== "draft" && version.status !== "under_review") {
             throw new Error(`already ${version.status.replaceAll("_", " ")}`);
           }
+          const sopSnap = await getDoc(doc(db, COLLECTIONS.sops, item.sopId));
+          const sopData = sopSnap.exists() ? (sopSnap.data() as SopDocument) : undefined;
+          const pendingRevision =
+            sopData?.status === "approved" && sopData.currentVersionId !== item.versionId;
           await updateDoc(doc(db, COLLECTIONS.sopVersions, item.versionId), {
             status: "under_review",
             submittedForReviewAt: version.submittedForReviewAt || now,
@@ -818,14 +972,27 @@ export async function bulkSubmitSopsForReview(
               ? { assignedApproverId: approver.uid, assignedApproverName: approver.name }
               : {}),
           });
-          await updateDoc(doc(db, COLLECTIONS.sops, item.sopId), {
-            status: "under_review",
-            updatedAt: now,
-            updatedBy: actor.uid,
-            ...(approver
-              ? { assignedApproverId: approver.uid, assignedApproverName: approver.name }
-              : {}),
-          });
+          await updateDoc(
+            doc(db, COLLECTIONS.sops, item.sopId),
+            pendingRevision
+              ? {
+                  pendingVersionId: item.versionId,
+                  pendingStatus: "under_review",
+                  updatedAt: now,
+                  updatedBy: actor.uid,
+                  ...(approver
+                    ? { assignedApproverId: approver.uid, assignedApproverName: approver.name }
+                    : {}),
+                }
+              : {
+                  status: "under_review",
+                  updatedAt: now,
+                  updatedBy: actor.uid,
+                  ...(approver
+                    ? { assignedApproverId: approver.uid, assignedApproverName: approver.name }
+                    : {}),
+                }
+          );
           done += 1;
         } catch (err) {
           failed.push(
@@ -897,7 +1064,14 @@ export async function bulkApproveSops(
         continue;
       }
       try {
-        assertAssignedApprover(version, actor);
+        const parent = store.sops.find((s) => s.id === item.sopId);
+        assertAssignedApprover(
+          {
+            assignedApproverId: version.assignedApproverId || parent?.assignedApproverId,
+            assignedApproverName: version.assignedApproverName || parent?.assignedApproverName,
+          },
+          actor
+        );
       } catch (err) {
         failed.push(`${item.sopNumber}: ${err instanceof Error ? err.message : "not assigned to you"}`);
         continue;
@@ -926,19 +1100,22 @@ export async function bulkApproveSops(
         }
         return v;
       });
-      store.sops = store.sops.map((s) =>
-        s.id === item.sopId
-          ? {
-              ...s,
-              status: "approved",
-              currentVersionId: item.versionId,
-              currentVersionNumber: version.versionNumber,
-              effectiveDate,
-              reviewDate,
-              updatedAt: now,
-            }
-          : s
-      );
+      store.sops = store.sops.map((s) => {
+        if (s.id !== item.sopId) return s;
+        const next: SopDocument = {
+          ...s,
+          status: "approved",
+          currentVersionId: item.versionId,
+          currentVersionNumber: version.versionNumber,
+          effectiveDate,
+          reviewDate,
+          updatedAt: now,
+        };
+        delete next.pendingVersionId;
+        delete next.pendingVersionNumber;
+        delete next.pendingStatus;
+        return next;
+      });
       if (isRevision) retrainCount += autoRetrainDemo(store, item.sopId, item.versionId, actor.uid);
       done += 1;
     }
@@ -1067,6 +1244,7 @@ export async function updateSopDetails(
     effectiveDate?: string;
     reviewDate?: string;
     files?: File[];
+    versionId?: string;
   },
   actor: SopActor
 ): Promise<void> {
@@ -1081,8 +1259,11 @@ export async function updateSopDetails(
   const parsed = parseSopVersionNumber(data.versionNumber);
   const now = nowISO();
   const bundle = await getSopBundle(sopId);
-  if (!bundle.sop || !bundle.currentVersion) throw new Error("SOP not found");
-  const current = bundle.currentVersion;
+  const current =
+    (data.versionId && bundle.versions.find((v) => v.id === data.versionId)) ||
+    bundle.currentVersion;
+  if (!bundle.sop || !current) throw new Error("SOP not found");
+  const editingLivePointer = current.id === bundle.sop.currentVersionId;
   if (current.status !== "draft" && current.status !== "under_review") {
     throw new Error("Approved SOPs stay locked. Upload a revision to change them.");
   }
@@ -1144,22 +1325,32 @@ export async function updateSopDetails(
           }
         : v
     );
-    store.sops = store.sops.map((s) =>
-      s.id === sopId
-        ? {
-            ...s,
-            sopNumber,
-            title,
-            category,
-            departmentIds: data.departmentIds,
-            currentVersionNumber: parsed.versionNumber,
-            effectiveDate,
-            reviewDate: reviewDate || s.reviewDate,
-            updatedAt: now,
-            updatedBy: actor.uid,
-          }
-        : s
-    );
+    store.sops = store.sops.map((s) => {
+      if (s.id !== sopId) return s;
+      const identity = {
+        ...s,
+        sopNumber,
+        title,
+        category,
+        departmentIds: data.departmentIds,
+        updatedAt: now,
+        updatedBy: actor.uid,
+      };
+      if (!editingLivePointer) {
+        return {
+          ...identity,
+          ...(s.pendingVersionId === current.id
+            ? { pendingVersionNumber: parsed.versionNumber }
+            : {}),
+        };
+      }
+      return {
+        ...identity,
+        currentVersionNumber: parsed.versionNumber,
+        effectiveDate,
+        reviewDate: reviewDate || s.reviewDate,
+      };
+    });
     writeSopStore(store);
   } else {
     await updateDoc(doc(db, COLLECTIONS.sopVersions, current.id), {
@@ -1182,11 +1373,17 @@ export async function updateSopDetails(
       title,
       category,
       departmentIds: data.departmentIds,
-      currentVersionNumber: parsed.versionNumber,
-      effectiveDate: effectiveDate ?? deleteField(),
-      reviewDate: reviewDate ?? bundle.sop.reviewDate ?? deleteField(),
       updatedAt: now,
       updatedBy: actor.uid,
+      ...(editingLivePointer
+        ? {
+            currentVersionNumber: parsed.versionNumber,
+            effectiveDate: effectiveDate ?? deleteField(),
+            reviewDate: reviewDate ?? bundle.sop.reviewDate ?? deleteField(),
+          }
+        : bundle.sop.pendingVersionId === current.id
+          ? { pendingVersionNumber: parsed.versionNumber }
+          : {}),
     });
   }
 
@@ -1211,10 +1408,11 @@ export async function approveSopVersionFull(
   }
 ): Promise<{ retrainCount: number }> {
   const now = nowISO();
-  const effectiveDate = options?.effectiveDate || now;
-  const reviewDate = options?.reviewDate || addDays(now, 365);
-
   let retrainCount = 0;
+  const datesFor = (version: { effectiveDate?: string; reviewDate?: string }) => ({
+    effectiveDate: options?.effectiveDate || version.effectiveDate || now,
+    reviewDate: options?.reviewDate || version.reviewDate || addDays(now, 365),
+  });
 
   if (await preferLocalSopStore()) {
     const store = readSopStore();
@@ -1223,8 +1421,16 @@ export async function approveSopVersionFull(
     if (version.status !== "under_review") {
       throw new Error("Submit the version for QA review before approval");
     }
-    assertAssignedApprover(version, actor);
+    const parent = store.sops.find((s) => s.id === sopId);
+    assertAssignedApprover(
+      {
+        assignedApproverId: version.assignedApproverId || parent?.assignedApproverId,
+        assignedApproverName: version.assignedApproverName || parent?.assignedApproverName,
+      },
+      actor
+    );
     const isRevision = Boolean(version.supersedesVersionId);
+    const { effectiveDate, reviewDate } = datesFor(version);
 
     store.versions = store.versions.map((v) => {
       if (v.id === versionId) {
@@ -1248,19 +1454,22 @@ export async function approveSopVersionFull(
       return v;
     });
 
-    store.sops = store.sops.map((s) =>
-      s.id === sopId
-        ? {
-            ...s,
-            status: "approved",
-            currentVersionId: versionId,
-            currentVersionNumber: version?.versionNumber,
-            effectiveDate,
-            reviewDate,
-            updatedAt: now,
-          }
-        : s
-    );
+    store.sops = store.sops.map((s) => {
+      if (s.id !== sopId) return s;
+      const next: SopDocument = {
+        ...s,
+        status: "approved",
+        currentVersionId: versionId,
+        currentVersionNumber: version?.versionNumber,
+        effectiveDate,
+        reviewDate,
+        updatedAt: now,
+      };
+      delete next.pendingVersionId;
+      delete next.pendingVersionNumber;
+      delete next.pendingStatus;
+      return next;
+    });
 
     if (options?.triggerRetrain !== false && isRevision) {
       retrainCount = autoRetrainDemo(store, sopId, versionId, actor.uid);
@@ -1273,8 +1482,17 @@ export async function approveSopVersionFull(
     if (version.status !== "under_review") {
       throw new Error("Submit the version for QA review before approval");
     }
-    assertAssignedApprover(version, actor);
+    const parentSnap = await getDoc(doc(db, COLLECTIONS.sops, sopId));
+    const parent = parentSnap.exists() ? (parentSnap.data() as SopDocument) : undefined;
+    assertAssignedApprover(
+      {
+        assignedApproverId: version.assignedApproverId || parent?.assignedApproverId,
+        assignedApproverName: version.assignedApproverName || parent?.assignedApproverName,
+      },
+      actor
+    );
     const isRevision = Boolean(version.supersedesVersionId);
+    const { effectiveDate, reviewDate } = datesFor(version);
 
     await updateDoc(doc(db, COLLECTIONS.sopVersions, versionId), {
       status: "approved",
@@ -1320,6 +1538,9 @@ export async function approveSopVersionFull(
       currentVersionNumber: version.versionNumber,
       effectiveDate,
       reviewDate,
+      pendingVersionId: deleteField(),
+      pendingVersionNumber: deleteField(),
+      pendingStatus: deleteField(),
       updatedAt: now,
       updatedBy: actor.uid,
     });
@@ -1631,6 +1852,23 @@ export async function acknowledgeSop(params: {
     };
   }
 
+  const bundle = await getSopBundle(params.sopId, {
+    role: params.actor.role,
+    userId: params.actor.uid,
+  });
+  const version = bundle.versions.find((v) => v.id === params.versionId);
+  if (!version || !bundle.sop) throw new Error("SOP version not found");
+  if (version.status !== "approved" || version.id !== bundle.sop.currentVersionId) {
+    throw new Error("Only the current approved version can be acknowledged");
+  }
+  if (params.actor.role === "employee") {
+    const allowed = await employeeCanAccessSop(
+      params.actor.employeeId || params.actor.uid,
+      params.sopId
+    );
+    if (!allowed) throw new Error("This SOP is not on your training plan");
+  }
+
   const ack: SopAcknowledgement = {
     id: generateId("ack"),
     sopId: params.sopId,
@@ -1810,10 +2048,16 @@ export async function deleteSop(sopId: string): Promise<void> {
         query(collection(db, COLLECTIONS.sopAcknowledgements), where("sopId", "==", sopId))
       ),
     ]);
+    const [assignments, reading] = await Promise.all([
+      getDocs(query(collection(db, COLLECTIONS.trainingAssignments), where("sopId", "==", sopId))),
+      getDocs(query(collection(db, COLLECTIONS.sopReadingProgress), where("sopId", "==", sopId))),
+    ]);
     await Promise.all([
       ...versions.docs.map((d) => deleteDoc(d.ref)),
       ...views.docs.map((d) => deleteDoc(d.ref)),
       ...acks.docs.map((d) => deleteDoc(d.ref)),
+      ...assignments.docs.map((d) => deleteDoc(d.ref)),
+      ...reading.docs.map((d) => deleteDoc(d.ref)),
     ]);
   } catch {
     /* related cleanup best-effort */
