@@ -1,17 +1,23 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Plus, FileText, Eye, PenLine, Layers } from "lucide-react";
+import { Plus, FileText, Eye, PenLine, Layers, CheckCircle2, Send } from "lucide-react";
+import { toast } from "sonner";
 import { RequirePermission } from "@/components/auth/require-permission";
 import { AdminDeleteButton } from "@/components/auth/admin-delete-button";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { DataToolbar } from "@/components/shared/data-toolbar";
+import {
+  SopBulkApproveDialog,
+  SopSendForApprovalDialog,
+} from "@/components/sops/sop-approval-dialogs";
 import { useAuth } from "@/contexts/auth-context";
 import { useSopDirectory } from "@/hooks/use-sop";
 import { useDepartments } from "@/hooks/use-departments";
-import { deleteSop } from "@/lib/services/sops";
+import { bulkApproveSops, bulkSubmitSopsForReview, deleteSop, type SopBulkTarget } from "@/lib/services/sops";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Table,
@@ -23,14 +29,50 @@ import {
 } from "@/components/ui/table";
 import { formatDate } from "@/lib/utils";
 import { SopLoading } from "@/components/sops/sop-media-preview";
+import type { SopDocument, SopVersion } from "@/types";
+
+type SopRow = SopDocument & { version?: SopVersion };
+
+function approverIdOf(sop: SopRow) {
+  return sop.assignedApproverId || sop.version?.assignedApproverId || "";
+}
+
+function approverNameOf(sop: SopRow) {
+  return sop.assignedApproverName || sop.version?.assignedApproverName || "";
+}
+
+function toTarget(sop: SopRow): SopBulkTarget {
+  return {
+    sopId: sop.id,
+    versionId: sop.currentVersionId || sop.version?.id || "",
+    sopNumber: sop.sopNumber,
+    effectiveDate: sop.effectiveDate || sop.version?.effectiveDate,
+    reviewDate: sop.reviewDate || sop.version?.reviewDate,
+  };
+}
 
 export default function SopsPage() {
-  const { profile } = useAuth();
+  const { profile, can } = useAuth();
   const isEmployee = profile?.role === "employee";
+  const canWrite = can("sops:write");
+  const canApprove = can("sops:approve");
+  const canBulk = !isEmployee && (canWrite || canApprove);
   const { sops, loading, error, refresh } = useSopDirectory();
   const { departments } = useDepartments();
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("");
+  const [mineOnly, setMineOnly] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [sendOpen, setSendOpen] = useState(false);
+  const [approveOpen, setApproveOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState<string | null>(null);
+  const [approveTargets, setApproveTargets] = useState<SopRow[]>([]);
+
+  const mine = useMemo(
+    () => sops.filter((sop) => sop.status === "under_review" && approverIdOf(sop) === profile?.uid),
+    [sops, profile?.uid]
+  );
 
   const filtered = useMemo(() => {
     return sops.filter((s) => {
@@ -40,14 +82,147 @@ export default function SopsPage() {
           .toLowerCase()
           .includes(search.toLowerCase());
       const matchStatus = !status || s.status === status;
-      return matchSearch && matchStatus;
+      const matchMine = !mineOnly || (s.status === "under_review" && approverIdOf(s) === profile?.uid);
+      return matchSearch && matchStatus && matchMine;
     });
-  }, [sops, search, status]);
+  }, [sops, search, status, mineOnly, profile?.uid]);
+
+  const selectable = useMemo(
+    () => filtered.filter((sop) => sop.status === "draft" || sop.status === "under_review"),
+    [filtered]
+  );
+  const selectedRows = useMemo(
+    () => sops.filter((sop) => selected.has(sop.id)),
+    [sops, selected]
+  );
+  const sendTargets = selectedRows.filter(
+    (sop) =>
+      canWrite &&
+      (sop.status === "draft" || sop.status === "under_review") &&
+      Boolean(sop.currentVersionId || sop.version?.id)
+  );
+  const readyToApprove = selectedRows.filter(
+    (sop) =>
+      canApprove &&
+      sop.status === "under_review" &&
+      (!approverIdOf(sop) || approverIdOf(sop) === profile?.uid)
+  );
+  const allSelected = selectable.length > 0 && selectable.every((sop) => selected.has(sop.id));
+  const someSelected = selectable.some((sop) => selected.has(sop.id));
+
+  useEffect(() => {
+    const ids = new Set(sops.map((sop) => sop.id));
+    setSelected((prev) => {
+      const next = new Set([...prev].filter((id) => ids.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [sops]);
 
   const deptLabel = (ids: string[]) =>
     ids
       .map((id) => departments.find((d) => d.id === id)?.code || id)
       .join(", ");
+
+  const toggleAll = () => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (allSelected) {
+        for (const sop of selectable) next.delete(sop.id);
+      } else {
+        for (const sop of selectable) next.add(sop.id);
+      }
+      return next;
+    });
+  };
+
+  const toggleOne = (id: string, on: boolean) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (on) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  };
+
+  const selectMine = () => {
+    setMineOnly(true);
+    setStatus("under_review");
+    setSelected(new Set(mine.map((sop) => sop.id)));
+  };
+
+  const finishBulk = async (ok: string, failed: string[], succeeded: number) => {
+    if (failed.length) toast.error(failed.slice(0, 3).join(" · "));
+    if (ok) toast.success(ok);
+    if (succeeded > 0) {
+      setSelected(new Set());
+      setSendOpen(false);
+      setApproveOpen(false);
+    }
+    await refresh();
+  };
+
+  const sendForApproval = async (approver: { uid: string; name: string }) => {
+    if (!profile || sendTargets.length === 0) return;
+    setBusy(true);
+    setProgress(null);
+    try {
+      const result = await bulkSubmitSopsForReview(
+        sendTargets.map(toTarget),
+        {
+          uid: profile.uid,
+          name: profile.displayName,
+          email: profile.email,
+          role: profile.role,
+          employeeId: profile.employeeId,
+        },
+        approver,
+        (done, total) => setProgress(`Sending ${done} of ${total}…`)
+      );
+      await finishBulk(
+        result.done
+          ? `Sent ${result.done} SOP${result.done === 1 ? "" : "s"} to ${approver.name}`
+          : "",
+        result.failed,
+        result.done
+      );
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not send SOPs");
+    } finally {
+      setBusy(false);
+      setProgress(null);
+    }
+  };
+
+  const approveSelected = async () => {
+    if (!profile || approveTargets.length === 0) return;
+    setBusy(true);
+    setProgress(null);
+    try {
+      const result = await bulkApproveSops(
+        approveTargets.map(toTarget),
+        {
+          uid: profile.uid,
+          name: profile.displayName,
+          email: profile.email,
+          role: profile.role,
+          employeeId: profile.employeeId,
+        },
+        (done, total) => setProgress(`Approving ${done} of ${total}…`)
+      );
+      const retrain =
+        result.retrainCount > 0 ? ` · retraining assigned to ${result.retrainCount}` : "";
+      await finishBulk(
+        result.done ? `Approved ${result.done} SOP${result.done === 1 ? "" : "s"}${retrain}` : "",
+        result.failed,
+        result.done
+      );
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not approve SOPs");
+    } finally {
+      setBusy(false);
+      setProgress(null);
+    }
+  };
 
   if (loading) return <SopLoading />;
 
@@ -66,7 +241,7 @@ export default function SopsPage() {
 
   return (
     <RequirePermission permission={["sops:read"]}>
-      <div className="space-y-6">
+      <div className="space-y-6 pb-24">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h1 className="text-2xl font-bold tracking-tight">
@@ -95,6 +270,30 @@ export default function SopsPage() {
             </div>
           </RequirePermission>
         </div>
+
+        {canApprove && mine.length > 0 && (
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-primary/20 bg-primary/5 px-4 py-3">
+            <p className="text-sm">
+              <span className="font-semibold">{mine.length}</span> SOP
+              {mine.length === 1 ? "" : "s"} waiting for your approval.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <Button size="sm" variant="outline" onClick={selectMine}>
+                Select them
+              </Button>
+              <Button
+                size="sm"
+                onClick={() => {
+                  setApproveTargets(mine);
+                  setApproveOpen(true);
+                }}
+              >
+                <CheckCircle2 className="mr-2 h-4 w-4" />
+                Approve all
+              </Button>
+            </div>
+          </div>
+        )}
 
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {[
@@ -152,13 +351,39 @@ export default function SopsPage() {
         />
 
         <Card>
-          <CardHeader>
+          <CardHeader className="flex flex-row items-center justify-between gap-3 space-y-0">
             <CardTitle className="text-base">{filtered.length} documents</CardTitle>
+            <div className="flex flex-wrap gap-2">
+              {canBulk && selectable.length > 0 && (
+                <Button size="sm" variant="outline" onClick={toggleAll}>
+                  {allSelected ? "Clear selection" : `Select all (${selectable.length})`}
+                </Button>
+              )}
+              {canApprove && (
+                <Button
+                  size="sm"
+                  variant={mineOnly ? "default" : "outline"}
+                  onClick={() => setMineOnly((on) => !on)}
+                >
+                  Waiting for me{mine.length ? ` (${mine.length})` : ""}
+                </Button>
+              )}
+            </div>
           </CardHeader>
           <CardContent>
             <Table>
               <TableHeader>
                 <TableRow>
+                  {canBulk && (
+                    <TableHead className="w-10">
+                      <Checkbox
+                        checked={allSelected ? true : someSelected ? "indeterminate" : false}
+                        onCheckedChange={toggleAll}
+                        disabled={selectable.length === 0}
+                        aria-label="Select all SOPs"
+                      />
+                    </TableHead>
+                  )}
                   <TableHead>SOP No.</TableHead>
                   <TableHead>Title</TableHead>
                   <TableHead>Version</TableHead>
@@ -173,7 +398,7 @@ export default function SopsPage() {
               <TableBody>
                 {filtered.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={9} className="py-12 text-center text-muted-foreground">
+                    <TableCell colSpan={canBulk ? 10 : 9} className="py-12 text-center text-muted-foreground">
                       {sops.length === 0 ? (
                         <div className="space-y-2">
                           <p>
@@ -200,8 +425,21 @@ export default function SopsPage() {
                     </TableCell>
                   </TableRow>
                 ) : (
-                  filtered.map((s) => (
-                  <TableRow key={s.id}>
+                  filtered.map((s) => {
+                    const canSelect = s.status === "draft" || s.status === "under_review";
+                    const approverName = approverNameOf(s);
+                    return (
+                  <TableRow key={s.id} data-state={selected.has(s.id) ? "selected" : undefined}>
+                    {canBulk && (
+                      <TableCell>
+                        <Checkbox
+                          checked={selected.has(s.id)}
+                          disabled={!canSelect}
+                          onCheckedChange={(value) => toggleOne(s.id, value === true)}
+                          aria-label={`Select ${s.sopNumber}`}
+                        />
+                      </TableCell>
+                    )}
                     <TableCell>
                       <Link
                         href={`/dashboard/sops/${s.id}`}
@@ -227,6 +465,9 @@ export default function SopsPage() {
                     </TableCell>
                     <TableCell>
                       <StatusBadge status={s.status} />
+                      {s.status === "under_review" && approverName && (
+                        <p className="mt-1 text-[11px] text-muted-foreground">For {approverName}</p>
+                      )}
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center justify-end gap-1">
@@ -249,12 +490,65 @@ export default function SopsPage() {
                       </div>
                     </TableCell>
                   </TableRow>
-                  ))
+                    );
+                  })
                 )}
               </TableBody>
             </Table>
           </CardContent>
         </Card>
+
+        {canBulk && selected.size > 0 && (
+          <div className="pointer-events-none fixed inset-x-0 bottom-6 z-40 flex justify-center px-4 lg:pl-64">
+            <div className="pointer-events-auto flex flex-wrap items-center gap-2 rounded-2xl border bg-background px-4 py-3 shadow-lift">
+              <p className="mr-1 text-sm font-medium">{selected.size} selected</p>
+              {canWrite && (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  disabled={busy || sendTargets.length === 0}
+                  onClick={() => setSendOpen(true)}
+                >
+                  <Send className="mr-2 h-4 w-4" />
+                  Send for approval{sendTargets.length ? ` (${sendTargets.length})` : ""}
+                </Button>
+              )}
+              {canApprove && (
+                <Button
+                  size="sm"
+                  disabled={busy || readyToApprove.length === 0}
+                  onClick={() => {
+                    setApproveTargets(readyToApprove);
+                    setApproveOpen(true);
+                  }}
+                >
+                  <CheckCircle2 className="mr-2 h-4 w-4" />
+                  Approve selected{readyToApprove.length ? ` (${readyToApprove.length})` : ""}
+                </Button>
+              )}
+              <Button size="sm" variant="ghost" disabled={busy} onClick={() => setSelected(new Set())}>
+                Clear
+              </Button>
+            </div>
+          </div>
+        )}
+
+        <SopSendForApprovalDialog
+          open={sendOpen}
+          onOpenChange={setSendOpen}
+          sopCount={sendTargets.length}
+          busy={busy}
+          progressLabel={progress}
+          onConfirm={(approver) => void sendForApproval(approver)}
+        />
+        <SopBulkApproveDialog
+          open={approveOpen}
+          onOpenChange={setApproveOpen}
+          sopNumbers={approveTargets.map((sop) => sop.sopNumber)}
+          busy={busy}
+          progressLabel={progress}
+          onConfirm={() => void approveSelected()}
+        />
       </div>
     </RequirePermission>
   );

@@ -1005,13 +1005,13 @@ function buildAuditReport(filters: ReportFilters): ReportDataset {
     .filter((a) => inDateRange(a.timestamp, filters))
     .filter((a) =>
       matchesSearch(
-        `${a.actorEmail} ${a.action} ${a.resourceType} ${a.description}`,
+        `${a.actorName || ""} ${a.actorEmployeeCode || ""} ${a.action} ${a.resourceType} ${a.description}`,
         filters.search
       )
     )
     .map((a) => ({
       timestamp: formatDate(a.timestamp),
-      actor: a.actorEmail,
+      actor: a.actorName || a.actorEmployeeCode || a.actorId,
       role: a.actorRole || "—",
       action: a.action,
       resource: a.resourceType,

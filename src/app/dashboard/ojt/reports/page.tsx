@@ -328,7 +328,7 @@ export default function OjtReportsPage() {
         ],
         rows: all.map((l) => ({
           timestamp: l.timestamp,
-          actor: l.actorEmail,
+          actor: l.actorName || l.actorEmployeeCode || l.actorId,
           action: l.action,
           resource: `${l.resourceType}:${l.resourceId}`,
           description: l.description,

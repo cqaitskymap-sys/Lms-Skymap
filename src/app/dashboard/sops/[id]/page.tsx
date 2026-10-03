@@ -34,6 +34,7 @@ import { SopMediaPreview, SopFileDropzone, SopLoading, ViewerBadge } from "@/com
 import { SopVersionHistory } from "@/components/sops/sop-version-history";
 import { SopAcknowledgementPanel } from "@/components/sops/sop-acknowledgement";
 import { AiExplainSopPanel } from "@/components/ai/ai-explain-sop-panel";
+import { SopSendForApprovalDialog } from "@/components/sops/sop-approval-dialogs";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -75,6 +76,7 @@ export default function SopDetailPage({ params }: { params: Promise<{ id: string
   const editOpened = useRef(false);
   const [effectiveDate, setEffectiveDate] = useState("");
   const [reviewDate, setReviewDate] = useState("");
+  const [sendOpen, setSendOpen] = useState(false);
   const viewedOnce = useRef(false);
 
   const actor: SopActor | null = useMemo(() => {
@@ -289,23 +291,18 @@ export default function SopDetailPage({ params }: { params: Promise<{ id: string
                 <Button
                   size="sm"
                   variant="secondary"
-                  disabled={busy || activeVersion.status === "under_review"}
-                  onClick={() =>
-                    actor &&
-                    run(
-                      () => submitSopForReview(sop.id, activeVersion.id, actor),
-                      "Submitted for QA review"
-                    )
-                  }
+                  disabled={busy}
+                  onClick={() => setSendOpen(true)}
                 >
                   <Send className="mr-1 h-4 w-4" />
-                  Submit for review
+                  {activeVersion.status === "under_review" ? "Change approver" : "Submit for review"}
                 </Button>
               )}
             </Can>
 
             <Can permission="sops:approve">
-              {activeVersion.status === "under_review" && (
+              {activeVersion.status === "under_review" &&
+                (!activeVersion.assignedApproverId || activeVersion.assignedApproverId === profile?.uid) && (
                 <Button
                   size="sm"
                   disabled={busy}
@@ -319,10 +316,10 @@ export default function SopDetailPage({ params }: { params: Promise<{ id: string
                         {
                           effectiveDate: effectiveDate
                             ? new Date(effectiveDate).toISOString()
-                            : undefined,
+                            : activeVersion.effectiveDate,
                           reviewDate: reviewDate
                             ? new Date(reviewDate).toISOString()
-                            : undefined,
+                            : activeVersion.reviewDate,
                           triggerRetrain: true,
                         }
                       );
@@ -635,6 +632,16 @@ export default function SopDetailPage({ params }: { params: Promise<{ id: string
                 <Meta label="Effective date" value={formatDate(sop.effectiveDate || activeVersion.effectiveDate)} />
                 <Meta label="Review date" value={formatDate(sop.reviewDate || activeVersion.reviewDate)} />
                 <Meta
+                  label="Approver"
+                  value={
+                    activeVersion.assignedApproverName
+                      ? activeVersion.assignedApproverId === profile?.uid
+                        ? `${activeVersion.assignedApproverName} (you)`
+                        : activeVersion.assignedApproverName
+                      : "—"
+                  }
+                />
+                <Meta
                   label="Approved by"
                   value={
                     activeVersion.approvedByName
@@ -790,6 +797,30 @@ export default function SopDetailPage({ params }: { params: Promise<{ id: string
             </Card>
           </TabsContent>
         </Tabs>
+        <SopSendForApprovalDialog
+          open={sendOpen}
+          onOpenChange={setSendOpen}
+          sopCount={1}
+          busy={busy}
+          onConfirm={async (approver) => {
+            if (!actor) return;
+            setBusy(true);
+            try {
+              await submitSopForReview(sop.id, activeVersion.id, actor, approver, sop.sopNumber);
+              toast.success(
+                activeVersion.status === "under_review"
+                  ? `Approver set to ${approver.name}`
+                  : `Sent to ${approver.name} for approval`
+              );
+              setSendOpen(false);
+              await refresh();
+            } catch (err) {
+              toast.error(err instanceof Error ? err.message : "Could not send for approval");
+            } finally {
+              setBusy(false);
+            }
+          }}
+        />
       </div>
     </RequirePermission>
   );

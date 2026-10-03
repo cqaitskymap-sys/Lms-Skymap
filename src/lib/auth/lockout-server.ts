@@ -145,6 +145,8 @@ export async function recordLoginSuccess(email: string): Promise<void> {
 export async function writeLoginAudit(params: {
   actorId: string;
   actorEmail: string;
+  actorName?: string;
+  actorEmployeeCode?: string;
   actorRole: string;
   action: "login" | "logout";
   description: string;
@@ -154,12 +156,24 @@ export async function writeLoginAudit(params: {
 }) {
   if (!isAdminConfigured()) return;
   try {
+    let actorName = params.actorName?.trim() || "";
+    let actorEmployeeCode = params.actorEmployeeCode?.trim() || "";
+    if ((!actorName || !actorEmployeeCode) && params.actorId) {
+      const snap = await adminDb.collection(COLLECTIONS.users).doc(params.actorId).get();
+      if (snap.exists) {
+        const data = snap.data() || {};
+        actorName = actorName || String(data.displayName || "").trim();
+        actorEmployeeCode = actorEmployeeCode || String(data.username || "").trim();
+      }
+    }
     const auditId = generateId("audit");
     await adminDb.collection(COLLECTIONS.auditLogs).doc(auditId).set({
       id: auditId,
       timestamp: new Date().toISOString(),
       actorId: params.actorId,
       actorEmail: params.actorEmail,
+      ...(actorName ? { actorName } : {}),
+      ...(actorEmployeeCode ? { actorEmployeeCode } : {}),
       actorRole: params.actorRole,
       action: params.action,
       resourceType: "session",

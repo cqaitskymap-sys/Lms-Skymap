@@ -665,50 +665,323 @@ export async function reviseSopWithFiles(
   return version;
 }
 
+export interface SopApproverRef {
+  uid: string;
+  name: string;
+}
+
+export interface SopBulkTarget {
+  sopId: string;
+  versionId: string;
+  sopNumber: string;
+  effectiveDate?: string;
+  reviewDate?: string;
+}
+
+export interface SopBulkResult {
+  done: number;
+  failed: string[];
+  retrainCount: number;
+}
+
+function notifySopsUpdated() {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event("pharma-sops-updated"));
+  }
+}
+
+function assertAssignedApprover(
+  version: { assignedApproverId?: string; assignedApproverName?: string },
+  actor: SopActor
+) {
+  if (version.assignedApproverId && version.assignedApproverId !== actor.uid) {
+    throw new Error(
+      `This SOP is assigned to ${version.assignedApproverName || "another approver"}`
+    );
+  }
+}
+
+async function runInChunks<T>(
+  items: T[],
+  size: number,
+  worker: (item: T) => Promise<void>,
+  onProgress?: (done: number, total: number) => void
+) {
+  let done = 0;
+  for (let i = 0; i < items.length; i += size) {
+    const slice = items.slice(i, i + size);
+    await Promise.all(slice.map((item) => worker(item)));
+    done += slice.length;
+    onProgress?.(done, items.length);
+  }
+}
+
+function dedupeTargets(items: SopBulkTarget[]): SopBulkTarget[] {
+  const seen = new Set<string>();
+  const next: SopBulkTarget[] = [];
+  for (const item of items) {
+    if (!item.sopId || !item.versionId || seen.has(item.sopId)) continue;
+    seen.add(item.sopId);
+    next.push(item);
+  }
+  return next;
+}
+
 export async function submitSopForReview(
   sopId: string,
   versionId: string,
-  actor: SopActor
+  actor: SopActor,
+  approver?: SopApproverRef,
+  sopNumber?: string
 ): Promise<void> {
+  const result = await bulkSubmitSopsForReview(
+    [{ sopId, versionId, sopNumber: sopNumber || sopId }],
+    actor,
+    approver
+  );
+  if (result.failed.length) throw new Error(result.failed[0]);
+  if (result.done === 0) throw new Error("This SOP cannot be sent for approval");
+}
+
+/** Send many draft (or already in-review) SOPs to one approver. */
+export async function bulkSubmitSopsForReview(
+  items: SopBulkTarget[],
+  actor: SopActor,
+  approver?: SopApproverRef,
+  onProgress?: (done: number, total: number) => void
+): Promise<SopBulkResult> {
+  const targets = dedupeTargets(items);
   const now = nowISO();
+  const failed: string[] = [];
+  let done = 0;
+
+  const applyAssignment = <T extends { status: SopStatus }>(row: T) => ({
+    ...row,
+    status: "under_review" as const,
+    updatedAt: now,
+    ...(approver
+      ? { assignedApproverId: approver.uid, assignedApproverName: approver.name }
+      : {}),
+  });
+
   if (await preferLocalSopStore()) {
     const store = readSopStore();
-    store.versions = store.versions.map((v) =>
-      v.id === versionId
-        ? {
-            ...v,
-            status: "under_review",
-            submittedForReviewAt: now,
-            submittedBy: actor.uid,
-            updatedAt: now,
-          }
-        : v
-    );
-    store.sops = store.sops.map((s) =>
-      s.id === sopId ? { ...s, status: "under_review", updatedAt: now } : s
-    );
-    writeSopStore(store);
+    const versionById = new Map(store.versions.map((v) => [v.id, v]));
+    const touched = new Set<string>();
+    for (const item of targets) {
+      const version = versionById.get(item.versionId);
+      if (!version || version.sopId !== item.sopId) {
+        failed.push(`${item.sopNumber}: version not found`);
+        continue;
+      }
+      if (version.status !== "draft" && version.status !== "under_review") {
+        failed.push(`${item.sopNumber} is already ${version.status.replaceAll("_", " ")}`);
+        continue;
+      }
+      touched.add(item.sopId);
+      done += 1;
+    }
+    if (touched.size) {
+      store.versions = store.versions.map((v) => {
+        const item = targets.find((t) => t.versionId === v.id && touched.has(t.sopId));
+        if (!item) return v;
+        return {
+          ...applyAssignment(v),
+          submittedForReviewAt: v.submittedForReviewAt || now,
+          submittedBy: v.submittedBy || actor.uid,
+        };
+      });
+      store.sops = store.sops.map((s) => (touched.has(s.id) ? { ...applyAssignment(s), updatedBy: actor.uid } : s));
+      writeSopStore(store);
+    }
+    onProgress?.(targets.length, targets.length);
   } else {
-    await updateDoc(doc(db, COLLECTIONS.sopVersions, versionId), {
-      status: "under_review",
-      submittedForReviewAt: now,
-      submittedBy: actor.uid,
-      updatedAt: now,
-      updatedBy: actor.uid,
+    await runInChunks(
+      targets,
+      8,
+      async (item) => {
+        try {
+          const versionSnap = await getDoc(doc(db, COLLECTIONS.sopVersions, item.versionId));
+          if (!versionSnap.exists()) throw new Error("version not found");
+          const version = versionSnap.data() as SopVersion;
+          if (version.sopId !== item.sopId) throw new Error("version mismatch");
+          if (version.status !== "draft" && version.status !== "under_review") {
+            throw new Error(`already ${version.status.replaceAll("_", " ")}`);
+          }
+          await updateDoc(doc(db, COLLECTIONS.sopVersions, item.versionId), {
+            status: "under_review",
+            submittedForReviewAt: version.submittedForReviewAt || now,
+            submittedBy: version.submittedBy || actor.uid,
+            updatedAt: now,
+            updatedBy: actor.uid,
+            ...(approver
+              ? { assignedApproverId: approver.uid, assignedApproverName: approver.name }
+              : {}),
+          });
+          await updateDoc(doc(db, COLLECTIONS.sops, item.sopId), {
+            status: "under_review",
+            updatedAt: now,
+            updatedBy: actor.uid,
+            ...(approver
+              ? { assignedApproverId: approver.uid, assignedApproverName: approver.name }
+              : {}),
+          });
+          done += 1;
+        } catch (err) {
+          failed.push(
+            `${item.sopNumber}: ${err instanceof Error ? err.message : "could not send"}`
+          );
+        }
+      },
+      onProgress
+    );
+    if (done > 0) notifySopsUpdated();
+  }
+
+  if (done > 0) {
+    const who = approver?.name ? ` to ${approver.name}` : "";
+    await writeAuditClient({
+      actor,
+      action: "submit",
+      resourceId: targets[0]?.sopId || actor.uid,
+      description:
+        done === 1
+          ? `Submitted SOP for approval${who}`
+          : `Submitted ${done} SOPs for approval${who}`,
     });
-    await updateDoc(doc(db, COLLECTIONS.sops, sopId), {
-      status: "under_review",
-      updatedAt: now,
-      updatedBy: actor.uid,
+    if (approver && approver.uid !== actor.uid) {
+      try {
+        const { createNotification } = await import("@/lib/services/notifications");
+        await createNotification({
+          userId: approver.uid,
+          type: "system",
+          title: "SOPs waiting for your approval",
+          message:
+            done === 1
+              ? "1 SOP was assigned to you. Open SOP Management to review and approve it."
+              : `${done} SOPs were assigned to you. Open SOP Management, check them, and approve them together.`,
+          link: "/dashboard/sops",
+          actorId: actor.uid,
+        });
+      } catch {
+        /* inbox is optional */
+      }
+    }
+  }
+
+  return { done, failed, retrainCount: 0 };
+}
+
+/** Approve every selected in-review SOP assigned to this person, in one step. */
+export async function bulkApproveSops(
+  items: SopBulkTarget[],
+  actor: SopActor,
+  onProgress?: (done: number, total: number) => void
+): Promise<SopBulkResult> {
+  const targets = dedupeTargets(items);
+  const now = nowISO();
+  const failed: string[] = [];
+  let done = 0;
+  let retrainCount = 0;
+
+  if (await preferLocalSopStore()) {
+    const store = readSopStore();
+    for (const item of targets) {
+      const version = store.versions.find((v) => v.id === item.versionId && v.sopId === item.sopId);
+      if (!version) {
+        failed.push(`${item.sopNumber}: version not found`);
+        continue;
+      }
+      if (version.status !== "under_review") {
+        failed.push(`${item.sopNumber} is not under review`);
+        continue;
+      }
+      try {
+        assertAssignedApprover(version, actor);
+      } catch (err) {
+        failed.push(`${item.sopNumber}: ${err instanceof Error ? err.message : "not assigned to you"}`);
+        continue;
+      }
+      const effectiveDate = item.effectiveDate || version.effectiveDate || now;
+      const reviewDate = item.reviewDate || version.reviewDate || addDays(now, 365);
+      const isRevision = Boolean(version.supersedesVersionId);
+      store.versions = store.versions.map((v) => {
+        if (v.id === item.versionId) {
+          return {
+            ...v,
+            status: "approved",
+            approvedBy: actor.uid,
+            approvedByName: actor.name,
+            approvedAt: now,
+            effectiveDate,
+            reviewDate,
+            updatedAt: now,
+          };
+        }
+        if (v.id === version.supersedesVersionId) {
+          return { ...v, status: "superseded", archivedAt: now, updatedAt: now };
+        }
+        if (v.sopId === item.sopId && v.id !== item.versionId && v.status === "approved") {
+          return { ...v, status: "obsolete", archivedAt: now, updatedAt: now };
+        }
+        return v;
+      });
+      store.sops = store.sops.map((s) =>
+        s.id === item.sopId
+          ? {
+              ...s,
+              status: "approved",
+              currentVersionId: item.versionId,
+              currentVersionNumber: version.versionNumber,
+              effectiveDate,
+              reviewDate,
+              updatedAt: now,
+            }
+          : s
+      );
+      if (isRevision) retrainCount += autoRetrainDemo(store, item.sopId, item.versionId, actor.uid);
+      done += 1;
+    }
+    if (done > 0) writeSopStore(store);
+    onProgress?.(targets.length, targets.length);
+  } else {
+    await runInChunks(
+      targets,
+      6,
+      async (item) => {
+        try {
+          const result = await approveSopVersionFull(item.sopId, item.versionId, actor, {
+            effectiveDate: item.effectiveDate,
+            reviewDate: item.reviewDate,
+            triggerRetrain: true,
+            quiet: true,
+          });
+          retrainCount += result.retrainCount;
+          done += 1;
+        } catch (err) {
+          failed.push(
+            `${item.sopNumber}: ${err instanceof Error ? err.message : "could not approve"}`
+          );
+        }
+      },
+      onProgress
+    );
+    if (done > 0) notifySopsUpdated();
+  }
+
+  if (done > 0) {
+    await writeAuditClient({
+      actor,
+      action: "approve",
+      resourceId: targets[0]?.sopId || actor.uid,
+      description:
+        done === 1
+          ? `Approved SOP version — ${retrainCount} retraining assignment(s) created`
+          : `Approved ${done} SOPs in one step — ${retrainCount} retraining assignment(s) created`,
     });
   }
 
-  await writeAuditClient({
-    actor,
-    action: "submit",
-    resourceId: sopId,
-    description: "Submitted SOP version for QA approval",
-  });
+  return { done, failed, retrainCount };
 }
 
 const LOCKED_VERSION_STATUSES = new Set<SopStatus>(["approved", "obsolete", "superseded"]);
@@ -929,7 +1202,13 @@ export async function approveSopVersionFull(
   sopId: string,
   versionId: string,
   actor: SopActor,
-  options?: { effectiveDate?: string; reviewDate?: string; triggerRetrain?: boolean }
+  options?: {
+    effectiveDate?: string;
+    reviewDate?: string;
+    triggerRetrain?: boolean;
+    /** Skip the per-SOP audit row. Bulk approval writes one summary instead. */
+    quiet?: boolean;
+  }
 ): Promise<{ retrainCount: number }> {
   const now = nowISO();
   const effectiveDate = options?.effectiveDate || now;
@@ -944,6 +1223,7 @@ export async function approveSopVersionFull(
     if (version.status !== "under_review") {
       throw new Error("Submit the version for QA review before approval");
     }
+    assertAssignedApprover(version, actor);
     const isRevision = Boolean(version.supersedesVersionId);
 
     store.versions = store.versions.map((v) => {
@@ -993,6 +1273,7 @@ export async function approveSopVersionFull(
     if (version.status !== "under_review") {
       throw new Error("Submit the version for QA review before approval");
     }
+    assertAssignedApprover(version, actor);
     const isRevision = Boolean(version.supersedesVersionId);
 
     await updateDoc(doc(db, COLLECTIONS.sopVersions, versionId), {
@@ -1051,12 +1332,15 @@ export async function approveSopVersionFull(
     }
   }
 
-  await writeAuditClient({
-    actor,
-    action: "approve",
-    resourceId: sopId,
-    description: `Approved SOP version — ${retrainCount} retraining assignment(s) created`,
-  });
+  if (!options?.quiet) {
+    await writeAuditClient({
+      actor,
+      action: "approve",
+      resourceId: sopId,
+      description: `Approved SOP version — ${retrainCount} retraining assignment(s) created`,
+    });
+    notifySopsUpdated();
+  }
 
   return { retrainCount };
 }

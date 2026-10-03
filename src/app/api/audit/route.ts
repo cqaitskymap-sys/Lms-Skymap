@@ -71,6 +71,8 @@ export async function POST(request: NextRequest) {
   const id = await writeAuditLog({
     actorId: verified.auth.uid,
     actorEmail: verified.auth.email,
+    actorName: verified.auth.profile.displayName,
+    actorEmployeeCode: verified.auth.profile.username,
     actorRole: verified.auth.role,
     action: parsed.data.action,
     resourceType: parsed.data.resourceType,

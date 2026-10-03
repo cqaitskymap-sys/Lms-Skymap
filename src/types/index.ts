@@ -478,6 +478,9 @@ export interface SopDocument extends Timestamps {
   effectiveDate?: string;
   reviewDate?: string;
   ownerUserId: string;
+  /** Person asked to approve the current version. */
+  assignedApproverId?: string;
+  assignedApproverName?: string;
   /** Denormalized current version label e.g. "1.2" */
   currentVersionNumber?: string;
   viewCount?: number;
@@ -519,6 +522,9 @@ export interface SopVersion extends Timestamps {
   approvedAt?: string;
   submittedForReviewAt?: string;
   submittedBy?: string;
+  /** Person asked to approve this version. */
+  assignedApproverId?: string;
+  assignedApproverName?: string;
   obsoleteReason?: string;
   supersedesVersionId?: string;
   archivedAt?: string;
@@ -907,6 +913,10 @@ export interface AuditLog {
   timestamp: string;
   actorId: string;
   actorEmail: string;
+  /** Person's display name. Shown in the audit Actor column. */
+  actorName?: string;
+  /** Staff username or employee code. Shown with the name in the Actor column. */
+  actorEmployeeCode?: string;
   actorRole: UserRole;
   action: AuditAction;
   resourceType: string;

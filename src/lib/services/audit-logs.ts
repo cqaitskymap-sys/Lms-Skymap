@@ -4,7 +4,7 @@
 
 import { collection, getDocs, orderBy, query, limit } from "firebase/firestore/lite";
 import { db, COLLECTIONS, auth } from "@/lib/firebase/client";
-import type { AuditAction, AuditLog, UserRole } from "@/types";
+import type { AuditAction, AuditLog, UserProfile, UserRole } from "@/types";
 import { isoInLocalDateRange } from "@/lib/utils";
 import { isDemoMode } from "@/lib/demo/data";
 import { readLifecycleStore } from "@/lib/lifecycle/demo-store";
@@ -31,7 +31,8 @@ function lifecycleToAudit(events: LifecycleEvent[]): AuditLog[] {
     id: e.id,
     timestamp: e.createdAt,
     actorId: e.actorId || "system",
-    actorEmail: e.actorName || e.actorId || "system",
+    actorEmail: e.actorId || "system",
+    actorName: e.actorName,
     actorRole: (e.actorRole || "employee") as UserRole,
     action: "update" as AuditAction,
     resourceType: "employee_lifecycle",
@@ -40,13 +41,40 @@ function lifecycleToAudit(events: LifecycleEvent[]): AuditLog[] {
   }));
 }
 
+/** Name plus employee / staff code for the Actor column. Email is only a last resort for @pharma.local codes. */
+export function auditActorParts(log: Pick<AuditLog, "actorName" | "actorEmployeeCode" | "actorEmail">): {
+  name: string;
+  code: string;
+} {
+  const email = (log.actorEmail || "").trim();
+  const localPart = email.includes("@") ? email.split("@")[0] : "";
+  const pharmaCode = email.toLowerCase().endsWith("@pharma.local") ? localPart : "";
+  const code = (log.actorEmployeeCode || pharmaCode).trim();
+  let name = (log.actorName || "").trim();
+  if (!name && email && !email.includes("@")) name = email;
+  if (!name || name.includes("@") || (email.includes("@") && name.toLowerCase() === email.toLowerCase())) {
+    name = "";
+  }
+  if (code && name.toLowerCase() === code.toLowerCase()) name = "";
+  if (!name && !code && localPart) return { name: "", code: localPart };
+  return { name, code };
+}
+
+export function auditActorText(log: Pick<AuditLog, "actorName" | "actorEmployeeCode" | "actorEmail">): string {
+  const { name, code } = auditActorParts(log);
+  if (name && code) return `${name} (${code})`;
+  return name || code || "—";
+}
+
 function mapDoc(d: { id: string; data: () => Record<string, unknown> }): AuditLog {
   const data = d.data();
   return {
     id: (data.id as string) || d.id,
     timestamp: (data.timestamp as string) || new Date().toISOString(),
     actorId: data.actorId as string,
-    actorEmail: data.actorEmail as string,
+    actorEmail: (data.actorEmail as string) || "",
+    actorName: data.actorName as string | undefined,
+    actorEmployeeCode: data.actorEmployeeCode as string | undefined,
     actorRole: data.actorRole as UserRole,
     action: data.action as AuditAction,
     resourceType: data.resourceType as string,
@@ -89,11 +117,46 @@ function applyFilters(rows: AuditLog[], filters?: AuditListFilters): AuditLog[] 
     if (!inDateRange(a.timestamp, filters.dateFrom, filters.dateTo)) return false;
     if (filters.search?.trim()) {
       const q = filters.search.trim().toLowerCase();
-      const blob = `${a.description} ${a.actorEmail} ${a.actorRole} ${a.action} ${a.resourceType} ${a.resourceId}`;
+      const blob = `${a.description} ${auditActorText(a)} ${a.actorEmployeeCode || ""} ${a.actorRole} ${a.action} ${a.resourceType} ${a.resourceId}`;
       if (!blob.toLowerCase().includes(q)) return false;
     }
     return true;
   });
+}
+
+/** Fill name and employee code on older rows that only stored an email. */
+async function enrichAuditActors(logs: AuditLog[]): Promise<AuditLog[]> {
+  if (logs.length === 0) return logs;
+  const directory = await loadActorDirectory();
+  if (directory.size === 0) return logs;
+  return logs.map((log) => {
+    const hit = directory.get(log.actorId);
+    if (!hit) return log;
+    return {
+      ...log,
+      actorName: log.actorName || hit.name || undefined,
+      actorEmployeeCode: log.actorEmployeeCode || hit.code || undefined,
+    };
+  });
+}
+
+async function loadActorDirectory(): Promise<Map<string, { name: string; code: string }>> {
+  try {
+    const snap = await getDocs(collection(db, COLLECTIONS.users));
+    const map = new Map<string, { name: string; code: string }>();
+    for (const docSnap of snap.docs) {
+      const data = docSnap.data() as Partial<UserProfile>;
+      const entry = {
+        name: (data.displayName || "").trim(),
+        code: (data.username || "").trim(),
+      };
+      map.set(docSnap.id, entry);
+      if (data.uid) map.set(data.uid, entry);
+    }
+    return map;
+  } catch {
+    return new Map();
+  }
 }
 
 export async function listAuditLogs(
@@ -116,10 +179,10 @@ export async function listAuditLogs(
     const merged = [...byId.values()].sort((a, b) =>
       b.timestamp.localeCompare(a.timestamp)
     );
-    return applyFilters(merged, filters).slice(0, max);
+    return applyFilters(await enrichAuditActors(merged), filters).slice(0, max);
   }
 
-  const remote = await fetchRemoteAuditLogs(max);
+  const remote = await enrichAuditActors(await fetchRemoteAuditLogs(max));
   return applyFilters(remote, filters);
 }
 
@@ -172,7 +235,7 @@ export function exportAuditLogsCsv(logs: AuditLog[], filename = "audit-trail.csv
     ...logs.map((a) =>
       [
         a.timestamp,
-        a.actorEmail,
+        auditActorText(a),
         a.actorRole || "",
         a.action,
         a.resourceType,

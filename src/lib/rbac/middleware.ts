@@ -110,6 +110,8 @@ export function unauthorized(message = "Unauthorized", status = 401) {
 export async function writeAuditLog(params: {
   actorId: string;
   actorEmail: string;
+  actorName?: string;
+  actorEmployeeCode?: string;
   actorRole: UserRole;
   action: AuditAction;
   resourceType: string;
@@ -120,13 +122,42 @@ export async function writeAuditLog(params: {
   ipAddress?: string;
   userAgent?: string;
 }) {
+  const identity = await resolveAuditActor(params.actorId, params.actorName, params.actorEmployeeCode);
   const id = generateId("audit");
   await adminDb.collection(COLLECTIONS.auditLogs).doc(id).set(
     stripUndefined({
       id,
       timestamp: new Date().toISOString(),
       ...params,
+      actorName: identity.name || params.actorName,
+      actorEmployeeCode: identity.code || params.actorEmployeeCode,
     })
   );
   return id;
+}
+
+/** Name and employee / staff code for the audit Actor column. */
+async function resolveAuditActor(
+  actorId: string,
+  name?: string,
+  code?: string
+): Promise<{ name?: string; code?: string }> {
+  if (name && code) return { name, code };
+  if (!actorId || actorId === "system") return { name, code };
+  try {
+    const snap = await adminDb.collection(COLLECTIONS.users).doc(actorId).get();
+    if (!snap.exists) return { name, code };
+    const data = snap.data() || {};
+    return {
+      name: name || stringField(data.displayName),
+      code: code || stringField(data.username),
+    };
+  } catch {
+    return { name, code };
+  }
+}
+
+function stringField(value: unknown): string | undefined {
+  const text = typeof value === "string" ? value.trim() : "";
+  return text || undefined;
 }

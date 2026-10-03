@@ -430,7 +430,7 @@ export function buildDashboardView(snap: DashboardSnapshot, role: string) {
   const activities: DashActivity[] = snap.audit.slice(0, 12).map((e) => ({
     id: e.id,
     description: e.description,
-    actor: e.actorEmail || e.actorId,
+    actor: e.actorName || e.actorEmployeeCode || e.actorId,
     action: e.action,
     timestamp: e.timestamp,
   }));

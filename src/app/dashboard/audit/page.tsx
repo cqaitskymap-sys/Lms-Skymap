@@ -8,6 +8,8 @@ import { DataToolbar } from "@/components/shared/data-toolbar";
 import { ActivityTimeline } from "@/components/shared/activity-timeline";
 import {
   AUDIT_UPDATED_EVENT,
+  auditActorParts,
+  auditActorText,
   exportAuditLogsCsv,
   listAuditLogs,
   recordAuditEvent,
@@ -109,7 +111,7 @@ export default function AuditPage() {
       }
       if (search.trim()) {
         const q = search.trim().toLowerCase();
-        const blob = `${a.description} ${a.actorEmail} ${a.actorRole} ${a.action} ${a.resourceType} ${a.resourceId}`;
+        const blob = `${a.description} ${auditActorText(a)} ${a.actorRole} ${a.action} ${a.resourceType} ${a.resourceId}`;
         if (!blob.toLowerCase().includes(q)) return false;
       }
       return true;
@@ -122,7 +124,7 @@ export default function AuditPage() {
   }, [logs]);
 
   const actorCount = useMemo(
-    () => new Set(logs.map((l) => l.actorEmail)).size,
+    () => new Set(logs.map((l) => l.actorId || auditActorText(l))).size,
     [logs]
   );
 
@@ -277,7 +279,9 @@ export default function AuditPage() {
                           <TableCell className="whitespace-nowrap text-xs">
                             {formatDateTime(a.timestamp)}
                           </TableCell>
-                          <TableCell className="text-xs">{a.actorEmail}</TableCell>
+                          <TableCell className="text-xs">
+                            <AuditActor log={a} />
+                          </TableCell>
                           <TableCell className="text-xs">{a.actorRole || "—"}</TableCell>
                           <TableCell>
                             <Badge variant="outline">{a.action}</Badge>
@@ -305,5 +309,16 @@ export default function AuditPage() {
         )}
       </div>
     </RequirePermission>
+  );
+}
+
+function AuditActor({ log }: { log: AuditLog }) {
+  const { name, code } = auditActorParts(log);
+  if (!name && !code) return <span className="text-muted-foreground">—</span>;
+  return (
+    <div>
+      {name ? <p className="font-medium text-foreground">{name}</p> : null}
+      {code ? <p className="text-muted-foreground">{code}</p> : null}
+    </div>
   );
 }

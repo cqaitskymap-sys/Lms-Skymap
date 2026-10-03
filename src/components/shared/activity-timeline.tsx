@@ -1,11 +1,15 @@
 "use client";
 
 import { formatDateTime } from "@/lib/utils";
+import { auditActorText } from "@/lib/services/audit-logs";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import type { AuditLog } from "@/types";
 
 interface ActivityTimelineProps {
-  items: Pick<AuditLog, "id" | "timestamp" | "description" | "actorEmail" | "action">[];
+  items: Pick<
+    AuditLog,
+    "id" | "timestamp" | "description" | "actorEmail" | "actorName" | "actorEmployeeCode" | "action"
+  >[];
   maxHeight?: string;
 }
 
@@ -19,7 +23,7 @@ export function ActivityTimeline({ items, maxHeight = "400px" }: ActivityTimelin
             <div className="absolute -left-4 top-1.5 h-2.5 w-2.5 rounded-full border-2 border-primary bg-background" />
             <p className="text-sm font-medium">{item.description}</p>
             <p className="text-xs text-muted-foreground">
-              {item.actorEmail} · {item.action} · {formatDateTime(item.timestamp)}
+              {auditActorText(item)} · {item.action} · {formatDateTime(item.timestamp)}
             </p>
           </div>
         ))}
