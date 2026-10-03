@@ -220,8 +220,19 @@ export async function fetchDashboardSnapshot(
 }
 
 function isOverdue(dueDate?: string, status?: string) {
-  if (!dueDate || status === "passed") return false;
+  if (!dueDate || status === "passed" || status === "failed" || status === "expired") {
+    return false;
+  }
   return new Date(dueDate) < new Date();
+}
+
+function sopAwaitingReview(sop: { status?: string; pendingStatus?: string; pendingVersionId?: string }) {
+  if (sop.status === "under_review") return true;
+  return (
+    sop.status === "approved" &&
+    sop.pendingStatus === "under_review" &&
+    Boolean(sop.pendingVersionId)
+  );
 }
 
 function complianceRate(asg: TrainingAssignment[]): number {
@@ -306,29 +317,39 @@ export function buildDashboardView(snap: DashboardSnapshot, role: string) {
     })
     .slice(0, 8);
 
+  const statusBucket = (a: TrainingAssignment) => {
+    if (a.status === "passed") return "passed";
+    if (a.status === "failed" || a.status === "expired") return "closed";
+    if (a.status === "retraining" || a.isRetraining) return "retraining";
+    if (isOverdue(a.dueDate, a.status)) return "overdue";
+    if (
+      ["assigned", "in_progress", "training_completed", "assessment_pending"].includes(
+        a.status
+      )
+    ) {
+      return "in_progress";
+    }
+    return "closed";
+  };
   const statusDistribution = [
     {
       name: "Passed",
-      value: asg.filter((a) => a.status === "passed").length,
+      value: asg.filter((a) => statusBucket(a) === "passed").length,
       color: "hsl(152, 61%, 36%)",
     },
     {
       name: "In progress",
-      value: asg.filter((a) =>
-        ["assigned", "in_progress", "training_completed", "assessment_pending"].includes(
-          a.status
-        )
-      ).length,
+      value: asg.filter((a) => statusBucket(a) === "in_progress").length,
       color: "hsl(199, 89%, 40%)",
     },
     {
       name: "Retraining",
-      value: asg.filter((a) => a.status === "retraining" || a.isRetraining).length,
+      value: asg.filter((a) => statusBucket(a) === "retraining").length,
       color: "hsl(25, 95%, 45%)",
     },
     {
       name: "Overdue",
-      value: overdueCount,
+      value: asg.filter((a) => statusBucket(a) === "overdue").length,
       color: "hsl(0, 72%, 51%)",
     },
   ];
@@ -383,7 +404,7 @@ export function buildDashboardView(snap: DashboardSnapshot, role: string) {
       href: "/dashboard/employees",
     });
   }
-  const underReview = snap.sops.filter((s) => s.status === "under_review").length;
+  const underReview = snap.sops.filter((s) => sopAwaitingReview(s)).length;
   if (underReview > 0 && (role === "qa" || role === "super_admin")) {
     tasks.push({
       id: "sop_review",

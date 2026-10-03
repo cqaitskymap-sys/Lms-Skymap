@@ -284,10 +284,13 @@ export async function startAssessment(params: {
     };
   }
 
-  const finished = prior.filter((a) =>
-    ["passed", "failed", "expired"].includes(a.status)
+  const inCycle = (a: AssessmentAttempt) =>
+    !params.assignmentId || a.assignmentId === params.assignmentId;
+  const finished = prior.filter(
+    (a) => inCycle(a) && ["passed", "failed", "expired"].includes(a.status)
   );
-  if (finished.length + open.length >= exam.maxAttempts) {
+  const cycleOpen = open.filter(inCycle);
+  if (finished.length + cycleOpen.length >= exam.maxAttempts) {
     throw new Error(`Maximum attempts (${exam.maxAttempts}) reached for this exam`);
   }
 

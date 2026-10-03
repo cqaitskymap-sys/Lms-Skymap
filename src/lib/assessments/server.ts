@@ -333,11 +333,21 @@ export async function startAssessmentServer(
   }
 
   const enforceMaxAttempts = input.enforceMaxAttempts !== false;
-  const finished = prior.filter((a) =>
-    ["passed", "failed", "expired"].includes(a.status)
+  // A retraining assignment is a new cycle. Earlier fails on the previous
+  // assignment must not consume this cycle's attempt allowance.
+  const inCycle = (a: AssessmentAttempt) =>
+    !input.assignmentId || a.assignmentId === input.assignmentId;
+  const finished = prior.filter(
+    (a) => inCycle(a) && ["passed", "failed", "expired"].includes(a.status)
   );
-  const stillOpen = open.length - staleOpen.length;
-  if (enforceMaxAttempts && finished.length + staleOpen.length + stillOpen >= exam.maxAttempts) {
+  const cycleStaleOpen = staleOpen.filter(inCycle);
+  const cycleStillOpen = open.filter(
+    (a) => inCycle(a) && new Date(a.expiresAt) > now
+  ).length;
+  if (
+    enforceMaxAttempts &&
+    finished.length + cycleStaleOpen.length + cycleStillOpen >= exam.maxAttempts
+  ) {
     return {
       ok: false,
       status: 400,
@@ -786,6 +796,24 @@ async function handleTrainingResultServer(
     },
     { merge: true }
   );
+
+  const siblingSnap = await adminDb
+    .collection(COLLECTIONS.trainingAssignments)
+    .where("employeeId", "==", prev.employeeId)
+    .get();
+  const openStatuses = new Set([
+    "assigned",
+    "in_progress",
+    "training_completed",
+    "assessment_pending",
+    "retraining",
+  ]);
+  const alreadyOpen = siblingSnap.docs.some((d) => {
+    if (d.id === assignmentId) return false;
+    const row = d.data() as { sopId?: string; status?: string };
+    return row.sopId === prev.sopId && openStatuses.has(row.status || "");
+  });
+  if (alreadyOpen) return;
 
   const retrainId = generateId("ta");
   const due = new Date();
