@@ -1,3 +1,4 @@
+import { PRODUCTION_SECTIONS } from "@/lib/jd/production-responsibilities";
 import { QA_SECTIONS } from "@/lib/jd/qa-responsibilities";
 
 export interface JdResponsibilityLine {
@@ -731,6 +732,11 @@ const RESPONSIBILITY_CATALOG: CatalogDepartment[] = [
     id: "qa",
     matchers: ["qa", "quality assurance"],
     sections: QA_SECTIONS,
+  },
+  {
+    id: "production",
+    matchers: ["production", "prd"],
+    sections: PRODUCTION_SECTIONS,
   },
 ];
 
