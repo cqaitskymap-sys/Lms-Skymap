@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { CheckCircle2, FileSignature, Loader2, Pencil, Printer, Sparkles } from "lucide-react";
@@ -29,6 +29,7 @@ import {
 import { getEmployee } from "@/lib/services/employees";
 import { listDepartments, departmentLabel } from "@/lib/services/departments";
 import { useAuth } from "@/contexts/auth-context";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -46,7 +47,38 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { ROLE_LABELS } from "@/lib/rbac/permissions";
+import {
+  allResponsibilityLines,
+  designationsForDepartment,
+  findDesignation,
+  matchSavedResponsibilities,
+  sectionsForDepartment,
+  selectedResponsibilityTexts,
+} from "@/lib/jd/responsibility-catalog";
 import type { Department, Employee, JobDescription, JdSignoff, UserRole } from "@/types";
+
+const SUB_DEPARTMENT_STORAGE_PREFIX = "jd-sub-departments:";
+
+function readSavedSubDepartments(departmentId: string): string[] {
+  if (!departmentId || typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(`${SUB_DEPARTMENT_STORAGE_PREFIX}${departmentId}`);
+    const parsed = raw ? (JSON.parse(raw) as unknown) : [];
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((row): row is string => typeof row === "string" && row.trim().length > 0);
+  } catch {
+    return [];
+  }
+}
+
+function rememberSubDepartment(departmentId: string, name: string) {
+  const current = readSavedSubDepartments(departmentId);
+  const next = [name, ...current.filter((row) => row.toLowerCase() !== name.toLowerCase())];
+  window.localStorage.setItem(
+    `${SUB_DEPARTMENT_STORAGE_PREFIX}${departmentId}`,
+    JSON.stringify(next)
+  );
+}
 
 const SELF_ASSIGNER = "__self__";
 
@@ -104,6 +136,11 @@ function JdPageInner() {
   const [revisionNo, setRevisionNo] = useState("1");
   const [jobTitle, setJobTitle] = useState("");
   const [departmentId, setDepartmentId] = useState("");
+  const [subDepartment, setSubDepartment] = useState("");
+  const [subDepartmentDraft, setSubDepartmentDraft] = useState("");
+  const [savedSubDepartments, setSavedSubDepartments] = useState<string[]>([]);
+  const [designationId, setDesignationId] = useState("");
+  const [selectedResponsibilityIds, setSelectedResponsibilityIds] = useState<string[]>([]);
   const [responsibilities, setResponsibilities] = useState("");
   const [qualifications, setQualifications] = useState("");
   const [experience, setExperience] = useState("");
@@ -179,6 +216,14 @@ function JdPageInner() {
         return;
       }
 
+      if (profile?.role === "department_head" && !profile.departmentId) {
+        const depts = await listDepartments().catch(() => [] as Department[]);
+        setDepartments(depts.filter((d) => d.isActive));
+        setEmployees([]);
+        setRecords(assigned);
+        return;
+      }
+
       const [emps, depts, jdRows] = await Promise.all([
         listEmployeesForLifecycle(),
         listDepartments(),
@@ -195,7 +240,7 @@ function JdPageInner() {
     } finally {
       setLoading(false);
     }
-  }, [profile?.role, profile?.employeeId, profile?.uid]);
+  }, [profile?.role, profile?.employeeId, profile?.departmentId, profile?.uid]);
 
   useEffect(() => {
     void loadData();
@@ -213,11 +258,32 @@ function JdPageInner() {
   }, [employeeFromUrl]);
 
   useEffect(() => {
+    if (editingId) return;
     const emp = employees.find((e) => e.id === employeeId);
     if (!emp) return;
     if (emp.departmentId) setDepartmentId(emp.departmentId);
-    if (!jobTitle && emp.designation) setJobTitle(emp.designation);
-  }, [employeeId, employees, jobTitle]);
+    if (emp.designation) {
+      setJobTitle((current) => current || emp.designation);
+    }
+  }, [employeeId, employees, editingId]);
+
+  const catalogEmployeeRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (editingId) {
+      catalogEmployeeRef.current = employeeId;
+      return;
+    }
+    if (catalogEmployeeRef.current === employeeId) return;
+    catalogEmployeeRef.current = employeeId;
+    setSubDepartment("");
+    setSubDepartmentDraft("");
+    setDesignationId("");
+    setSelectedResponsibilityIds([]);
+  }, [employeeId, editingId]);
+
+  useEffect(() => {
+    setSavedSubDepartments(readSavedSubDepartments(departmentId));
+  }, [departmentId]);
 
   const scopedEmployees = useMemo(() => {
     if (employeeScopeId) {
@@ -293,6 +359,47 @@ function JdPageInner() {
     [employees, acceptedByEmployeeId]
   );
 
+  const selectedDepartment = useMemo(
+    () => departments.find((d) => d.id === departmentId) || null,
+    [departments, departmentId]
+  );
+
+  const catalogSections = useMemo(
+    () => (selectedDepartment ? sectionsForDepartment(selectedDepartment) : []),
+    [selectedDepartment]
+  );
+
+  const catalogDesignations = useMemo(
+    () =>
+      selectedDepartment
+        ? designationsForDepartment(selectedDepartment, subDepartment)
+        : [],
+    [selectedDepartment, subDepartment]
+  );
+
+  const selectedDesignation = useMemo(
+    () => catalogDesignations.find((row) => row.id === designationId) || null,
+    [catalogDesignations, designationId]
+  );
+
+  const catalogResponsibilityCount = selectedDesignation
+    ? allResponsibilityLines(selectedDesignation).length
+    : 0;
+
+  const subDepartmentOptions = useMemo(() => {
+    const rows = [...catalogSections];
+    for (const name of savedSubDepartments) {
+      if (!rows.some((row) => row.toLowerCase() === name.toLowerCase())) rows.push(name);
+    }
+    if (
+      subDepartment &&
+      !rows.some((row) => row.toLowerCase() === subDepartment.toLowerCase())
+    ) {
+      rows.unshift(subDepartment);
+    }
+    return rows;
+  }, [catalogSections, savedSubDepartments, subDepartment]);
+
   const signoffCandidates = useMemo(
     () =>
       scopedEmployees.filter((e) => e.status !== "inactive" && e.status !== "terminated"),
@@ -316,6 +423,10 @@ function JdPageInner() {
     setRevisionNo("1");
     setJobTitle("");
     setDepartmentId("");
+    setSubDepartment("");
+    setSubDepartmentDraft("");
+    setDesignationId("");
+    setSelectedResponsibilityIds([]);
     setResponsibilities("");
     setQualifications("");
     setExperience("");
@@ -357,10 +468,6 @@ function JdPageInner() {
       toast.error("Select an employee");
       return;
     }
-    if (!jobTitle.trim()) {
-      toast.error("Job title required");
-      return;
-    }
     if (!jdNo.trim()) {
       toast.error("JD no. required");
       return;
@@ -370,12 +477,44 @@ function JdPageInner() {
       toast.error("Revision no. must be a whole number");
       return;
     }
-    const parsedResp = responsibilities
+    const manualResp = responsibilities
       .split("\n")
       .map((l) => l.replace(/^\d+\.\s*/, "").trim())
       .filter(Boolean);
+    const deptForCatalog =
+      departmentId ||
+      employees.find((x) => x.id === employeeId)?.departmentId ||
+      "";
+    const catalogDept = departments.find((d) => d.id === deptForCatalog);
+    const catalogRows = catalogDept
+      ? designationsForDepartment(catalogDept, subDepartment)
+      : [];
+    const chosenDesignation = catalogRows.find((row) => row.id === designationId) || null;
+    const resolvedTitle = jobTitle.trim() || chosenDesignation?.designation || "";
+    if (!resolvedTitle) {
+      toast.error("Job title required");
+      return;
+    }
+    let parsedResp = manualResp;
+    const sectionCatalog = catalogDept ? sectionsForDepartment(catalogDept).length > 0 : false;
+    if (catalogRows.length) {
+      if (sectionCatalog && !subDepartment.trim()) {
+        toast.error("Add a sub department");
+        return;
+      }
+      if (!chosenDesignation) {
+        toast.error("Select a designation");
+        return;
+      }
+      parsedResp = [
+        ...selectedResponsibilityTexts(chosenDesignation, selectedResponsibilityIds),
+        ...manualResp,
+      ];
+    }
     if (!parsedResp.length) {
-      toast.error("Add at least one responsibility");
+      toast.error(
+        catalogRows.length ? "Select at least one responsibility" : "Add at least one responsibility"
+      );
       return;
     }
     const effectiveParsed = new Date(effectiveFrom);
@@ -475,8 +614,9 @@ function JdPageInner() {
         employeeId,
         departmentId: dept,
         jdNo: jdNo.trim(),
-        title: jobTitle.trim(),
+        title: resolvedTitle,
         version: revision,
+        subDepartment: subDepartment.trim(),
         responsibilities: parsedResp,
         qualifications: qualifications
           .split("\n")
@@ -564,7 +704,22 @@ function JdPageInner() {
     setJdNo(record.jdNo || "");
     setRevisionNo(String(record.version ?? 1));
     setJobTitle(record.title);
-    setResponsibilities((record.responsibilities || []).map((r, i) => `${i + 1}. ${r}`).join("\n"));
+    setSubDepartment(record.subDepartment || "");
+    setSubDepartmentDraft("");
+    const dept = departments.find((d) => d.id === record.departmentId);
+    const matched = dept
+      ? findDesignation(dept, record.title, record.subDepartment)
+      : undefined;
+    if (matched) {
+      const restored = matchSavedResponsibilities(matched, record.responsibilities || []);
+      setDesignationId(matched.id);
+      setSelectedResponsibilityIds(restored.ids);
+      setResponsibilities(restored.extra.join("\n"));
+    } else {
+      setDesignationId("");
+      setSelectedResponsibilityIds([]);
+      setResponsibilities((record.responsibilities || []).map((r, i) => `${i + 1}. ${r}`).join("\n"));
+    }
     setQualifications((record.qualifications || []).join("\n"));
     setExperience(record.experience || "");
     setSupersedesNo(record.supersedesNo || "");
@@ -638,6 +793,9 @@ function JdPageInner() {
       emp?.departmentName ||
       departmentLabel(departments, record.departmentId) ||
       "—";
+    const deptDisplay = record.subDepartment?.trim()
+      ? `${deptName} / ${record.subDepartment.trim()}`
+      : deptName;
     const fullName = emp
       ? `${emp.firstName} ${emp.lastName}`.trim()
       : record.employeeId;
@@ -812,7 +970,7 @@ function JdPageInner() {
               </tr>
               <tr>
                 <td class="label">Department</td>
-                <td class="value">${escapeHtml(deptName)}</td>
+                <td class="value">${escapeHtml(deptDisplay)}</td>
                 <td class="label">Employee Code</td>
                 <td class="value">${escapeHtml(employeeCode)}</td>
               </tr>
@@ -899,6 +1057,56 @@ function JdPageInner() {
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to open print dialog");
     }
+  }
+
+  function handleDepartmentChange(nextId: string) {
+    setDepartmentId(nextId);
+    if (nextId === departmentId) return;
+    setSubDepartment("");
+    setSubDepartmentDraft("");
+    setDesignationId("");
+    setSelectedResponsibilityIds([]);
+  }
+
+  function addSubDepartment() {
+    const name = subDepartmentDraft.trim();
+    if (!departmentId) {
+      toast.error("Select a department first");
+      return;
+    }
+    if (!name) {
+      toast.error("Enter a sub department");
+      return;
+    }
+    rememberSubDepartment(departmentId, name);
+    setSavedSubDepartments(readSavedSubDepartments(departmentId));
+    setSubDepartment(name);
+    setSubDepartmentDraft("");
+    setDesignationId("");
+    setSelectedResponsibilityIds([]);
+  }
+
+  function chooseSubDepartment(name: string) {
+    setSubDepartment(name);
+    setDesignationId("");
+    setSelectedResponsibilityIds([]);
+  }
+
+  function handleDesignationChange(nextId: string) {
+    setDesignationId(nextId);
+    setSelectedResponsibilityIds([]);
+    const row = catalogDesignations.find((item) => item.id === nextId);
+    if (row) setJobTitle(row.designation);
+  }
+
+  function toggleResponsibility(id: string, checked: boolean) {
+    setSelectedResponsibilityIds((current) =>
+      checked
+        ? current.includes(id)
+          ? current
+          : [...current, id]
+        : current.filter((row) => row !== id)
+    );
   }
 
   const canWrite = can("jd:write");
@@ -1017,16 +1225,8 @@ function JdPageInner() {
                   </div>
                 </div>
                 <div className="space-y-2">
-                  <Label>Job title</Label>
-                  <Input
-                    value={jobTitle}
-                    onChange={(e) => setJobTitle(e.target.value)}
-                    required
-                  />
-                </div>
-                <div className="space-y-2">
                   <Label>Department</Label>
-                  <Select value={departmentId || undefined} onValueChange={setDepartmentId}>
+                  <Select value={departmentId || undefined} onValueChange={handleDepartmentChange}>
                     <SelectTrigger>
                       <SelectValue placeholder="Select department" />
                     </SelectTrigger>
@@ -1040,13 +1240,179 @@ function JdPageInner() {
                   </Select>
                 </div>
                 <div className="space-y-2">
-                  <Label>Responsibilities (one per line)</Label>
-                  <Textarea
-                    rows={5}
-                    value={responsibilities}
-                    onChange={(e) => setResponsibilities(e.target.value)}
+                  <Label>Sub department</Label>
+                  {subDepartmentOptions.length > 0 && (
+                    <Select
+                      value={subDepartment || undefined}
+                      onValueChange={chooseSubDepartment}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select sub department" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {subDepartmentOptions.map((name) => (
+                          <SelectItem key={name} value={name}>
+                            {name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                  <div className="flex gap-2">
+                    <Input
+                      value={subDepartmentDraft}
+                      onChange={(e) => setSubDepartmentDraft(e.target.value)}
+                      placeholder="Add sub department"
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          addSubDepartment();
+                        }
+                      }}
+                    />
+                    <Button type="button" variant="secondary" onClick={addSubDepartment}>
+                      Add
+                    </Button>
+                  </div>
+                  {subDepartment && (
+                    <p className="text-xs text-muted-foreground">
+                      Selected sub department: {subDepartment}
+                    </p>
+                  )}
+                </div>
+                {catalogDesignations.length > 0 && (
+                  <div className="space-y-2">
+                    <Label>Designation</Label>
+                    <Select
+                      value={designationId || undefined}
+                      onValueChange={handleDesignationChange}
+                      disabled={catalogSections.length > 0 && !subDepartment}
+                    >
+                      <SelectTrigger>
+                        <SelectValue
+                          placeholder={
+                            catalogSections.length > 0 && !subDepartment
+                              ? "Select a sub department first"
+                              : "Select designation"
+                          }
+                        />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {catalogDesignations.map((row) => (
+                          <SelectItem key={row.id} value={row.id}>
+                            {row.designation}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+                <div className="space-y-2">
+                  <Label>Job title</Label>
+                  <Input
+                    value={jobTitle}
+                    onChange={(e) => setJobTitle(e.target.value)}
+                    placeholder={selectedDesignation?.designation || "Job title"}
                   />
                 </div>
+                {selectedDesignation ? (
+                  <div className="space-y-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <Label>Responsibilities</Label>
+                        <p className="text-xs text-muted-foreground">
+                          {selectedResponsibilityIds.length} of {catalogResponsibilityCount}{" "}
+                          selected for {selectedDesignation.designation}. Selected lines are added
+                          to this employee.
+                        </p>
+                      </div>
+                      <div className="flex gap-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() =>
+                            setSelectedResponsibilityIds(
+                              allResponsibilityLines(selectedDesignation).map((line) => line.id)
+                            )
+                          }
+                        >
+                          Select all
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setSelectedResponsibilityIds([])}
+                        >
+                          Clear
+                        </Button>
+                      </div>
+                    </div>
+                    <div className="max-h-96 space-y-4 overflow-y-auto rounded-md border p-3">
+                      {selectedDesignation.groups.map((group) => (
+                        <div key={group.code} className="space-y-2">
+                          <p className="text-sm font-medium">
+                            {group.code}. {group.title}
+                          </p>
+                          {group.lines.map((line) => (
+                            <label
+                              key={line.id}
+                              className="flex cursor-pointer items-start gap-2 text-sm leading-snug"
+                            >
+                              <Checkbox
+                                className="mt-0.5"
+                                checked={selectedResponsibilityIds.includes(line.id)}
+                                onCheckedChange={(checked) =>
+                                  toggleResponsibility(line.id, checked === true)
+                                }
+                              />
+                              <span>
+                                {line.code ? (
+                                  <span className="mr-1 font-medium">{line.code}</span>
+                                ) : null}
+                                {line.text}
+                              </span>
+                            </label>
+                          ))}
+                        </div>
+                      ))}
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Additional responsibilities (optional, one per line)</Label>
+                      <Textarea
+                        rows={3}
+                        value={responsibilities}
+                        onChange={(e) => setResponsibilities(e.target.value)}
+                        placeholder="Anything not in the list above"
+                      />
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <Label>Responsibilities (one per line)</Label>
+                    {catalogSections.length > 0 && !catalogDesignations.length ? (
+                      <p className="text-xs text-muted-foreground">
+                        Select a sub department, then a designation. Responsibilities for that
+                        section will appear here.
+                      </p>
+                    ) : catalogDesignations.length > 0 ? (
+                      <p className="text-xs text-muted-foreground">
+                        Add a sub department and select a designation to choose from the saved
+                        responsibilities.
+                      </p>
+                    ) : departmentId ? (
+                      <p className="text-xs text-muted-foreground">
+                        Saved responsibilities for this department are not added yet.
+                      </p>
+                    ) : null}
+                    <Textarea
+                      rows={5}
+                      value={responsibilities}
+                      onChange={(e) => setResponsibilities(e.target.value)}
+                    />
+                  </div>
+                )}
                 <div className="space-y-2">
                   <Label>Qualifications</Label>
                   <Textarea

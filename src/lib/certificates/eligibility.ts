@@ -14,16 +14,20 @@ export function collectRequiredSopIds(params: {
   return sopIds;
 }
 
-/** Active SOP exams the employee must pass — induction papers are excluded. */
+/** Latest active SOP exam per SOP — induction papers and retired papers are excluded. */
 export function requiredExamsForEmployee(exams: Exam[], sopIds: Set<string>): Exam[] {
   if (!sopIds.size) return [];
-  return exams.filter(
-    (exam) =>
-      exam.isActive &&
-      !!exam.sopId &&
-      sopIds.has(exam.sopId) &&
-      !exam.inductionModuleId
-  );
+  const bySop = new Map<string, Exam>();
+  for (const exam of exams) {
+    if (!exam.isActive || !exam.sopId || !sopIds.has(exam.sopId) || exam.inductionModuleId) {
+      continue;
+    }
+    const prev = bySop.get(exam.sopId);
+    const recency = exam.updatedAt || exam.createdAt || "";
+    const prevRecency = prev ? prev.updatedAt || prev.createdAt || "" : "";
+    if (!prev || recency >= prevRecency) bySop.set(exam.sopId, exam);
+  }
+  return [...bySop.values()];
 }
 
 export function evaluateProgrammeEligibility(
@@ -38,6 +42,7 @@ export function evaluateProgrammeEligibility(
   const bestByExam = new Map<string, AssessmentAttempt>();
   for (const attempt of attempts) {
     if (attempt.status !== "passed" || !attempt.passed) continue;
+    if (attempt.certificateEligible === false) continue;
     const prev = bestByExam.get(attempt.examId);
     if (!prev || (attempt.percentage || 0) > (prev.percentage || 0)) {
       bestByExam.set(attempt.examId, attempt);

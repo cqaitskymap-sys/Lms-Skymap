@@ -180,42 +180,50 @@ async function patchAssignment(
   });
 }
 
-/** After an SOP acknowledgement, mark TNI training complete and unlock exams. */
+function assignmentVersionId(assignment: TrainingAssignment): string | undefined {
+  return assignment.sopVersionId && assignment.sopVersionId !== "current"
+    ? assignment.sopVersionId
+    : undefined;
+}
+
+/** After an SOP acknowledgement, mark training complete and unlock that SOP's exam. */
 export async function syncTniLearningAfterAck(actor: SopActor): Promise<void> {
   const employeeId = actor.employeeId;
   if (!employeeId) return;
 
-  const [progress, assignments] = await Promise.all([
+  const [progress, assignments, acks] = await Promise.all([
     getEmployeeTniLearning(employeeId, actor.uid),
     getEmployeeAssignments(employeeId),
+    listAcknowledgementsForUser(actor.uid),
   ]);
-  if (!progress.items.length) return;
 
   const now = nowISO();
-  for (const item of progress.items) {
-    const asg = assignments.find(
-      (a) => a.sopId === item.sopId && a.status !== "passed" && a.status !== "failed"
+  let unlocked = false;
+  for (const asg of assignments) {
+    if (!asg.sopId) continue;
+    if (!["assigned", "in_progress", "training_completed"].includes(asg.status)) continue;
+    const tniItem = progress.items.find((item) => item.sopId === asg.sopId);
+    const versionId = assignmentVersionId(asg);
+    const acknowledged = tniItem
+      ? tniItem.acknowledged
+      : acks.some(
+          (ack) =>
+            ack.sopId === asg.sopId && (!versionId || ack.versionId === versionId)
+        );
+    if (!acknowledged) continue;
+    unlocked = true;
+    await patchAssignment(
+      asg,
+      {
+        status: "assessment_pending",
+        startedAt: asg.startedAt || now,
+        trainingCompletedAt: now,
+      },
+      actor.uid
     );
-    if (!asg) continue;
-
-    // Unlock this SOP's exam as soon as it is acknowledged — do not wait for other TNI SOPs.
-    if (
-      item.acknowledged &&
-      ["assigned", "in_progress", "training_completed"].includes(asg.status)
-    ) {
-      await patchAssignment(
-        asg,
-        {
-          status: "assessment_pending",
-          startedAt: asg.startedAt || now,
-          trainingCompletedAt: now,
-        },
-        actor.uid
-      );
-    }
   }
 
-  if (progress.items.some((i) => i.acknowledged)) {
+  if (unlocked || progress.items.some((i) => i.acknowledged)) {
     try {
       const { getEmployeeLifecycle, markTrainingLifecycle } = await import(
         "@/lib/services/lifecycle"
@@ -276,7 +284,20 @@ export async function assertTniSopsReadForExam(params: {
       throw new Error("This exam is not linked to your assigned SOPs");
     }
     const item = progress.items.find((i) => i.sopId === params.examSopId);
-    if (!item?.acknowledged) {
+    if (item) {
+      if (!item.acknowledged) {
+        throw new Error("Read and acknowledge this SOP before taking the exam");
+      }
+      return;
+    }
+    const acks = await listAcknowledgementsForUser(params.userId);
+    const assignment = assignments.find((row) => row.sopId === params.examSopId);
+    const versionId = assignment ? assignmentVersionId(assignment) : undefined;
+    const acknowledged = acks.some(
+      (ack) =>
+        ack.sopId === params.examSopId && (!versionId || ack.versionId === versionId)
+    );
+    if (!acknowledged) {
       throw new Error("Read and acknowledge this SOP before taking the exam");
     }
     return;

@@ -205,7 +205,7 @@ export default function SopDetailPage({ params }: { params: Promise<{ id: string
     );
   }
 
-  const deptNames = sop.departmentIds
+  const deptNames = (sop.departmentIds || [])
     .map((d) => departments.find((x) => x.id === d)?.name || d)
     .join(", ");
   const canEditCurrent =
@@ -217,7 +217,7 @@ export default function SopDetailPage({ params }: { params: Promise<{ id: string
       (v.status === "draft" || v.status === "under_review")
   );
   const deptOptions = [...activeDepartments];
-  for (const deptId of sop.departmentIds) {
+  for (const deptId of sop.departmentIds || []) {
     if (!deptOptions.some((d) => d.id === deptId)) {
       const extra = departments.find((d) => d.id === deptId);
       if (extra) deptOptions.push(extra);

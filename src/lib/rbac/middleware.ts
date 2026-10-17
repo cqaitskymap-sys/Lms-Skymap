@@ -28,12 +28,85 @@ export async function verifyAuth(
   return result.ok ? result.auth : null;
 }
 
+type AuthVerifyResult =
+  | { ok: true; auth: AuthenticatedRequest }
+  | { ok: false; reason: AuthFailureReason; message: string };
+
+/** Coalesce parallel verifies from one page load. Role is always read fresh. */
+const authInflight = new Map<string, Promise<AuthVerifyResult>>();
+let authGeneration = 0;
+const uidGeneration = new Map<string, number>();
+
+function authStamp(uid: string): number {
+  return authGeneration + (uidGeneration.get(uid) || 0);
+}
+
+/** Drop in-flight auth so a role or active-state change is not answered with the old profile. */
+export function invalidateAuthCache(uid?: string) {
+  if (!uid) {
+    authGeneration += 1;
+  } else {
+    uidGeneration.set(uid, (uidGeneration.get(uid) || 0) + 1);
+  }
+  authInflight.clear();
+}
+
+async function loadActiveProfile(uid: string): Promise<AuthVerifyResult | UserProfile> {
+  const ref = adminDb.collection(COLLECTIONS.users).doc(uid);
+  type Snap = Awaited<ReturnType<typeof ref.get>>;
+  let snap: Snap | undefined;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const stamp = authStamp(uid);
+    snap = await ref.get();
+    if (authStamp(uid) === stamp) break;
+  }
+  if (!snap?.exists) {
+    return {
+      ok: false,
+      reason: "profile_missing",
+      message:
+        "Your user profile was not found in Firestore (users/{uid}). Sign out and sign in again, or ask an admin to create your profile.",
+    };
+  }
+  const profile = { id: snap.id, ...snap.data() } as UserProfile;
+  if (profile.isActive === false) {
+    return {
+      ok: false,
+      reason: "inactive",
+      message: "Account is deactivated.",
+    };
+  }
+  return profile;
+}
+
+async function verifyTokenUncached(token: string): Promise<AuthVerifyResult> {
+  try {
+    const decoded = await adminAuth.verifyIdToken(token, true);
+    const loaded = await loadActiveProfile(decoded.uid);
+    if ("ok" in loaded) return loaded;
+
+    return {
+      ok: true,
+      auth: {
+        uid: decoded.uid,
+        email: decoded.email || loaded.email,
+        profile: loaded,
+        role: loaded.role,
+      },
+    };
+  } catch (err) {
+    console.error("[verifyAuth]", err);
+    return {
+      ok: false,
+      reason: "invalid_token",
+      message: "Invalid or expired session. Sign out and sign in again.",
+    };
+  }
+}
+
 export async function verifyAuthDetailed(
   request: NextRequest
-): Promise<
-  | { ok: true; auth: AuthenticatedRequest }
-  | { ok: false; reason: AuthFailureReason; message: string }
-> {
+): Promise<AuthVerifyResult> {
   const header = request.headers.get("authorization");
   if (!header?.startsWith("Bearer ")) {
     return {
@@ -52,45 +125,15 @@ export async function verifyAuthDetailed(
     };
   }
 
-  try {
-    const token = header.slice(7);
-    const decoded = await adminAuth.verifyIdToken(token);
-    const snap = await adminDb.collection(COLLECTIONS.users).doc(decoded.uid).get();
-    if (!snap.exists) {
-      return {
-        ok: false,
-        reason: "profile_missing",
-        message:
-          "Your user profile was not found in Firestore (users/{uid}). Sign out and sign in again, or ask an admin to create your profile.",
-      };
-    }
+  const token = header.slice(7);
+  const pending = authInflight.get(token);
+  if (pending) return pending;
 
-    const profile = { id: snap.id, ...snap.data() } as UserProfile;
-    if (profile.isActive === false) {
-      return {
-        ok: false,
-        reason: "inactive",
-        message: "Account is deactivated.",
-      };
-    }
-
-    return {
-      ok: true,
-      auth: {
-        uid: decoded.uid,
-        email: decoded.email || profile.email,
-        profile,
-        role: profile.role,
-      },
-    };
-  } catch (err) {
-    console.error("[verifyAuth]", err);
-    return {
-      ok: false,
-      reason: "invalid_token",
-      message: "Invalid or expired session. Sign out and sign in again.",
-    };
-  }
+  const job = verifyTokenUncached(token).finally(() => {
+    authInflight.delete(token);
+  });
+  authInflight.set(token, job);
+  return job;
 }
 
 export function requirePermission(auth: AuthenticatedRequest, permission: Permission) {

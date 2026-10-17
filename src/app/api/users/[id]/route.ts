@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { FieldValue } from "firebase-admin/firestore";
 import {
+  invalidateAuthCache,
   unauthorized,
   verifyAuthDetailed,
   requirePermission,
@@ -164,10 +165,14 @@ export async function PATCH(
     if (Object.keys(authUpdates).length > 0) {
       await adminAuth.updateUser(id, authUpdates);
     }
+    if (input.isActive === false) {
+      await adminAuth.revokeRefreshTokens(id);
+    }
 
     const claims: Record<string, string> = { role: nextRole };
     if (nextDept) claims.departmentId = nextDept;
     await adminAuth.setCustomUserClaims(id, claims);
+    invalidateAuthCache(id);
 
     const wasHead = before.role === "department_head" && before.departmentId;
     const isHead = nextRole === "department_head" && nextDept;
@@ -400,6 +405,7 @@ export async function DELETE(
     }
   }
 
+  invalidateAuthCache(id);
   await ref.delete();
 
   await writeAuditLog({

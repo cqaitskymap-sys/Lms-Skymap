@@ -265,6 +265,19 @@ function TniPageInner() {
         return;
       }
 
+      if (profile?.role === "department_head" && !profile.departmentId) {
+        const pack = await packPromise;
+        setAssignedIds(new Set(pack.items.map((row) => row.id)));
+        setMyPendingSignoffs(pack.pending);
+        setEmployees([]);
+        setDepartments([]);
+        setJds([]);
+        setSops([]);
+        setQaUsers([]);
+        setRecords(pack.items);
+        return;
+      }
+
       const [pack, emps, depts, jdList, sopList, tniList, qa] = await Promise.all([
         packPromise,
         listEmployeesForLifecycle(),
@@ -292,7 +305,7 @@ function TniPageInner() {
     } finally {
       setLoading(false);
     }
-  }, [profile?.role, profile?.employeeId, profile?.uid]);
+  }, [profile?.role, profile?.employeeId, profile?.departmentId, profile?.uid]);
 
   useEffect(() => {
     void (async () => {

@@ -388,6 +388,8 @@ export interface JobDescription extends Timestamps {
   jdNo?: string;
   employeeId: string;
   departmentId: string;
+  /** Sub department entered when the JD is created. */
+  subDepartment?: string;
   title: string;
   version: number;
   responsibilities: string[];

@@ -36,9 +36,18 @@ export default function DeptDashboardPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const unscopedHead = profile?.role === "department_head" && !deptId;
+
   const refresh = useCallback(async () => {
     setLoading(true);
     setError(null);
+    if (profile?.role === "department_head" && !profile.departmentId) {
+      setEmployees([]);
+      setSops([]);
+      setAssignments([]);
+      setLoading(false);
+      return;
+    }
     try {
       const [emps, sopList, asg] = await Promise.all([
         listEmployeesForLifecycle(),
@@ -56,7 +65,7 @@ export default function DeptDashboardPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [profile?.role, profile?.departmentId]);
 
   useEffect(() => {
     void refresh();
@@ -70,9 +79,10 @@ export default function DeptDashboardPage() {
   }, [refresh]);
 
   const teamEmployees = useMemo(() => {
+    if (unscopedHead) return [];
     if (!deptId) return employees;
     return employees.filter((e) => e.departmentId === deptId);
-  }, [employees, deptId]);
+  }, [employees, deptId, unscopedHead]);
 
   const teamEmployeeIds = useMemo(
     () => new Set(teamEmployees.map((e) => e.id)),
@@ -80,16 +90,18 @@ export default function DeptDashboardPage() {
   );
 
   const deptSops = useMemo(() => {
+    if (unscopedHead) return [];
     if (!deptId) return sops;
     return sops.filter((s) => s.departmentIds?.includes(deptId));
-  }, [sops, deptId]);
+  }, [sops, deptId, unscopedHead]);
 
   const teamAssignments = useMemo(() => {
+    if (unscopedHead) return [];
     if (!deptId) return assignments;
     return assignments.filter(
       (a) => a.departmentId === deptId || teamEmployeeIds.has(a.employeeId)
     );
-  }, [assignments, deptId, teamEmployeeIds]);
+  }, [assignments, deptId, teamEmployeeIds, unscopedHead]);
 
   const empName = (id: string) => {
     const e = employees.find((x) => x.id === id);
@@ -117,7 +129,7 @@ export default function DeptDashboardPage() {
             description={
               deptId
                 ? `${teamEmployees.length} team member(s) · ${teamAssignments.length} assignment(s)`
-                : "Organization-wide view (no department on profile)"
+                : "Assign a department to this account to see team training"
             }
             action={
               <div className="flex gap-2">

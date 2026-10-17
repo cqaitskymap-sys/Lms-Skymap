@@ -64,7 +64,7 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const decoded = await adminAuth.verifyIdToken(idToken);
+    const decoded = await adminAuth.verifyIdToken(idToken, true);
     let sessionCookie: string;
     try {
       sessionCookie = await adminAuth.createSessionCookie(idToken, {
@@ -103,25 +103,27 @@ export async function POST(request: NextRequest) {
       /* profile optional for cookie */
     }
 
-    await recordLoginSuccess(email || decoded.uid);
-    await updateUserLastLogin(decoded.uid, ip);
-    await writeLoginAudit({
-      actorId: decoded.uid,
-      actorEmail: email || decoded.uid,
-      actorRole: role,
-      action: "login",
-      description: "User signed in successfully",
-      ipAddress: ip,
-      userAgent: ua,
-      success: true,
-    });
-    await writeActivityLogServer({
-      userId: decoded.uid,
-      verb: "login_success",
-      summary: "Signed in",
-      ipAddress: ip,
-      userAgent: ua,
-    });
+    await Promise.all([
+      recordLoginSuccess(email || decoded.uid),
+      updateUserLastLogin(decoded.uid, ip),
+      writeLoginAudit({
+        actorId: decoded.uid,
+        actorEmail: email || decoded.uid,
+        actorRole: role,
+        action: "login",
+        description: "User signed in successfully",
+        ipAddress: ip,
+        userAgent: ua,
+        success: true,
+      }),
+      writeActivityLogServer({
+        userId: decoded.uid,
+        verb: "login_success",
+        summary: "Signed in",
+        ipAddress: ip,
+        userAgent: ua,
+      }),
+    ]);
 
     const response = NextResponse.json({ success: true, session: true });
     response.cookies.set({ ...cookieOptions(rememberMe), value: sessionCookie });
@@ -140,7 +142,7 @@ export async function DELETE(request: NextRequest) {
 
   if (session && isAdminConfigured()) {
     try {
-      const decoded = await adminAuth.verifySessionCookie(session, true);
+      const decoded = await adminAuth.verifySessionCookie(session, false);
       let role = "employee";
       try {
         const snap = await adminDb.collection(COLLECTIONS.users).doc(decoded.uid).get();
@@ -150,23 +152,25 @@ export async function DELETE(request: NextRequest) {
       } catch {
         /* profile optional for logout audit */
       }
-      await writeLoginAudit({
-        actorId: decoded.uid,
-        actorEmail: decoded.email || decoded.uid,
-        actorRole: role,
-        action: "logout",
-        description: "User signed out",
-        ipAddress: ip,
-        userAgent: ua,
-        success: true,
-      });
-      await writeActivityLogServer({
-        userId: decoded.uid,
-        verb: "logout",
-        summary: "Signed out",
-        ipAddress: ip,
-        userAgent: ua,
-      });
+      await Promise.all([
+        writeLoginAudit({
+          actorId: decoded.uid,
+          actorEmail: decoded.email || decoded.uid,
+          actorRole: role,
+          action: "logout",
+          description: "User signed out",
+          ipAddress: ip,
+          userAgent: ua,
+          success: true,
+        }),
+        writeActivityLogServer({
+          userId: decoded.uid,
+          verb: "logout",
+          summary: "Signed out",
+          ipAddress: ip,
+          userAgent: ua,
+        }),
+      ]);
     } catch {
       /* cookie already invalid */
     }

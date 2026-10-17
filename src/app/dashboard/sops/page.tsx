@@ -148,8 +148,8 @@ export default function SopsPage() {
     });
   }, [sops]);
 
-  const deptLabel = (ids: string[]) =>
-    ids
+  const deptLabel = (ids?: string[]) =>
+    (ids || [])
       .map((id) => departments.find((d) => d.id === id)?.code || id)
       .join(", ");
 

@@ -223,7 +223,13 @@ function ExamsPageInner() {
     if (!isEmployee) return true;
     if (e.inductionModuleId) return Boolean(inductionAssignmentByModule[e.inductionModuleId]);
     if (!e.sopId) return false;
-    return intendedSopIds.has(e.sopId) && acknowledgedSopIds.has(e.sopId);
+    if (!intendedSopIds.has(e.sopId)) return false;
+    if (acknowledgedSopIds.has(e.sopId)) return true;
+    return myAssignments.some(
+      (a) =>
+        a.sopId === e.sopId &&
+        (a.status === "assessment_pending" || a.status === "retraining")
+    );
   };
 
   const assignmentForExam = (sopId?: string) =>

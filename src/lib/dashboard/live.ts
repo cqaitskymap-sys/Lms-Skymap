@@ -93,7 +93,20 @@ export type DashboardSnapshotOpts = {
   employeeId?: string;
   /** Department heads only see this department. */
   departmentId?: string;
+  /** Skip the short in-memory snapshot (use after the user changes data). */
+  fresh?: boolean;
 };
+
+const SNAPSHOT_CACHE_MS = 20_000;
+const snapshotCache = new Map<string, { at: number; snap: DashboardSnapshot }>();
+const snapshotInflight = new Map<string, Promise<DashboardSnapshot>>();
+const snapshotGen = new Map<string, number>();
+
+function snapshotCacheKey(opts: DashboardSnapshotOpts): string {
+  return [opts.userId || "", opts.role || "", opts.employeeId || "", opts.departmentId || ""].join(
+    "|"
+  );
+}
 
 export async function fetchDashboardSnapshot(
   opts?: DashboardSnapshotOpts | string
@@ -101,7 +114,33 @@ export async function fetchDashboardSnapshot(
   // Back-compat: older callers passed userId as a bare string.
   const normalized: DashboardSnapshotOpts =
     typeof opts === "string" ? { userId: opts } : opts || {};
-  const { userId, role, employeeId, departmentId } = normalized;
+  const { userId, role, employeeId, departmentId, fresh } = normalized;
+  const cacheKey = snapshotCacheKey(normalized);
+  if (!fresh) {
+    const hit = snapshotCache.get(cacheKey);
+    if (hit && Date.now() - hit.at < SNAPSHOT_CACHE_MS) return hit.snap;
+    const pending = snapshotInflight.get(cacheKey);
+    if (pending) return pending;
+  }
+
+  const generation = (snapshotGen.get(cacheKey) || 0) + 1;
+  snapshotGen.set(cacheKey, generation);
+  const job = loadDashboardSnapshot({ userId, role, employeeId, departmentId })
+    .then((snap) => {
+      if (snapshotGen.get(cacheKey) === generation) {
+        snapshotCache.set(cacheKey, { at: Date.now(), snap });
+      }
+      return snap;
+    })
+    .finally(() => {
+      if (snapshotInflight.get(cacheKey) === job) snapshotInflight.delete(cacheKey);
+    });
+  snapshotInflight.set(cacheKey, job);
+  return job;
+}
+
+async function loadDashboardSnapshot(opts: DashboardSnapshotOpts): Promise<DashboardSnapshot> {
+  const { userId, role, employeeId, departmentId } = opts;
   // Missing role → treat as restricted (avoid collection-wide lists that 403).
   const isEmployee = !role || role === "employee";
   const canListOrg =
@@ -152,8 +191,10 @@ export async function fetchDashboardSnapshot(
   ] = await Promise.all([
     employeesPromise,
     listDepartments().catch(() => [] as Department[]),
-    isEmployee && employeeId
-      ? listSopsForEmployee(employeeId).catch(() => [] as SopDocument[])
+    isEmployee
+      ? employeeId
+        ? listSopsForEmployee(employeeId).catch(() => [] as SopDocument[])
+        : Promise.resolve([] as SopDocument[])
       : listSopsDetailed().catch(() => [] as SopDocument[]),
     assignmentsPromise,
     listTrainingSessions().catch(() => [] as TrainingSession[]),
@@ -192,6 +233,42 @@ export async function fetchDashboardSnapshot(
     scopedSops = sops.filter((s) => s.departmentIds?.includes(departmentId));
     scopedJds = jds.filter((j) => j.departmentId === departmentId);
     scopedTnis = tnis.filter((t) => t.departmentId === departmentId);
+  } else if (role === "department_head") {
+    scopedEmployees = [];
+    scopedAssignments = [];
+    scopedSessions = [];
+    scopedCertificates = [];
+    scopedSops = [];
+    scopedJds = [];
+    scopedTnis = [];
+  } else if (role === "trainer") {
+    const mine = userId
+      ? sessions.filter((s) => s.trainerId === userId || s.createdBy === userId)
+      : [];
+    const sessionIds = new Set(mine.map((s) => s.id));
+    scopedSessions = mine;
+    scopedAssignments = userId
+      ? assignments.filter(
+          (a) =>
+            (a.sessionId && sessionIds.has(a.sessionId)) ||
+            a.trainerId === userId ||
+            a.assignedBy === userId ||
+            a.createdBy === userId
+        )
+      : [];
+    const employeeIds = new Set(scopedAssignments.map((a) => a.employeeId));
+    scopedEmployees = employees.filter((e) => employeeIds.has(e.id));
+    scopedCertificates = certificates.filter(
+      (c) => employeeIds.has(c.employeeId) || (userId ? c.trainerId === userId : false)
+    );
+    const sopIds = new Set(
+      [...scopedSessions, ...scopedAssignments]
+        .map((row) => row.sopId)
+        .filter((id): id is string => Boolean(id))
+    );
+    scopedSops = sops.filter((s) => sopIds.has(s.id));
+    scopedJds = [];
+    scopedTnis = [];
   } else if (isEmployee && employeeId) {
     const mine = new Set(
       assignments.filter((a) => a.employeeId === employeeId).map((a) => a.sessionId).filter(Boolean)
@@ -201,6 +278,12 @@ export async function fetchDashboardSnapshot(
         mine.has(s.id) ||
         (s.attendance || []).some((row) => row.employeeId === employeeId)
     );
+  } else if (isEmployee) {
+    scopedEmployees = [];
+    scopedAssignments = [];
+    scopedSessions = [];
+    scopedCertificates = [];
+    scopedSops = [];
   }
 
   return {

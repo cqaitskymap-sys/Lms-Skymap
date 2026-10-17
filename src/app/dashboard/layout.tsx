@@ -1,12 +1,17 @@
 "use client";
 
 import { useState } from "react";
+import dynamic from "next/dynamic";
 import { AuthGuard } from "@/components/auth/auth-guard";
 import { AppProviders } from "@/components/providers/app-providers";
 import { Sidebar } from "@/components/layout/sidebar";
 import { Header } from "@/components/layout/header";
-import { AiTrainingChatbot } from "@/components/ai/ai-training-chatbot";
 import { ExamLockGuard, useExamLockOptional } from "@/contexts/exam-lock-context";
+
+const AiTrainingChatbot = dynamic(
+  () => import("@/components/ai/ai-training-chatbot").then((m) => m.AiTrainingChatbot),
+  { ssr: false }
+);
 
 function DashboardShell({ children }: { children: React.ReactNode }) {
   const [mobileOpen, setMobileOpen] = useState(false);

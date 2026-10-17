@@ -17,6 +17,7 @@ import {
   where,
   orderBy,
   limit,
+  documentId,
 } from "firebase/firestore/lite";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { auth, db, storage, COLLECTIONS } from "@/lib/firebase/client";
@@ -233,6 +234,40 @@ async function writeAuditClient(params: {
   });
 }
 
+/** One `in` query per 30 ids instead of a round trip per SOP version. */
+async function loadSopVersionsById(ids: string[]): Promise<Map<string, SopVersion>> {
+  const unique = [...new Set(ids.filter(Boolean))];
+  const map = new Map<string, SopVersion>();
+  if (!unique.length) return map;
+
+  const chunks: string[][] = [];
+  for (let i = 0; i < unique.length; i += 30) chunks.push(unique.slice(i, i + 30));
+
+  await Promise.all(
+    chunks.map(async (chunk) => {
+      try {
+        const snap = await getDocs(
+          query(collection(db, COLLECTIONS.sopVersions), where(documentId(), "in", chunk))
+        );
+        for (const d of snap.docs) {
+          map.set(d.id, { id: d.id, ...d.data() } as SopVersion);
+        }
+      } catch {
+        const docs = await Promise.all(
+          chunk.map(async (id) => {
+            const vSnap = await getDoc(doc(db, COLLECTIONS.sopVersions, id));
+            return vSnap.exists() ? ({ id: vSnap.id, ...vSnap.data() } as SopVersion) : null;
+          })
+        );
+        for (const version of docs) {
+          if (version) map.set(version.id, version);
+        }
+      }
+    })
+  );
+  return map;
+}
+
 export async function listSopsDetailed(filters?: {
   status?: SopStatus | "";
   departmentId?: string;
@@ -242,7 +277,7 @@ export async function listSopsDetailed(filters?: {
     let next = list;
     if (filters?.status) next = next.filter((s) => s.status === filters.status);
     if (filters?.departmentId) {
-      next = next.filter((s) => s.departmentIds.includes(filters.departmentId!));
+      next = next.filter((s) => (s.departmentIds || []).includes(filters.departmentId!));
     }
     if (filters?.search) {
       const q = filters.search.toLowerCase();
@@ -280,19 +315,19 @@ export async function listSopsDetailed(filters?: {
     const snap = await getDocs(
       query(collection(db, COLLECTIONS.sops), orderBy("sopNumber", "asc"))
     );
-    const list = snap.docs.map((d) => ({ id: d.id, ...d.data(), tags: ((d.data() as SopDocument).tags || []) }) as SopDocument);
+    const list = snap.docs.map((d) => {
+      const data = d.data() as SopDocument;
+      return {
+        ...data,
+        id: d.id,
+        tags: data.tags || [],
+        departmentIds: data.departmentIds || [],
+      } as SopDocument;
+    });
     const versionIds = [
       ...new Set(list.map((s) => s.currentVersionId).filter((id): id is string => Boolean(id))),
     ];
-    const versions = await Promise.all(
-      versionIds.map(async (id) => {
-        const vSnap = await getDoc(doc(db, COLLECTIONS.sopVersions, id));
-        return vSnap.exists() ? ({ id: vSnap.id, ...vSnap.data() } as SopVersion) : null;
-      })
-    );
-    const byVersion = new Map(
-      versions.filter((v): v is SopVersion => Boolean(v)).map((v) => [v.id, v])
-    );
+    const byVersion = await loadSopVersionsById(versionIds);
     const rows = await Promise.all(
       list.map(async (s) => {
         const version = s.currentVersionId ? byVersion.get(s.currentVersionId) : undefined;
@@ -512,7 +547,13 @@ export async function getSopBundle(
     if (!sopSnap.exists()) {
       throw new Error("SOP not found");
     }
-    const sop = { id: sopSnap.id, ...sopSnap.data() } as SopDocument;
+    const rawSop = sopSnap.data() as SopDocument;
+    const sop = {
+      ...rawSop,
+      id: sopSnap.id,
+      tags: rawSop.tags || [],
+      departmentIds: rawSop.departmentIds || [],
+    } as SopDocument;
 
     const versionsSnap = await getDocs(
       query(

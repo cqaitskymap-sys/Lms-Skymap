@@ -167,9 +167,8 @@ service cloud.firestore {
         && request.resource.data.role in ['employee']
         && request.resource.data.isActive == true;
 
-      // Self: profile fields only (never role / isActive)
-      allow update: if hasRole(['super_admin', 'hr'])
-        || (isOwner(userId) && onlyUpdating([
+      // Profile fields only. Role, isActive, and department changes go through the Admin SDK.
+      allow update: if (isOwner(userId) && onlyUpdating([
           'displayName', 'phone', 'photoURL', 'digitalSignatureUrl',
           'updatedAt', 'lastLoginAt', 'lastLoginIp'
         ]))
@@ -393,9 +392,16 @@ service cloud.firestore {
           && resource.data.employeeId == userDoc().employeeId
           && resource.data.status in ['assigned', 'in_progress', 'training_completed']
           && onlyUpdating(['status', 'startedAt', 'trainingCompletedAt', 'updatedAt', 'updatedBy'])
-          && request.resource.data.status in [
-            'in_progress', 'training_completed', 'assessment_pending'
-          ]
+          && (
+            (resource.data.status == 'assigned' && request.resource.data.status == 'in_progress')
+            || (resource.data.status == 'in_progress'
+              && request.resource.data.status in ['training_completed', 'assessment_pending'])
+            || (resource.data.status == 'training_completed'
+              && request.resource.data.status == 'assessment_pending')
+            || (resource.data.status == 'assigned'
+              && request.resource.data.status == 'assessment_pending'
+              && request.resource.data.trainingCompletedAt is string)
+          )
         );
       allow delete: if isSuperAdmin();
     }

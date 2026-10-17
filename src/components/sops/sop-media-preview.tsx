@@ -85,9 +85,11 @@ export function SopMediaPreview({
                   <Button
                     size="sm"
                     variant="outline"
+                    disabled={!pdf.downloadUrl}
                     onClick={() => {
+                      if (!pdf.downloadUrl) return;
                       onDownload?.(pdf);
-                      window.open(pdf.downloadUrl, "_blank");
+                      window.open(pdf.downloadUrl, "_blank", "noopener,noreferrer");
                     }}
                   >
                     <Download className="mr-1 h-3.5 w-3.5" />
@@ -127,8 +129,9 @@ export function SopMediaPreview({
               key={a.id}
               attachment={a}
               onDownload={() => {
+                if (!a.downloadUrl) return;
                 onDownload?.(a);
-                window.open(a.downloadUrl, "_blank");
+                window.open(a.downloadUrl, "_blank", "noopener,noreferrer");
               }}
             />
           ))}

@@ -1,17 +1,36 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import dynamic from "next/dynamic";
 import { Loader2 } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
 import { MotionItem, MotionSection } from "@/components/dashboard/motion";
 import { GlassStatCard } from "@/components/dashboard/glass-stat-card";
-import {
-  ComplianceRing,
-  ComplianceTrendChart,
-  DepartmentComplianceChart,
-  StatusDonutChart,
-  TrainingProgressChart,
-} from "@/components/dashboard/charts";
+
+function ChartSlot() {
+  return <div className="h-64 animate-pulse rounded-xl bg-muted/40" />;
+}
+
+const ComplianceTrendChart = dynamic(
+  () => import("@/components/dashboard/charts").then((m) => m.ComplianceTrendChart),
+  { ssr: false, loading: ChartSlot }
+);
+const TrainingProgressChart = dynamic(
+  () => import("@/components/dashboard/charts").then((m) => m.TrainingProgressChart),
+  { ssr: false, loading: ChartSlot }
+);
+const DepartmentComplianceChart = dynamic(
+  () => import("@/components/dashboard/charts").then((m) => m.DepartmentComplianceChart),
+  { ssr: false, loading: ChartSlot }
+);
+const StatusDonutChart = dynamic(
+  () => import("@/components/dashboard/charts").then((m) => m.StatusDonutChart),
+  { ssr: false, loading: ChartSlot }
+);
+const ComplianceRing = dynamic(
+  () => import("@/components/dashboard/charts").then((m) => m.ComplianceRing),
+  { ssr: false, loading: ChartSlot }
+);
 import { OverdueTrainingList, UpcomingTrainingList } from "@/components/dashboard/training-lists";
 import {
   AlertsPanel,
@@ -51,7 +70,7 @@ export function DashboardShell({ role, title, subtitle, children }: DashboardShe
   // Prefer signed-in profile role for Firestore scoping (prop may be wrong during redirects).
   const dataRole = profile?.role;
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (fresh = false) => {
     if (authLoading || !profile?.role) return;
     setLoading(true);
     try {
@@ -60,6 +79,7 @@ export function DashboardShell({ role, title, subtitle, children }: DashboardShe
         role: dataRole,
         employeeId: profile.employeeId,
         departmentId: profile.departmentId,
+        fresh,
       });
       setView(buildDashboardView(snap, dataRole || role));
     } finally {
@@ -68,8 +88,8 @@ export function DashboardShell({ role, title, subtitle, children }: DashboardShe
   }, [authLoading, profile, dataRole, role]);
 
   useEffect(() => {
-    void refresh();
-    const onUpdate = () => void refresh();
+    void refresh(false);
+    const onUpdate = () => void refresh(true);
     window.addEventListener("pharma-lifecycle-updated", onUpdate);
     window.addEventListener("pharma-training-updated", onUpdate);
     window.addEventListener("pharma-sops-updated", onUpdate);

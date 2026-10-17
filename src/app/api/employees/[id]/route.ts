@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import {
+  invalidateAuthCache,
   unauthorized,
   verifyAuthDetailed,
   writeAuditLog,
@@ -240,6 +241,7 @@ export async function PATCH(
 
   try {
     await batch.commit();
+    if (employee.userId) invalidateAuthCache(employee.userId);
   } catch (err) {
     return NextResponse.json(
       {
@@ -385,6 +387,9 @@ export async function DELETE(
   await deleteQueryBatch(COLLECTIONS.sopViews, "employeeId", id);
   await deleteQueryBatch(COLLECTIONS.sopReadingProgress, "employeeId", id);
   if (userId) {
+    await deleteQueryBatch(COLLECTIONS.sopAcknowledgements, "userId", userId);
+    await deleteQueryBatch(COLLECTIONS.sopViews, "userId", userId);
+    await deleteQueryBatch(COLLECTIONS.sopReadingProgress, "userId", userId);
     await deleteQueryBatch(COLLECTIONS.notifications, "userId", userId);
     await deleteQueryBatch(COLLECTIONS.policyAcceptances, "userId", userId);
   }
@@ -392,6 +397,7 @@ export async function DELETE(
   await empRef.delete();
 
   if (userId) {
+    invalidateAuthCache(userId);
     try {
       await adminDb.collection(COLLECTIONS.users).doc(userId).delete();
     } catch {

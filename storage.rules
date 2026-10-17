@@ -6,12 +6,18 @@ service firebase.storage {
       return request.auth != null;
     }
 
-    function role() {
-      return firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.role;
+    function userData() {
+      return firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function isActive() {
+      return isSignedIn()
+        && firestore.exists(/databases/(default)/documents/users/$(request.auth.uid))
+        && userData().isActive == true;
     }
 
     function hasRole(roles) {
-      return isSignedIn() && role() in roles;
+      return isActive() && userData().role in roles;
     }
 
     function isSuperAdmin() {
@@ -19,7 +25,7 @@ service firebase.storage {
     }
 
     function callerEmployeeId() {
-      return firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.employeeId;
+      return userData().employeeId;
     }
 
     function isTrainingFile() {
@@ -29,7 +35,7 @@ service firebase.storage {
     }
 
     match /induction/{moduleId}/{fileName} {
-      allow read: if isSignedIn();
+      allow read: if isActive();
       allow write: if hasRole(['super_admin', 'hr'])
         && request.resource.size < 100 * 1024 * 1024
         && request.resource.contentType.matches('application/pdf|video/.*|application/vnd.*|application/octet-stream');
@@ -37,7 +43,7 @@ service firebase.storage {
     }
 
     match /sops/{sopId}/{fileName} {
-      allow read: if isSignedIn();
+      allow read: if isActive();
       allow write: if hasRole(['super_admin', 'qa'])
         && request.resource.size < 100 * 1024 * 1024
         && isTrainingFile();
@@ -45,15 +51,15 @@ service firebase.storage {
     }
 
     match /signatures/{userId}/{fileName} {
-      allow read: if isSignedIn() && (
+      allow read: if isActive() && (
         request.auth.uid == userId ||
         hasRole(['super_admin', 'hr', 'qa', 'department_head', 'trainer'])
       );
-      allow write: if isSignedIn() && request.auth.uid == userId
+      allow write: if isActive() && request.auth.uid == userId
         && request.resource.contentType.matches('image/(png|jpeg|jpg|webp)')
         && request.resource.size < 2 * 1024 * 1024;
       allow delete: if isSuperAdmin()
-        || (isSignedIn() && request.auth.uid == userId);
+        || (isActive() && request.auth.uid == userId);
     }
 
     match /certificates/{fileName} {
@@ -66,7 +72,7 @@ service firebase.storage {
 
     // JD and TNI files for employees onboarded before this LMS
     match /legacy-records/{employeeCode}/{kind}/{fileName} {
-      allow read: if isSignedIn();
+      allow read: if hasRole(['super_admin', 'hr', 'qa', 'department_head']);
       allow write: if hasRole(['super_admin', 'hr'])
         && request.resource.size < 15 * 1024 * 1024
         && isTrainingFile();
@@ -76,7 +82,7 @@ service firebase.storage {
     // Signed physical induction papers (HR uploads after dept-head signatures)
     match /employees/{employeeId}/induction-signed/{fileName} {
       allow read: if hasRole(['super_admin', 'hr', 'qa', 'department_head'])
-        || (isSignedIn() && callerEmployeeId() == employeeId);
+        || (isActive() && callerEmployeeId() == employeeId);
       allow write: if hasRole(['super_admin', 'hr'])
         && request.resource.size < 15 * 1024 * 1024
         && request.resource.contentType.matches('application/pdf|image/(png|jpeg|jpg|webp)');
@@ -84,7 +90,7 @@ service firebase.storage {
     }
 
     match /ojt/{assignmentId}/{fileName} {
-      allow read: if isSignedIn();
+      allow read: if isActive();
       allow write: if hasRole(['super_admin', 'qa', 'department_head', 'trainer'])
         && request.resource.size < 25 * 1024 * 1024
         && isTrainingFile();

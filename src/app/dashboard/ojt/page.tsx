@@ -69,8 +69,12 @@ export default function OjtDashboardPage() {
     if (!opts?.silent) setLoading(true);
     setError(null);
     try {
-      if (profile?.role === "employee" && !profile.employeeId) {
+      if (
+        (profile?.role === "employee" && !profile.employeeId) ||
+        (profile?.role === "department_head" && !profile.departmentId)
+      ) {
         setAssignments([]);
+        setFormDocs([]);
         setStats(await buildOjtDashboardStats([], []));
         return;
       }

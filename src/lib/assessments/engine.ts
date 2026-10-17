@@ -41,8 +41,17 @@ export function selectQuestionsForExam(
   exam: Exam
 ): Question[] {
   let active = pool.filter((q) => q.isActive);
-  const bankIds = new Set([exam.bankId, ...(exam.bankIds || [])]);
-  active = active.filter((q) => bankIds.has(q.bankId));
+  const bankIds = new Set(
+    [exam.bankId, ...(exam.bankIds || [])].filter(
+      (id): id is string => typeof id === "string" && id.trim().length > 0
+    )
+  );
+  const seen = new Set<string>();
+  active = active.filter((q) => {
+    if (!bankIds.has(q.bankId) || seen.has(q.id)) return false;
+    seen.add(q.id);
+    return true;
+  });
 
   if (exam.randomizeFromBank && exam.difficultyMix) {
     const picked: Question[] = [];
@@ -53,9 +62,11 @@ export function selectQuestionsForExam(
       let candidates = active.filter((q) => q.difficulty === diff && !used.has(q.id));
       if (exam.shuffleQuestions) candidates = shuffleArray(candidates);
       for (const q of candidates.slice(0, need)) {
+        if (picked.length >= exam.questionCount) break;
         picked.push(q);
         used.add(q.id);
       }
+      if (picked.length >= exam.questionCount) break;
     }
     // Fill remaining slots randomly
     const remaining = exam.questionCount - picked.length;

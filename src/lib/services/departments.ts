@@ -10,7 +10,7 @@ import {
 } from "@/lib/departments/defaults";
 import type { CreateDepartmentInput, UpdateDepartmentInput } from "@/lib/auth/department-schemas";
 import type { Department } from "@/types";
-import { collection, getDocs, orderBy, query } from "firebase/firestore/lite";
+import { collection, getDocs } from "firebase/firestore/lite";
 
 export const DEPARTMENTS_UPDATED_EVENT = "pharma-departments-updated";
 const DEMO_DEPT_KEY = "pharma_lms_departments";
@@ -53,7 +53,7 @@ async function authHeaders(): Promise<HeadersInit> {
 
 let listInflight: Promise<Department[]> | null = null;
 let listCache: { at: number; data: Department[] } | null = null;
-const LIST_CACHE_MS = 15_000;
+const LIST_CACHE_MS = 60_000;
 
 function invalidateDepartmentListCache() {
   listCache = null;
@@ -80,20 +80,24 @@ export async function listDepartments(): Promise<Department[]> {
 
   listInflight = (async () => {
     try {
-      const res = await fetch("/api/departments", { headers: await authHeaders() });
-      const json = await res.json().catch(() => ({}));
-      if (res.ok && Array.isArray(json.departments)) {
-        const data = json.departments as Department[];
-        listCache = { at: Date.now(), data };
-        return data;
-      }
+      const snap = await getDocs(collection(db, COLLECTIONS.departments));
+      const data = snap.docs
+        .map((doc) => ({ id: doc.id, ...doc.data() } as Department))
+        .sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+      listCache = { at: Date.now(), data };
+      return data;
     } catch {
-      /* fall through to client Firestore */
+      /* client rules blocked — admin API can still list */
     }
 
-    const q = query(collection(db, COLLECTIONS.departments), orderBy("name"));
-    const snap = await getDocs(q);
-    const data = snap.docs.map((doc) => ({ id: doc.id, ...doc.data() } as Department));
+    const res = await fetch("/api/departments", { headers: await authHeaders() });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok || !Array.isArray(json.departments)) {
+      throw new Error(
+        typeof json.error === "string" ? json.error : "Could not load departments"
+      );
+    }
+    const data = json.departments as Department[];
     listCache = { at: Date.now(), data };
     return data;
   })();

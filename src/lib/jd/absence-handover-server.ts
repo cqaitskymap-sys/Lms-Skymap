@@ -52,22 +52,24 @@ export async function listAbsenceHandoverJdsForUser(actor: {
   uid: string;
   employeeId?: string;
 }): Promise<{ items: JobDescription[]; extraEmployeeIds: string[] }> {
-  const extraEmployeeIds = await employeeIdsForAuthUser(actor.uid, actor.employeeId);
-  const tasks: Promise<JobDescription[]>[] = [
+  const extraPromise = employeeIdsForAuthUser(actor.uid, actor.employeeId);
+  const uidPromise = Promise.all([
     collectByField("absenceHandoverUserId", actor.uid),
     collectByField("assignedBy.userId", actor.uid),
     collectByField("acceptedBy.userId", actor.uid),
-  ];
-  for (const empId of extraEmployeeIds) {
-    tasks.push(
+  ]);
+  const extraEmployeeIds = await extraPromise;
+  const empPromise = Promise.all(
+    extraEmployeeIds.flatMap((empId) => [
       collectByField("absenceHandoverEmployeeId", empId),
       collectByField("assignedBy.employeeId", empId),
-      collectByField("acceptedBy.employeeId", empId)
-    );
-  }
+      collectByField("acceptedBy.employeeId", empId),
+    ])
+  );
+  const [uidChunks, empChunks] = await Promise.all([uidPromise, empPromise]);
 
   const byId = new Map<string, JobDescription>();
-  for (const rows of await Promise.all(tasks)) {
+  for (const rows of [...uidChunks, ...empChunks]) {
     for (const row of rows) byId.set(row.id, row);
   }
 

@@ -28,7 +28,7 @@ export async function getServerAuthFromBearer(
 
   try {
     const token = authorizationHeader.slice(7);
-    const decoded = await adminAuth.verifyIdToken(token);
+    const decoded = await adminAuth.verifyIdToken(token, true);
     const snap = await adminDb.collection(COLLECTIONS.users).doc(decoded.uid).get();
     if (!snap.exists) return null;
     const profile = { id: snap.id, ...snap.data() } as UserProfile;

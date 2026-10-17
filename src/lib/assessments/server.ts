@@ -12,6 +12,7 @@ import {
   selectQuestionsForExam,
   toAttemptQuestions,
 } from "@/lib/assessments/engine";
+import { attemptsRemaining, hasOutstandingTraining } from "@/lib/assessments/training-cycle";
 import { generateId } from "@/lib/services/helpers";
 import { issueCertificateForAttemptServer } from "@/lib/certificates/issue-server";
 import { getProgressForStage, getStageIndex } from "@/lib/lifecycle/stages";
@@ -124,6 +125,39 @@ async function assertTniSopsReadServer(params: {
   }
 }
 
+async function questionsWithAnswerKeys(
+  exam: Exam,
+  attempt: AssessmentAttempt
+): Promise<AssessmentAttempt["questions"]> {
+  const bankQuestions = await loadBankQuestions(exam);
+  const keyById = new Map(
+    bankQuestions.map((q) => [
+      q.id,
+      q.options.filter((o) => o.isCorrect).map((o) => o.id),
+    ])
+  );
+  const missing = [
+    ...new Set(attempt.questions.map((q) => q.questionId).filter((id) => !keyById.has(id))),
+  ];
+  if (missing.length) {
+    const snaps = await adminDb.getAll(
+      ...missing.map((id) => adminDb.collection(COLLECTIONS.questions).doc(id))
+    );
+    for (const snap of snaps) {
+      if (!snap.exists) continue;
+      const options = (snap.data()?.options || []) as { id?: string; isCorrect?: boolean }[];
+      const ids = options.filter((o) => o.isCorrect && o.id).map((o) => o.id as string);
+      if (ids.length) keyById.set(snap.id, ids);
+    }
+  }
+  return attempt.questions.map((q) => ({
+    ...q,
+    correctOptionIds: keyById.get(q.questionId)?.length
+      ? keyById.get(q.questionId)!
+      : q.correctOptionIds || [],
+  }));
+}
+
 async function loadExam(examId: string): Promise<Exam | null> {
   const snap = await adminDb.collection(COLLECTIONS.exams).doc(examId).get();
   if (!snap.exists) return null;
@@ -131,17 +165,25 @@ async function loadExam(examId: string): Promise<Exam | null> {
 }
 
 async function loadBankQuestions(exam: Exam): Promise<Question[]> {
-  const bankIds = [exam.bankId, ...(exam.bankIds || [])];
-  const all: Question[] = [];
+  const bankIds = [
+    ...new Set(
+      [exam.bankId, ...(exam.bankIds || [])].filter(
+        (id): id is string => typeof id === "string" && id.trim().length > 0
+      )
+    ),
+  ];
+  const byId = new Map<string, Question>();
   for (const bankId of bankIds) {
     const snap = await adminDb
       .collection(COLLECTIONS.questions)
       .where("bankId", "==", bankId)
       .where("isActive", "==", true)
       .get();
-    all.push(...snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Question));
+    for (const d of snap.docs) {
+      if (!byId.has(d.id)) byId.set(d.id, { id: d.id, ...d.data() } as Question);
+    }
   }
-  return all;
+  return [...byId.values()];
 }
 
 async function listAttemptsForEmployee(
@@ -525,17 +567,7 @@ export async function submitAssessmentServer(
   const expired = now > new Date(attempt.expiresAt);
   const mergedAnswers = { ...(attempt.answersDraft || {}), ...input.answers };
 
-  const bankQuestions = await loadBankQuestions(exam);
-  const keyById = new Map(
-    bankQuestions.map((q) => [
-      q.id,
-      q.options.filter((o) => o.isCorrect).map((o) => o.id),
-    ])
-  );
-  const questionsWithKeys = attempt.questions.map((q) => ({
-    ...q,
-    correctOptionIds: keyById.get(q.questionId) || [],
-  }));
+  const questionsWithKeys = await questionsWithAnswerKeys(exam, attempt);
 
   const evaluated = evaluateAttempt(questionsWithKeys, mergedAnswers, exam);
   const passed = !expired && evaluated.passed;
@@ -757,18 +789,18 @@ async function handleTrainingResultServer(
       .collection(COLLECTIONS.trainingAssignments)
       .where("employeeId", "==", attempt.employeeId)
       .get();
-    const outstanding = allAssignSnap.docs.filter((d) => {
-      if (d.id === assignmentId) return false;
-      const status = (d.data() as { status?: string }).status;
-      return status !== "passed" && status !== "failed" && status !== "expired";
+    const assignmentRows = allAssignSnap.docs.map((d) => {
+      const data = d.data() as { sopId?: string; status?: string };
+      return { id: d.id, sopId: data.sopId, status: data.status };
     });
+    const outstanding = hasOutstandingTraining(assignmentRows, assignmentId);
 
     const empRef = adminDb.collection(COLLECTIONS.employees).doc(attempt.employeeId);
     const empSnap = await empRef.get();
     const currentStage = (empSnap.data()?.lifecycleStage || "created") as LifecycleStage;
     const currentIdx = getStageIndex(currentStage);
 
-    const targetStage: LifecycleStage = outstanding.length ? "exam" : "passed";
+    const targetStage: LifecycleStage = outstanding ? "exam" : "passed";
     const targetIdx = getStageIndex(targetStage);
     if (targetIdx > currentIdx) {
       await empRef.set(
@@ -782,6 +814,33 @@ async function handleTrainingResultServer(
         { merge: true }
       );
     }
+    return;
+  }
+
+  const exam = attempt.examId ? await loadExam(attempt.examId) : null;
+  const priorAttempts = attempt.examId
+    ? await listAttemptsForEmployee(attempt.examId, attempt.employeeId)
+    : [];
+  const finishedRows = priorAttempts.filter(
+    (row) =>
+      row.assignmentId === assignmentId &&
+      (row.status === "passed" || row.status === "failed" || row.status === "expired")
+  );
+  const finishedInCycle = finishedRows.some((row) => row.id === attempt.id)
+    ? finishedRows.length
+    : finishedRows.length + 1;
+  if (attemptsRemaining(finishedInCycle, exam?.maxAttempts || 1)) {
+    await assignRef.set(
+      {
+        status: prev.status === "retraining" ? "retraining" : "assessment_pending",
+        score: attempt.percentage,
+        passed: false,
+        assessmentAttemptId: attempt.id,
+        updatedAt: now,
+        updatedBy: actorId,
+      },
+      { merge: true }
+    );
     return;
   }
 
