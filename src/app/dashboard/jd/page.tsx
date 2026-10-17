@@ -257,10 +257,20 @@ function JdPageInner() {
     if (employeeFromUrl) setEmployeeId(employeeFromUrl);
   }, [employeeFromUrl]);
 
+  const prefilledEmployeeRef = useRef<string | null>(null);
   useEffect(() => {
-    if (editingId) return;
+    if (editingId) {
+      prefilledEmployeeRef.current = employeeId;
+      return;
+    }
+    if (!employeeId) {
+      prefilledEmployeeRef.current = "";
+      return;
+    }
+    if (prefilledEmployeeRef.current === employeeId) return;
     const emp = employees.find((e) => e.id === employeeId);
     if (!emp) return;
+    prefilledEmployeeRef.current = employeeId;
     if (emp.departmentId) setDepartmentId(emp.departmentId);
     if (emp.designation) {
       setJobTitle((current) => current || emp.designation);
@@ -1398,8 +1408,7 @@ function JdPageInner() {
                       </p>
                     ) : catalogDesignations.length > 0 ? (
                       <p className="text-xs text-muted-foreground">
-                        Add a sub department and select a designation to choose from the saved
-                        responsibilities.
+                        Select a designation to choose from the saved responsibilities.
                       </p>
                     ) : departmentId ? (
                       <p className="text-xs text-muted-foreground">
