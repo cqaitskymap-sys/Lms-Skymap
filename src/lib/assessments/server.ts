@@ -133,7 +133,7 @@ async function questionsWithAnswerKeys(
   const keyById = new Map(
     bankQuestions.map((q) => [
       q.id,
-      q.options.filter((o) => o.isCorrect).map((o) => o.id),
+      (q.options || []).filter((o) => o.isCorrect).map((o) => o.id),
     ])
   );
   const missing = [
@@ -316,12 +316,25 @@ export async function startAssessmentServer(
 
   const prior = await listAttemptsForEmployee(input.examId, input.employeeId);
   const nowMs = Date.now();
-  const staleClaims = prior.filter(
-    (a) =>
-      a.status === "submitted" &&
-      nowMs - new Date(a.updatedAt).getTime() >= 2 * 60 * 1000
+  const submitted = prior.filter((a) => a.status === "submitted");
+  const freshScoring = submitted.filter(
+    (a) => nowMs - new Date(a.updatedAt).getTime() < 2 * 60 * 1000
   );
-  for (const stale of staleClaims) {
+  if (freshScoring.length) {
+    return {
+      ok: false,
+      status: 409,
+      error: "Your previous submission is still being scored. Wait a moment, then refresh.",
+    };
+  }
+  const staleClaims = submitted.filter(
+    (a) => nowMs - new Date(a.updatedAt).getTime() >= 2 * 60 * 1000
+  );
+  const lockedStale = staleClaims.filter(
+    (a) => a.answersLocked || a.score != null || !!a.submittedAt
+  );
+  const legacyStale = staleClaims.filter((a) => !lockedStale.some((s) => s.id === a.id));
+  for (const stale of legacyStale) {
     await adminDb.collection(COLLECTIONS.assessmentAttempts).doc(stale.id).set(
       {
         status: "in_progress",
@@ -332,14 +345,24 @@ export async function startAssessmentServer(
     );
     stale.status = "in_progress";
   }
-  const scoring = prior.filter(
-    (a) => a.status === "submitted" && !staleClaims.some((s) => s.id === a.id)
-  );
-  if (scoring.length) {
+  if (lockedStale.length) {
+    const resumableScore = lockedStale.find(
+      (a) => a.answersLocked && a.score == null && !a.submittedAt
+    );
+    if (resumableScore) {
+      const recovered = await submitAssessmentServer({
+        attemptId: resumableScore.id,
+        answers: resumableScore.answersDraft || {},
+        actorId: input.actorId,
+      });
+      if (!recovered.ok) {
+        return { ok: false, status: recovered.status, error: recovered.error };
+      }
+    }
     return {
       ok: false,
       status: 409,
-      error: "Your previous submission is still being scored. Wait a moment, then refresh.",
+      error: "This exam was already submitted. Refresh to see the result.",
     };
   }
 
@@ -375,10 +398,15 @@ export async function startAssessmentServer(
   }
 
   const enforceMaxAttempts = input.enforceMaxAttempts !== false;
-  // A retraining assignment is a new cycle. Earlier fails on the previous
-  // assignment must not consume this cycle's attempt allowance.
-  const inCycle = (a: AssessmentAttempt) =>
-    !input.assignmentId || a.assignmentId === input.assignmentId;
+  // A retraining or induction assignment is a new cycle. Earlier fails on a
+  // previous assignment must not consume this cycle's attempt allowance.
+  const inCycle = (a: AssessmentAttempt) => {
+    if (input.assignmentId) return a.assignmentId === input.assignmentId;
+    if (input.inductionAssignmentId) {
+      return a.inductionAssignmentId === input.inductionAssignmentId;
+    }
+    return true;
+  };
   const finished = prior.filter(
     (a) => inCycle(a) && ["passed", "failed", "expired"].includes(a.status)
   );
@@ -519,7 +547,8 @@ export async function getOrBuildExamLeaderboard(
 
 async function claimAttemptForSubmit(
   attemptId: string,
-  actorId: string
+  actorId: string,
+  answers: Record<string, string[]>
 ): Promise<
   | { ok: true; attempt: AssessmentAttempt }
   | { ok: false; status: number; error: string }
@@ -533,17 +562,36 @@ async function claimAttemptForSubmit(
     const attempt = { id: snap.id, ...snap.data() } as AssessmentAttempt;
     const staleClaim =
       attempt.status === "submitted" &&
+      attempt.score == null &&
+      !attempt.submittedAt &&
       Date.now() - new Date(attempt.updatedAt).getTime() >= 2 * 60 * 1000;
     if (attempt.status !== "in_progress" && !staleClaim) {
       return { ok: false as const, status: 400, error: "Attempt already submitted" };
     }
     const now = new Date().toISOString();
+    const lockedAnswers = attempt.answersLocked
+      ? { ...(attempt.answersDraft || {}) }
+      : { ...(attempt.answersDraft || {}), ...answers };
     tx.set(
       attemptRef,
-      { status: "submitted", updatedAt: now, updatedBy: actorId },
+      {
+        status: "submitted",
+        answersDraft: lockedAnswers,
+        answersLocked: true,
+        updatedAt: now,
+        updatedBy: actorId,
+      },
       { merge: true }
     );
-    return { ok: true as const, attempt };
+    return {
+      ok: true as const,
+      attempt: {
+        ...attempt,
+        status: "submitted",
+        answersDraft: lockedAnswers,
+        answersLocked: true,
+      },
+    };
   });
 }
 
@@ -551,7 +599,7 @@ export async function submitAssessmentServer(
   input: SubmitAssessmentServerInput
 ): Promise<SubmitAssessmentServerResult> {
   const attemptRef = adminDb.collection(COLLECTIONS.assessmentAttempts).doc(input.attemptId);
-  const claimed = await claimAttemptForSubmit(input.attemptId, input.actorId);
+  const claimed = await claimAttemptForSubmit(input.attemptId, input.actorId, input.answers);
   if (!claimed.ok) return claimed;
 
   const attempt = claimed.attempt;
@@ -565,7 +613,7 @@ export async function submitAssessmentServer(
 
   const now = new Date();
   const expired = now > new Date(attempt.expiresAt);
-  const mergedAnswers = { ...(attempt.answersDraft || {}), ...input.answers };
+  const mergedAnswers = { ...(attempt.answersDraft || {}) };
 
   const questionsWithKeys = await questionsWithAnswerKeys(exam, attempt);
 
@@ -634,8 +682,18 @@ export async function submitAssessmentServer(
 
   const revealAnswers = !!exam.allowReview && !!exam.showResultsImmediately;
   await attemptRef.set(stripUndefined(attemptForPersistence(updated, revealAnswers)));
-  await adminDb.collection(COLLECTIONS.examResults).doc(result.id).set(stripUndefined(result));
   finalized = true;
+  try {
+    await adminDb.collection(COLLECTIONS.examResults).doc(result.id).set(stripUndefined(result));
+  } catch (resultErr) {
+    console.error("[submitAssessmentServer] result write failed:", resultErr);
+    return {
+      ok: false,
+      status: 500,
+      error:
+        "Your exam was scored, but the result record did not save. Do not retake it — refresh or ask QA.",
+    };
+  }
 
   try {
     await persistExamLeaderboard(exam.id, peers);
@@ -681,6 +739,7 @@ export async function submitAssessmentServer(
       const finishedBefore = priorAttempts.filter(
         (a) =>
           a.id !== attempt.id &&
+          a.inductionAssignmentId === attempt.inductionAssignmentId &&
           (a.status === "passed" || a.status === "failed" || a.status === "expired")
       ).length;
       const attemptsExhausted = finishedBefore + 1 >= (exam.maxAttempts || 1);
@@ -749,6 +808,7 @@ export async function submitAssessmentServer(
         .set(
           {
             status: "in_progress",
+            answersLocked: false,
             updatedAt: new Date().toISOString(),
             updatedBy: input.actorId,
           },
@@ -863,6 +923,7 @@ async function handleTrainingResultServer(
   const openStatuses = new Set([
     "assigned",
     "in_progress",
+    "training_scheduled",
     "training_completed",
     "assessment_pending",
     "retraining",

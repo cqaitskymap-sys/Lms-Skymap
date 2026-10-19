@@ -10,6 +10,7 @@ import type {
   OjtStatus,
 } from "@/types/ojt";
 import { CALENDAR_MONTHS } from "@/types/ojt";
+import { calendarDateToIso as stableCalendarDateToIso } from "@/lib/utils";
 
 export { CALENDAR_MONTHS };
 
@@ -242,11 +243,7 @@ export function parseCalendarDateParts(
 
 /** Store date-only inputs at noon UTC so the calendar day is stable across timezones. */
 export function calendarDateToIso(dateStr: string): string {
-  const parts = parseCalendarDateParts(dateStr);
-  if (!parts) return new Date(dateStr).toISOString();
-  const mm = String(parts.month).padStart(2, "0");
-  const dd = String(parts.day).padStart(2, "0");
-  return `${parts.year}-${mm}-${dd}T12:00:00.000Z`;
+  return stableCalendarDateToIso(dateStr);
 }
 
 export function dateFallsInMonth(isoDate: string, year: number, month: number): boolean {

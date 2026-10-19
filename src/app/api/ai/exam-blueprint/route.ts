@@ -10,6 +10,7 @@ import {
   extractJsonObject,
   isOpenRouterConfigured,
   openRouterChat,
+  providerErrorStatus,
 } from "@/lib/ai/openrouter";
 
 const bodySchema = z.object({
@@ -107,7 +108,7 @@ Create an exam blueprint.`,
   if (!result.ok) {
     return NextResponse.json(
       { success: false, error: result.error },
-      { status: result.status && result.status >= 400 ? result.status : 502 }
+      { status: providerErrorStatus(result.status) }
     );
   }
 

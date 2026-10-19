@@ -5,7 +5,7 @@ import {
   unauthorized,
   verifyAuthDetailed,
 } from "@/lib/rbac/middleware";
-import { isOpenRouterConfigured, openRouterChat } from "@/lib/ai/openrouter";
+import { isOpenRouterConfigured, openRouterChat, providerErrorStatus } from "@/lib/ai/openrouter";
 import { DEFAULT_COMPANY_POLICIES } from "@/lib/onboarding/policies";
 
 const messageSchema = z.object({
@@ -90,7 +90,7 @@ ${contextNote ? `Extra session context:\n${contextNote}` : ""}`;
   if (!result.ok) {
     return NextResponse.json(
       { success: false, error: result.error },
-      { status: result.status && result.status >= 400 ? result.status : 502 }
+      { status: providerErrorStatus(result.status) }
     );
   }
 

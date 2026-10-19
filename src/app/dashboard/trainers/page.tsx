@@ -118,14 +118,14 @@ export default function TrainersPage() {
                 </CardHeader>
                 <CardContent className="space-y-2">
                   <div className="flex flex-wrap gap-2">
-                    {t.specializations.map((s) => (
+                    {(t.specializations || []).map((s) => (
                       <Badge key={s}>{s}</Badge>
                     ))}
                   </div>
                   <p className="text-sm text-muted-foreground">
                     {t.totalSessionsConducted} sessions conducted
-                    {t.departmentIds[0]
-                      ? ` · ${departmentLabel(departments, t.departmentIds[0])}`
+                    {(t.departmentIds || [])[0]
+                      ? ` · ${departmentLabel(departments, (t.departmentIds || [])[0])}`
                       : ""}
                   </p>
                 </CardContent>

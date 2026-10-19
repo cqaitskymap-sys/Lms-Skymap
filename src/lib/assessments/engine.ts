@@ -87,7 +87,8 @@ export function toAttemptQuestions(
   exam: Exam
 ): AttemptQuestion[] {
   return questions.map((q) => {
-    let options = q.options.map((o) => ({ id: o.id, text: o.text }));
+    const sourceOptions = q.options || [];
+    let options = sourceOptions.map((o) => ({ id: o.id, text: o.text }));
     if (exam.shuffleOptions) options = shuffleArray(options);
     const negative =
       q.negativeMarks ??
@@ -98,7 +99,7 @@ export function toAttemptQuestions(
       type: q.type,
       options,
       selectedOptionIds: [],
-      correctOptionIds: q.options.filter((o) => o.isCorrect).map((o) => o.id),
+      correctOptionIds: sourceOptions.filter((o) => o.isCorrect).map((o) => o.id),
       marks: q.marks,
       negativeMarks: negative,
       earnedMarks: 0,

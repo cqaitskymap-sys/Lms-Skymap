@@ -35,6 +35,7 @@ import {
   selectQuestionsForExam,
   toAttemptQuestions,
 } from "@/lib/assessments/engine";
+import { attemptsRemaining } from "@/lib/assessments/training-cycle";
 import {
   pushAttemptLocal,
   readAssessmentStore,
@@ -284,8 +285,13 @@ export async function startAssessment(params: {
     };
   }
 
-  const inCycle = (a: AssessmentAttempt) =>
-    !params.assignmentId || a.assignmentId === params.assignmentId;
+  const inCycle = (a: AssessmentAttempt) => {
+    if (params.assignmentId) return a.assignmentId === params.assignmentId;
+    if (params.inductionAssignmentId) {
+      return a.inductionAssignmentId === params.inductionAssignmentId;
+    }
+    return true;
+  };
   const finished = prior.filter(
     (a) => inCycle(a) && ["passed", "failed", "expired"].includes(a.status)
   );
@@ -365,6 +371,11 @@ export async function autoSaveAssessment(
     return;
   }
 
+  const snap = await getDoc(doc(db, COLLECTIONS.assessmentAttempts, attemptId));
+  if (!snap.exists()) return;
+  const current = snap.data() as { status?: string; answersLocked?: boolean };
+  if (current.status !== "in_progress" || current.answersLocked) return;
+
   await updateDoc(doc(db, COLLECTIONS.assessmentAttempts, attemptId), {
     answersDraft: answers,
     lastSavedAt: now,
@@ -413,7 +424,7 @@ export async function submitAssessment(
   const keyById = new Map(
     bankQuestions.map((q) => [
       q.id,
-      q.options.filter((o) => o.isCorrect).map((o) => o.id),
+      (q.options || []).filter((o) => o.isCorrect).map((o) => o.id),
     ])
   );
   const questionsWithKeys = attempt.questions.map((q) => ({
@@ -496,6 +507,11 @@ export async function submitAssessment(
   if (attempt.inductionAssignmentId) {
     try {
       const { completeInductionAssessment } = await import("@/lib/services/induction");
+      const finishedOnInduction = readAssessmentStore().attempts.filter(
+        (row) =>
+          row.inductionAssignmentId === attempt.inductionAssignmentId &&
+          (row.status === "passed" || row.status === "failed" || row.status === "expired")
+      ).length;
       await completeInductionAssessment({
         assignmentId: attempt.inductionAssignmentId,
         attemptId,
@@ -503,6 +519,8 @@ export async function submitAssessment(
         passed: !!updated.passed,
         actorId,
         employeeId: attempt.employeeId,
+        attemptsExhausted:
+          !!updated.passed || finishedOnInduction >= (exam.maxAttempts || 1),
       });
     } catch {
       /* non-blocking */
@@ -540,13 +558,71 @@ async function handleTrainingAssessmentResult(
   if (await preferLocalData()) {
     try {
       const { updateAssignmentAfterAssessment } = await import("@/lib/services/training");
+      const { readTrainingStore, writeTrainingStore } = await import("@/lib/training/demo-store");
+      const examForCycle = await loadExam(attempt.examId);
+      const finishedInCycle = readAssessmentStore().attempts.filter(
+        (row) =>
+          row.assignmentId === assignmentId &&
+          (row.status === "passed" || row.status === "failed" || row.status === "expired")
+      ).length;
+      const current = readTrainingStore().assignments.find((row) => row.id === assignmentId);
+      const status = attempt.passed
+        ? "passed"
+        : attemptsRemaining(finishedInCycle, examForCycle?.maxAttempts || 1)
+          ? current?.status === "retraining"
+            ? "retraining"
+            : "assessment_pending"
+          : "failed";
       await updateAssignmentAfterAssessment({
         assignmentId,
         passed: !!attempt.passed,
         score: attempt.percentage ?? attempt.score ?? 0,
         attemptId: attempt.id!,
         actorId,
+        status,
       });
+      if (status === "failed" && current) {
+        const openStatuses = new Set([
+          "assigned",
+          "in_progress",
+          "training_scheduled",
+          "training_completed",
+          "assessment_pending",
+          "retraining",
+        ]);
+        const fresh = readTrainingStore();
+        const alreadyOpen = fresh.assignments.some(
+          (row) =>
+            row.id !== assignmentId &&
+            row.employeeId === current.employeeId &&
+            row.sopId === current.sopId &&
+            openStatuses.has(row.status)
+        );
+        if (!alreadyOpen) {
+          const due = new Date();
+          due.setDate(due.getDate() + 7);
+          const now = nowISO();
+          fresh.assignments.unshift({
+            id: generateId("ta"),
+            employeeId: current.employeeId,
+            sopId: current.sopId,
+            sopVersionId: current.sopVersionId,
+            trainerId: current.trainerId,
+            assignedBy: actorId,
+            departmentId: current.departmentId,
+            status: "retraining",
+            dueDate: due.toISOString(),
+            attemptCount: (current.attemptCount || 0) + 1,
+            isRetraining: true,
+            previousAssignmentId: assignmentId,
+            triggeredBySopRevision: false,
+            createdAt: now,
+            updatedAt: now,
+            createdBy: actorId,
+          });
+          writeTrainingStore(fresh);
+        }
+      }
     } catch {
       /* non-blocking */
     }
@@ -582,6 +658,28 @@ async function handleTrainingAssessmentResult(
     const assignSnap = await getDoc(doc(db, COLLECTIONS.trainingAssignments, assignmentId));
     if (!assignSnap.exists()) return;
     const prev = assignSnap.data() as TrainingAssignment;
+
+    const examForCycle = await loadExam(attempt.examId);
+    const prior = await listAttemptsForEmployee(attempt.examId, attempt.employeeId);
+    const finishedRows = prior.filter(
+      (row) =>
+        row.assignmentId === assignmentId &&
+        (row.status === "passed" || row.status === "failed" || row.status === "expired")
+    );
+    const finishedInCycle = finishedRows.some((row) => row.id === attempt.id)
+      ? finishedRows.length
+      : finishedRows.length + 1;
+    if (attemptsRemaining(finishedInCycle, examForCycle?.maxAttempts || 1)) {
+      await updateDoc(doc(db, COLLECTIONS.trainingAssignments, assignmentId), {
+        status: prev.status === "retraining" ? "retraining" : "assessment_pending",
+        score: attempt.percentage,
+        passed: false,
+        assessmentAttemptId: attempt.id,
+        updatedAt: now,
+        updatedBy: actorId,
+      });
+      return;
+    }
 
     await updateDoc(doc(db, COLLECTIONS.trainingAssignments, assignmentId), {
       status: "failed",

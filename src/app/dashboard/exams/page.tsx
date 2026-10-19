@@ -298,7 +298,9 @@ function ExamsPageInner() {
       const result = await submitAssessment(attempt.id, answersRef.current, profile.uid);
       const reveal = !!(exam?.allowReview && exam?.showResultsImmediately);
       const full = await getAttempt(result.id, { revealAnswers: reveal });
-      const resultHasKey = result.questions.some((q) => q.correctOptionIds.length > 0);
+      const resultHasKey = (result.questions || []).some(
+        (q) => (q.correctOptionIds || []).length > 0
+      );
       setAttempt({
         ...(full || {}),
         ...result,

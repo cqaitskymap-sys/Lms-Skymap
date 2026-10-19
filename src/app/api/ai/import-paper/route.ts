@@ -10,6 +10,7 @@ import {
   extractJsonObject,
   isOpenRouterConfigured,
   openRouterChat,
+  providerErrorStatus,
   type OpenRouterContentPart,
 } from "@/lib/ai/openrouter";
 import { normalizeQuestion, type QuestionDraftInput } from "@/lib/ai/normalize-question";
@@ -119,7 +120,7 @@ ${paperText ? `Extracted text:\n${paperText}` : "Text layer was empty (likely a 
   if (!result.ok) {
     return NextResponse.json(
       { success: false, error: result.error },
-      { status: result.status && result.status >= 400 ? result.status : 502 }
+      { status: providerErrorStatus(result.status) }
     );
   }
 

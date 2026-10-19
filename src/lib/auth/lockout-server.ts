@@ -180,8 +180,8 @@ export async function writeLoginAudit(params: {
       resourceType: "session",
       resourceId: params.actorId,
       description: params.description,
-      ipAddress: params.ipAddress,
-      userAgent: params.userAgent,
+      ...(params.ipAddress ? { ipAddress: params.ipAddress } : {}),
+      ...(params.userAgent ? { userAgent: params.userAgent } : {}),
       after: { success: params.success },
     });
   } catch {
@@ -203,7 +203,13 @@ export async function writeActivityLogServer(params: {
     const id = generateId("act");
     await adminDb.collection(COLLECTIONS.activityLogs).doc(id).set({
       id,
-      ...params,
+      userId: params.userId,
+      verb: params.verb,
+      summary: params.summary,
+      ...(params.employeeId ? { employeeId: params.employeeId } : {}),
+      ...(params.ipAddress ? { ipAddress: params.ipAddress } : {}),
+      ...(params.userAgent ? { userAgent: params.userAgent } : {}),
+      ...(params.metadata ? { metadata: params.metadata } : {}),
       createdAt: new Date().toISOString(),
     });
   } catch {

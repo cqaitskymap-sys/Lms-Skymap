@@ -1,12 +1,6 @@
 "use client";
 
-import {
-  EmailAuthProvider,
-  reauthenticateWithCredential,
-  sendPasswordResetEmail,
-  updatePassword,
-  updateProfile,
-} from "firebase/auth";
+import { sendPasswordResetEmail, signInWithEmailAndPassword, updateProfile } from "firebase/auth";
 import { deleteField, doc, updateDoc } from "firebase/firestore/lite";
 import { auth, db, COLLECTIONS } from "@/lib/firebase/client";
 import { validatePassword } from "@/lib/auth/password-policy";
@@ -74,41 +68,24 @@ export async function changeUserPassword(params: {
     throw new Error("You can only change your own password");
   }
 
-  try {
-    const credential = EmailAuthProvider.credential(user.email, params.currentPassword);
-    await reauthenticateWithCredential(user, credential);
-    await updatePassword(user, params.newPassword);
-  } catch (err) {
-    const code =
-      err && typeof err === "object" && "code" in err
-        ? String((err as { code?: string }).code)
-        : "";
-    if (
-      code === "auth/wrong-password" ||
-      code === "auth/invalid-credential" ||
-      code === "auth/invalid-login-credentials"
-    ) {
-      throw new Error(
-        "Temporary password is incorrect. Use the password from the credentials card — re-issuing login credentials replaces the previous one."
-      );
-    }
-    if (code === "auth/too-many-requests") {
-      throw new Error("Too many attempts. Wait a few minutes and try again.");
-    }
-    if (code === "auth/requires-recent-login") {
-      throw new Error("Session expired. Sign in again with the temporary password, then set a new one.");
-    }
-    throw err instanceof Error ? err : new Error("Could not change password");
+  const token = await user.getIdToken();
+  const res = await fetch("/api/auth/change-password", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      currentPassword: params.currentPassword,
+      newPassword: params.newPassword,
+    }),
+  });
+  const body = (await res.json().catch(() => ({}))) as { success?: boolean; error?: string };
+  if (!res.ok || !body.success) {
+    throw new Error(body.error || "Could not change password");
   }
 
-  const now = new Date().toISOString();
-  await updateDoc(doc(db, COLLECTIONS.users, params.userId), {
-    mustChangePassword: false,
-    passwordChangedAt: now,
-    updatedAt: now,
-  });
-
-  // Password change counts as recent auth — refresh server session cookie
+  await signInWithEmailAndPassword(auth, user.email, params.newPassword);
   await refreshServerSession(true);
 
   await logActivity({

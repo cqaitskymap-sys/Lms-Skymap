@@ -14,6 +14,26 @@ function id(prefix: string) {
   return `${prefix}_${crypto.randomBytes(8).toString("hex")}`;
 }
 
+/** Calendar dates (and noon/midnight UTC copies of them) are due at the end of that UTC day. */
+function isPastDue(dueDate: string, nowMs: number): boolean {
+  const calendar =
+    /^(\d{4})-(\d{2})-(\d{2})(?:T(?:00|12):00:00(?:\.\d+)?Z)?$/.exec(dueDate.trim());
+  if (calendar) {
+    const end = Date.UTC(
+      Number(calendar[1]),
+      Number(calendar[2]) - 1,
+      Number(calendar[3]),
+      23,
+      59,
+      59,
+      999
+    );
+    return nowMs > end;
+  }
+  const parsed = new Date(dueDate).getTime();
+  return Number.isFinite(parsed) && nowMs > parsed;
+}
+
 async function writeAudit(params: {
   actorId: string;
   actorEmail: string;
@@ -32,15 +52,24 @@ async function writeAudit(params: {
   });
 }
 
-async function notify(userId: string, type: string, title: string, message: string, link?: string) {
-  const notifId = id("notif");
-  await db.collection("notifications").doc(notifId).set({
-    id: notifId,
+async function notify(
+  userId: string,
+  type: string,
+  title: string,
+  message: string,
+  link?: string,
+  notifId?: string
+) {
+  const noticeId = notifId || id("notif");
+  const ref = db.collection("notifications").doc(noticeId);
+  if (notifId && (await ref.get()).exists) return;
+  await ref.set({
+    id: noticeId,
     userId,
     type,
     title,
     message,
-    link,
+    ...(link ? { link } : {}),
     isRead: false,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -108,6 +137,7 @@ export const onSopVersionApproved = onDocumentUpdated(
             ref: docSnap.ref,
             data: {
               sopVersionId: versionId,
+              ...(docSnap.data().status === "failed" ? { status: "retraining" } : {}),
               isRetraining: true,
               triggeredBySopRevision: true,
               updatedAt: now,
@@ -127,7 +157,7 @@ export const onSopVersionApproved = onDocumentUpdated(
         );
       const source = completed[0];
       if (!source) continue;
-      const newId = id("ta");
+      const newId = `ta_${employeeId}_${versionId}`;
       ops.push({
         type: "set",
         ref: db.collection("training_assignments").doc(newId),
@@ -138,7 +168,7 @@ export const onSopVersionApproved = onDocumentUpdated(
           sopVersionId: versionId,
           trainerId: source.data().trainerId || null,
           assignedBy: "system",
-          departmentId: source.data().departmentId,
+          departmentId: source.data().departmentId ?? null,
           status: "assigned",
           attemptCount: 0,
           isRetraining: true,
@@ -178,7 +208,8 @@ export const onSopVersionApproved = onDocumentUpdated(
           "sop_revision",
           "SOP Revised — Retraining Required",
           "An SOP you were trained on has been revised. Please complete the updated training.",
-          "/dashboard/training"
+          "/dashboard/training",
+          `notif_soprev_${versionId}_${userId}`
         );
       }
     }
@@ -209,8 +240,8 @@ export const submitAssessment = onCall(async (request) => {
     answers: Record<string, string[]>;
   };
 
-  if (!attemptId || !answers) {
-    throw new HttpsError("invalid-argument", "attemptId and answers required");
+  if (!attemptId) {
+    throw new HttpsError("invalid-argument", "attemptId required");
   }
 
   const attemptRef = db.collection("assessment_attempts").doc(attemptId);
@@ -218,6 +249,16 @@ export const submitAssessment = onCall(async (request) => {
   if (!attemptSnap.exists) throw new HttpsError("not-found", "Attempt not found");
 
   const attempt = attemptSnap.data()!;
+  const draftAnswers =
+    attempt.answersDraft && typeof attempt.answersDraft === "object"
+      ? (attempt.answersDraft as Record<string, string[]>)
+      : {};
+  const submittedAnswers =
+    answers && typeof answers === "object" ? answers : {};
+  if (!answers && Object.keys(draftAnswers).length === 0) {
+    throw new HttpsError("invalid-argument", "answers required");
+  }
+  const mergedAnswers = { ...draftAnswers, ...submittedAnswers };
   if (attempt.status !== "in_progress" && attempt.status !== "submitted") {
     throw new HttpsError("failed-precondition", "Attempt already submitted");
   }
@@ -251,6 +292,8 @@ export const submitAssessment = onCall(async (request) => {
     throw new HttpsError("failed-precondition", "Attempt already submitted");
   }
 
+  let finalized = false;
+  try {
   const examSnap = await db.collection("exams").doc(attempt.examId).get();
   if (!examSnap.exists) {
     await attemptRef.update({
@@ -264,7 +307,9 @@ export const submitAssessment = onCall(async (request) => {
   const expired = now > new Date(attempt.expiresAt);
 
   // Rehydrate keys from question bank
-  const bankIds = [exam.bankId as string, ...((exam.bankIds as string[]) || [])];
+  const bankIds = [exam.bankId, ...((exam.bankIds as unknown[]) || [])].filter(
+    (bankId): bankId is string => typeof bankId === "string" && bankId.trim().length > 0
+  );
   const keyById = new Map<string, string[]>();
   for (const bankId of bankIds) {
     const qSnap = await db
@@ -286,16 +331,25 @@ export const submitAssessment = onCall(async (request) => {
   let negativeApplied = 0;
   const negEnabled = !!exam.negativeMarkingEnabled;
 
-  const questions = (
-    attempt.questions as Array<{
-      questionId: string;
-      marks: number;
-      negativeMarks?: number;
-      correctOptionIds: string[];
-      selectedOptionIds: string[];
-    }>
-  ).map((q) => {
-    const selected = answers[q.questionId] || q.selectedOptionIds || [];
+  const attemptQuestions = attempt.questions as
+    | Array<{
+        questionId: string;
+        marks: number;
+        negativeMarks?: number;
+        correctOptionIds: string[];
+        selectedOptionIds: string[];
+      }>
+    | undefined;
+  if (!Array.isArray(attemptQuestions)) {
+    await attemptRef.update({
+      status: "in_progress",
+      updatedAt: new Date().toISOString(),
+    });
+    throw new HttpsError("failed-precondition", "Attempt has no questions");
+  }
+
+  const questions = attemptQuestions.map((q) => {
+    const selected = mergedAnswers[q.questionId] || q.selectedOptionIds || [];
     const correctIds = keyById.get(q.questionId) || q.correctOptionIds || [];
     const correct = new Set(correctIds);
     const sel = new Set(selected);
@@ -328,11 +382,11 @@ export const submitAssessment = onCall(async (request) => {
   const passed = !expired && percentage >= (exam.passPercentage as number);
   const certThreshold =
     (exam.certificatePassPercentage as number) ?? (exam.passPercentage as number);
-  const certificateEligible = !expired && percentage >= certThreshold;
+  const certificateEligible = passed && percentage >= certThreshold;
 
   await attemptRef.update({
     questions,
-    answersDraft: answers,
+    answersDraft: mergedAnswers,
     status: expired ? "expired" : passed ? "passed" : "failed",
     submittedAt: now.toISOString(),
     score: earnedMarks,
@@ -343,6 +397,7 @@ export const submitAssessment = onCall(async (request) => {
     negativeMarksApplied: negativeApplied,
     updatedAt: now.toISOString(),
   });
+  finalized = true;
 
   if (attempt.assignmentId && passed) {
     const assignRef = db.collection("training_assignments").doc(attempt.assignmentId);
@@ -357,37 +412,89 @@ export const submitAssessment = onCall(async (request) => {
     const assignRef = db.collection("training_assignments").doc(attempt.assignmentId);
     const assignSnap = await assignRef.get();
     const prev = assignSnap.data() || {};
-    await assignRef.update({
-      status: "failed",
-      score: percentage,
-      passed: false,
-      assessmentAttemptId: attemptId,
-      updatedAt: now.toISOString(),
-    });
-    const retrainId = id("ta");
-    const due = new Date(now);
-    due.setDate(due.getDate() + 7);
-    await db.collection("training_assignments").doc(retrainId).set({
-      id: retrainId,
-      employeeId: prev.employeeId,
-      sopId: prev.sopId,
-      sopVersionId: prev.sopVersionId,
-      trainerId: prev.trainerId || null,
-      assignedBy: "system",
-      departmentId: prev.departmentId,
-      status: "retraining",
-      dueDate: due.toISOString(),
-      attemptCount: (prev.attemptCount || 0) + 1,
-      isRetraining: true,
-      previousAssignmentId: attempt.assignmentId,
-      triggeredBySopRevision: false,
-      createdAt: now.toISOString(),
-      updatedAt: now.toISOString(),
-      createdBy: "system",
-    });
+    const maxAttempts = Number(exam.maxAttempts) > 0 ? Number(exam.maxAttempts) : 1;
+    const priorSnap = await db
+      .collection("assessment_attempts")
+      .where("examId", "==", attempt.examId)
+      .where("employeeId", "==", employeeId)
+      .get();
+    const finishedInCycle = priorSnap.docs.filter((d) => {
+      const row = d.data();
+      return (
+        row.assignmentId === attempt.assignmentId &&
+        (row.status === "passed" || row.status === "failed" || row.status === "expired")
+      );
+    }).length;
+    if (finishedInCycle < maxAttempts) {
+      await assignRef.update({
+        status: prev.status === "retraining" ? "retraining" : "assessment_pending",
+        score: percentage,
+        passed: false,
+        assessmentAttemptId: attemptId,
+        updatedAt: now.toISOString(),
+      });
+    } else {
+      await assignRef.update({
+        status: "failed",
+        score: percentage,
+        passed: false,
+        assessmentAttemptId: attemptId,
+        updatedAt: now.toISOString(),
+      });
+      const open = new Set([
+        "assigned",
+        "in_progress",
+        "training_scheduled",
+        "training_completed",
+        "assessment_pending",
+        "retraining",
+      ]);
+      const sibling = prev.employeeId
+        ? await db.collection("training_assignments").where("employeeId", "==", prev.employeeId).get()
+        : null;
+      const alreadyOpen = sibling?.docs.some((d) => {
+        if (d.id === attempt.assignmentId) return false;
+        const row = d.data();
+        return row.sopId === prev.sopId && open.has(String(row.status || ""));
+      });
+      if (!alreadyOpen && prev.employeeId && prev.sopId) {
+        const retrainId = id("ta");
+        const due = new Date(now);
+        due.setDate(due.getDate() + 7);
+        await db.collection("training_assignments").doc(retrainId).set({
+          id: retrainId,
+          employeeId: prev.employeeId,
+          sopId: prev.sopId,
+          sopVersionId: prev.sopVersionId || null,
+          trainerId: prev.trainerId || null,
+          assignedBy: "system",
+          departmentId: prev.departmentId ?? null,
+          status: "retraining",
+          dueDate: due.toISOString(),
+          attemptCount: (prev.attemptCount || 0) + 1,
+          isRetraining: true,
+          previousAssignmentId: attempt.assignmentId,
+          triggeredBySopRevision: false,
+          createdAt: now.toISOString(),
+          updatedAt: now.toISOString(),
+          createdBy: "system",
+        });
+      }
+    }
   }
 
   return { passed, percentage, score: earnedMarks, certificateEligible, expired };
+  } catch (err) {
+    if (!finalized) {
+      await attemptRef
+        .update({
+          status: "in_progress",
+          updatedAt: new Date().toISOString(),
+        })
+        .catch(() => undefined);
+    }
+    throw err;
+  }
 });
 
 /**
@@ -421,7 +528,6 @@ export const verifyCertificate = onCall(async (request) => {
  * Daily reminder for overdue trainings.
  */
 export const overdueTrainingReminders = onSchedule("every day 09:00", async () => {
-  const now = new Date().toISOString();
   const snap = await db
     .collection("training_assignments")
     .where("status", "in", ["assigned", "in_progress", "retraining", "assessment_pending"])
@@ -429,7 +535,7 @@ export const overdueTrainingReminders = onSchedule("every day 09:00", async () =
 
   for (const doc of snap.docs) {
     const a = doc.data();
-    if (!a.dueDate || a.dueDate > now) continue;
+    if (!a.dueDate || !isPastDue(String(a.dueDate), Date.now())) continue;
     const emp = await db.collection("employees").doc(a.employeeId).get();
     const userId = emp.data()?.userId;
     if (userId) {
@@ -529,6 +635,58 @@ export const onEmployeeCreated = onDocumentCreated("employees/{employeeId}", asy
   }
 });
 
+const OPEN_TRAINING = new Set([
+  "assigned",
+  "in_progress",
+  "training_scheduled",
+  "training_completed",
+  "assessment_pending",
+  "retraining",
+]);
+
+const LIFECYCLE_INDEX: Record<string, number> = {
+  created: 0,
+  hr_verification: 1,
+  induction_assigned: 2,
+  induction_completed: 3,
+  department_handover: 4,
+  jd_created: 5,
+  tni_created: 6,
+  trainer_assigned: 7,
+  sop_assigned: 8,
+  training: 9,
+  exam: 10,
+  passed: 11,
+  certified: 12,
+  qualified: 13,
+};
+
+function trainingStillOutstanding(
+  rows: Array<{ id: string; sopId?: string; status?: string }>,
+  passedAssignmentId: string
+): boolean {
+  const mapped = rows.map((row) =>
+    row.id === passedAssignmentId ? { ...row, status: "passed" } : row
+  );
+  return mapped.some((row) => {
+    if (row.id === passedAssignmentId) return false;
+    const status = row.status || "";
+    if (status === "passed") return false;
+    if (OPEN_TRAINING.has(status)) return true;
+    if (status === "failed" || status === "expired") {
+      const covered = mapped.some(
+        (other) =>
+          other.id !== row.id &&
+          !!other.sopId &&
+          other.sopId === row.sopId &&
+          (other.status === "passed" || OPEN_TRAINING.has(other.status || ""))
+      );
+      return !covered;
+    }
+    return true;
+  });
+}
+
 /**
  * When training assignment status changes, mirror employee lifecycle stage.
  */
@@ -561,32 +719,54 @@ export const onTrainingAssignmentUpdated = onDocumentUpdated(
     } else if (status === "assessment_pending") {
       patch = { lifecycleStage: "exam", lifecycleProgress: 84, status: "active", updatedAt: now };
     } else if (status === "passed") {
-      patch = {
-        lifecycleStage: after.certificateId ? "certified" : "passed",
-        lifecycleProgress: after.certificateId ? 96 : 90,
-        status: "active",
-        updatedAt: now,
-      };
+      const allAssign = await db
+        .collection("training_assignments")
+        .where("employeeId", "==", employeeId)
+        .get();
+      const rows = allAssign.docs.map((d) => {
+        const data = d.data();
+        return {
+          id: d.id,
+          sopId: data.sopId as string | undefined,
+          status: data.status as string | undefined,
+        };
+      });
+      const outstanding = trainingStillOutstanding(rows, event.params.assignmentId);
+      patch = outstanding
+        ? { lifecycleStage: "exam", lifecycleProgress: 84, status: "active", updatedAt: now }
+        : {
+            lifecycleStage: after.certificateId ? "certified" : "passed",
+            lifecycleProgress: after.certificateId ? 96 : 90,
+            status: "active",
+            updatedAt: now,
+          };
     }
 
     if (!patch) return;
-    await empRef.set(patch, { merge: true });
+    const currentStage = empSnap.data()?.lifecycleStage as string | undefined;
+    const currentIdx = currentStage ? LIFECYCLE_INDEX[currentStage] : undefined;
+    const targetIdx = LIFECYCLE_INDEX[String(patch.lifecycleStage)];
+    const wouldRegress =
+      currentIdx !== undefined && targetIdx !== undefined && targetIdx < currentIdx;
+    if (!wouldRegress) {
+      await empRef.set(patch, { merge: true });
 
-    const levId = id("lev");
-    await db.collection("lifecycle_events").doc(levId).set({
-      id: levId,
-      employeeId,
-      stage: patch.lifecycleStage,
-      title: String(patch.lifecycleStage),
-      description: `Auto-synced from training assignment (${status})`,
-      status: "completed",
-      actorId: "system",
-      actorName: "Cloud Function",
-      actorRole: "super_admin",
-      completedAt: now,
-      createdAt: now,
-      metadata: { assignmentId: event.params.assignmentId },
-    });
+      const levId = id("lev");
+      await db.collection("lifecycle_events").doc(levId).set({
+        id: levId,
+        employeeId,
+        stage: patch.lifecycleStage,
+        title: String(patch.lifecycleStage),
+        description: `Auto-synced from training assignment (${status})`,
+        status: "completed",
+        actorId: "system",
+        actorName: "Cloud Function",
+        actorRole: "super_admin",
+        completedAt: now,
+        createdAt: now,
+        metadata: { assignmentId: event.params.assignmentId },
+      });
+    }
 
     const userId = empSnap.data()?.userId;
     if (userId) {

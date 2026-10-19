@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useCallback, useEffect, useMemo, useState } from "react";
+import { use, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -89,7 +89,10 @@ export default function OjtAssignmentDetailPage({
     sopVersionChangeJustification: "",
   });
 
+  const refreshGen = useRef(0);
+
   const refresh = useCallback(async (opts?: { silent?: boolean }) => {
+    const gen = ++refreshGen.current;
     if (!opts?.silent) setLoading(true);
     try {
       const needsStaff = profile?.role && profile.role !== "employee";
@@ -99,6 +102,7 @@ export default function OjtAssignmentDetailPage({
         needsStaff ? listOjtStaffOptions() : Promise.resolve([]),
         getOjtSettings(),
       ]);
+      if (gen !== refreshGen.current) return;
       setRow(asg);
       setCriteria(crit.filter((c) => c.isActive));
       setUsers(staff);
@@ -120,7 +124,7 @@ export default function OjtAssignmentDetailPage({
         });
         setScores(
           crit.filter((c) => c.isActive).map((c) => {
-            const existing = asg.evaluation?.criteria.find((s) => s.criterionId === c.id);
+            const existing = asg.evaluation?.criteria?.find((s) => s.criterionId === c.id);
             return (
               existing || {
                 criterionId: c.id,
@@ -133,9 +137,10 @@ export default function OjtAssignmentDetailPage({
         );
       }
     } catch (err) {
+      if (gen !== refreshGen.current) return;
       toast.error(err instanceof Error ? err.message : "Failed to load OJT");
     } finally {
-      setLoading(false);
+      if (gen === refreshGen.current) setLoading(false);
     }
   }, [id, profile?.role]);
 

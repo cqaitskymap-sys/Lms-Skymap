@@ -39,6 +39,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { RequirePermission, Can } from "@/components/auth/require-permission";
 import { AdminDeleteButton } from "@/components/auth/admin-delete-button";
 import { escapeHtml, printHtml } from "@/lib/print";
+import { calendarDateToIso } from "@/lib/utils";
 import {
   Select,
   SelectContent,
@@ -105,14 +106,17 @@ function mergeJdRecords(...lists: JobDescription[][]): JobDescription[] {
   for (const list of lists) {
     for (const row of list) byId.set(row.id, row);
   }
-  return [...byId.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  return [...byId.values()].sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
 }
 
 function formatDate(value?: string): string {
   if (!value) return "—";
-  const d = new Date(value);
+  const match = /^(\d{4})-(\d{2})-(\d{2})(?:T(?:00|12):00:00(?:\.\d+)?Z)?$/.exec(value.trim());
+  const d = match
+    ? new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 12))
+    : new Date(value);
   if (Number.isNaN(d.getTime())) return "—";
-  return d.toLocaleDateString("en-GB");
+  return d.toLocaleDateString("en-GB", match ? { timeZone: "UTC" } : undefined);
 }
 
 function statusBadgeVariant(status: JobDescription["status"]) {
@@ -317,8 +321,7 @@ function JdPageInner() {
           POST_HANDOVER_STAGES.includes(
             e.lifecycleStage as (typeof POST_HANDOVER_STAGES)[number]
           ) &&
-          !employeesWithJd.has(e.id) &&
-          !e.jdId
+          !employeesWithJd.has(e.id)
       ),
     [scopedEmployees, employeesWithJd]
   );
@@ -460,9 +463,9 @@ function JdPageInner() {
         department: departmentLabel(departments, departmentId) || undefined,
       });
       setResponsibilities(
-        draft.responsibilities.map((r, i) => `${i + 1}. ${r}`).join("\n")
+        (draft.responsibilities || []).map((r, i) => `${i + 1}. ${r}`).join("\n")
       );
-      setQualifications(draft.qualifications.join("\n"));
+      setQualifications((draft.qualifications || []).join("\n"));
       toast.success(`JD draft filled (${model}) — review before saving`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "AI draft failed");
@@ -635,7 +638,7 @@ function JdPageInner() {
         skills: [] as string[],
         experience: experience.trim(),
         supersedesNo: supersedesNo.trim(),
-        effectiveFrom: effectiveParsed.toISOString(),
+        effectiveFrom: calendarDateToIso(effectiveFrom),
         absenceHandoverEmployeeId: handoverEmp.id,
         absenceHandoverName: handoverName,
         ...(handoverUid ? { absenceHandoverUserId: handoverUid } : {}),
@@ -813,7 +816,7 @@ function JdPageInner() {
     const joiningDate = formatDate(emp?.dateOfJoining);
     const effectiveDate = formatDate(record.effectiveFrom);
     const qualification =
-      record.qualifications.filter(Boolean).join(", ") || "—";
+      (record.qualifications || []).filter(Boolean).join(", ") || "—";
     const experienceText = record.experience?.trim() || "—";
     const reportingTo =
       record.reportingTo || emp?.reportingManagerName || "—";
@@ -1614,8 +1617,12 @@ function JdPageInner() {
               </div>
             ) : visibleRecords.length === 0 ? (
               <div className="py-8 text-center text-sm text-muted-foreground">
-                <p>No Job Descriptions yet.</p>
-                {canWrite && (
+                <p>
+                  {records.length === 0
+                    ? "No Job Descriptions yet."
+                    : "No Job Descriptions match this view."}
+                </p>
+                {canWrite && records.length === 0 && (
                   <p className="mt-1">
                     Select a handed-over employee above to create their JD.
                   </p>

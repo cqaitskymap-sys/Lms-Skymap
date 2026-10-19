@@ -167,14 +167,12 @@ service cloud.firestore {
         && request.resource.data.role in ['employee']
         && request.resource.data.isActive == true;
 
-      // Profile fields only. Role, isActive, and department changes go through the Admin SDK.
-      allow update: if (isOwner(userId) && onlyUpdating([
+      // Profile fields only. Role, isActive, department, and mustChangePassword
+      // go through the Admin SDK (password change is verified server-side).
+      allow update: if isOwner(userId) && onlyUpdating([
           'displayName', 'phone', 'photoURL', 'digitalSignatureUrl',
           'updatedAt', 'lastLoginAt', 'lastLoginIp'
-        ]))
-        || (isOwner(userId)
-          && onlyUpdating(['mustChangePassword', 'passwordChangedAt', 'updatedAt'])
-          && request.resource.data.mustChangePassword == false);
+        ]);
 
       allow delete: if isSuperAdmin();
     }

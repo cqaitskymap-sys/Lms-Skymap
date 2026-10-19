@@ -2,7 +2,10 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { adminDb, isAdminConfigured } from "@/lib/firebase/admin";
 import { COLLECTIONS } from "@/lib/firebase/client";
-import { resolveLoginSchema } from "@/lib/auth/onboarding-schemas";
+import {
+  loginEmailFromEmployeeCode,
+  resolveLoginSchema,
+} from "@/lib/auth/onboarding-schemas";
 
 function looksLikeEmail(value: string) {
   return value.includes("@") && value.includes(".");
@@ -87,18 +90,24 @@ export async function POST(request: NextRequest) {
           { status: 403 }
         );
       }
+      let email = loginEmailFromEmployeeCode(code);
       if (e.userId) {
         const userSnap = await adminDb.collection(COLLECTIONS.users).doc(e.userId).get();
-        if (userSnap.exists && userSnap.data()?.isActive === false) {
-          return NextResponse.json(
-            { success: false, error: "Account is deactivated. Contact HR." },
-            { status: 403 }
-          );
+        if (userSnap.exists) {
+          const user = userSnap.data() || {};
+          if (user.isActive === false) {
+            return NextResponse.json(
+              { success: false, error: "Account is deactivated. Contact HR." },
+              { status: 403 }
+            );
+          }
+          const loginEmail = String(user.email || "").trim().toLowerCase();
+          if (loginEmail) email = loginEmail;
         }
       }
       return NextResponse.json({
         success: true,
-        data: { email: String(e.email).toLowerCase(), resolved: true },
+        data: { email, resolved: true },
       });
     }
   } catch (err) {

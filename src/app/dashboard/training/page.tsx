@@ -143,7 +143,7 @@ export default function TrainingPage() {
     }
     const departmentId =
       employees.find((e) => e.id === selectedEmployees[0])?.departmentId ||
-      sop.departmentIds[0] ||
+      sop.departmentIds?.[0] ||
       "";
     if (!departmentId) {
       toast.error("Department missing on employee/SOP");

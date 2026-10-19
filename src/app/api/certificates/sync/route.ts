@@ -57,11 +57,15 @@ export async function POST(request: NextRequest) {
     });
   }
 
-  return NextResponse.json({
-    success: true,
-    issuedCount: 0,
-    certificates: [] as Certificate[],
-    skippedAttemptIds: [] as string[],
-    errors: [{ attemptId: latest.id, error: result.error }],
-  });
+  return NextResponse.json(
+    {
+      success: false,
+      error: result.error,
+      issuedCount: 0,
+      certificates: [] as Certificate[],
+      skippedAttemptIds: [] as string[],
+      errors: [{ attemptId: latest.id, error: result.error }],
+    },
+    { status: result.status }
+  );
 }

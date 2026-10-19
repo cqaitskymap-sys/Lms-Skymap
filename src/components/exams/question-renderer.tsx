@@ -34,12 +34,15 @@ export function QuestionRenderer({
   review,
 }: QuestionRendererProps) {
   const multi = question.type === "multi_select";
+  const options = question.options || [];
+  const correctIds = question.correctOptionIds || [];
+  const chosen = selected || [];
 
   const toggle = (oid: string) => {
     if (disabled) return;
     if (multi) {
       onChange(
-        selected.includes(oid) ? selected.filter((x) => x !== oid) : [...selected, oid]
+        chosen.includes(oid) ? chosen.filter((x) => x !== oid) : [...chosen, oid]
       );
     } else {
       onChange([oid]);
@@ -89,10 +92,10 @@ export function QuestionRenderer({
         )}
 
         <div className="space-y-2">
-          {question.options.map((o) => {
-            const isSelected = selected.includes(o.id);
-            const isCorrect = question.correctOptionIds.includes(o.id);
-            const showReview = review && question.correctOptionIds.length > 0;
+          {options.map((o) => {
+            const isSelected = chosen.includes(o.id);
+            const isCorrect = correctIds.includes(o.id);
+            const showReview = review && correctIds.length > 0;
 
             return (
               <label

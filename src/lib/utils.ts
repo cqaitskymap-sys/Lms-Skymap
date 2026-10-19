@@ -5,17 +5,35 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+const CALENDAR_DAY =
+  /^(\d{4})-(\d{2})-(\d{2})(?:T(?:00|12):00:00(?:\.\d+)?Z)?$/;
+
+function calendarParts(dateStr: string): { y: number; m: number; d: number } | null {
+  const match = CALENDAR_DAY.exec(dateStr.trim());
+  if (!match) return null;
+  const y = Number(match[1]);
+  const m = Number(match[2]);
+  const d = Number(match[3]);
+  const probe = new Date(Date.UTC(y, m - 1, d));
+  if (
+    probe.getUTCFullYear() !== y ||
+    probe.getUTCMonth() !== m - 1 ||
+    probe.getUTCDate() !== d
+  ) {
+    return null;
+  }
+  return { y, m, d };
+}
+
 export function localDayBound(dateStr: string, endOfDay: boolean): number {
-  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(dateStr.trim());
-  if (m) {
-    const y = Number(m[1]);
-    const mo = Number(m[2]) - 1;
-    const d = Number(m[3]);
+  const parts = calendarParts(dateStr);
+  if (parts) {
     return endOfDay
-      ? new Date(y, mo, d, 23, 59, 59, 999).getTime()
-      : new Date(y, mo, d, 0, 0, 0, 0).getTime();
+      ? new Date(parts.y, parts.m - 1, parts.d, 23, 59, 59, 999).getTime()
+      : new Date(parts.y, parts.m - 1, parts.d, 0, 0, 0, 0).getTime();
   }
   const parsed = new Date(dateStr);
+  if (Number.isNaN(parsed.getTime())) return Number.NaN;
   if (endOfDay) parsed.setHours(23, 59, 59, 999);
   else parsed.setHours(0, 0, 0, 0);
   return parsed.getTime();
@@ -44,15 +62,57 @@ export function reviewDateFromEffective(effective: string): string {
   return `${y}-${m}-${d}`;
 }
 
+/**
+ * Store a date-only value at noon UTC so the calendar day does not shift by timezone.
+ * Full timestamps are left unchanged — rewriting them from the UTC date prefix
+ * moves the day for instants that fall on the next local calendar day.
+ */
+export function calendarDateToIso(dateStr: string): string {
+  const trimmed = dateStr.trim();
+  const parts = calendarParts(trimmed);
+  if (parts) {
+    const mm = String(parts.m).padStart(2, "0");
+    const dd = String(parts.d).padStart(2, "0");
+    return `${parts.y}-${mm}-${dd}T12:00:00.000Z`;
+  }
+  if (CALENDAR_DAY.test(trimmed)) {
+    throw new Error("Invalid date");
+  }
+  const parsed = new Date(trimmed);
+  if (Number.isNaN(parsed.getTime())) {
+    throw new Error("Invalid date");
+  }
+  return parsed.toISOString();
+}
+
+const CALENDAR_DATE = /^(\d{4})-(\d{2})-(\d{2})(?:T(?:00|12):00:00(?:\.\d+)?Z)?$/;
+
 export function formatDate(date: string | Date | undefined, opts?: Intl.DateTimeFormatOptions) {
   if (!date) return "—";
+  if (typeof date === "string") {
+    const match = CALENDAR_DATE.exec(date.trim());
+    if (match) {
+      const stable = new Date(
+        Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 12)
+      );
+      return stable.toLocaleDateString("en-IN", {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+        ...opts,
+        timeZone: "UTC",
+      });
+    }
+  }
   const d = typeof date === "string" ? new Date(date) : date;
+  if (Number.isNaN(d.getTime())) return "—";
   return d.toLocaleDateString("en-IN", opts ?? { day: "2-digit", month: "short", year: "numeric" });
 }
 
 export function formatDateTime(date: string | Date | undefined) {
   if (!date) return "—";
   const d = typeof date === "string" ? new Date(date) : date;
+  if (Number.isNaN(d.getTime())) return "—";
   return d.toLocaleString("en-IN", {
     day: "2-digit",
     month: "short",

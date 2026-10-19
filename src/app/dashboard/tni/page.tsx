@@ -345,7 +345,7 @@ function TniPageInner() {
     if (linked) {
       setJdId(linked.id);
       setJobTitle(linked.title);
-      setResponsibilities(linked.responsibilities.join("\n"));
+      setResponsibilities((linked.responsibilities || []).join("\n"));
     } else if (emp.designation) {
       setJobTitle(emp.designation);
       setJdId("");
@@ -1272,8 +1272,12 @@ function TniPageInner() {
               </div>
             ) : visibleRecords.length === 0 ? (
               <div className="py-8 text-center text-sm text-muted-foreground">
-                <p>No TNI records yet.</p>
-                {canWrite && (
+                <p>
+                  {records.length === 0
+                    ? "No TNI records yet."
+                    : "No TNI records match this view."}
+                </p>
+                {canWrite && records.length === 0 && (
                   <p className="mt-1">
                     Approve a JD first, then create TNI for handed-over employees.
                   </p>

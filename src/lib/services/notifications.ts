@@ -191,6 +191,8 @@ export async function createNotification(params: {
   link?: string;
   actorId: string;
   metadata?: Record<string, string>;
+  /** Stable id so a repeated event does not create a second inbox row. */
+  id?: string;
 }): Promise<Notification | null> {
   const userId = (params.userId || "").trim();
   if (!userId) {
@@ -199,7 +201,15 @@ export async function createNotification(params: {
   }
 
   remoteNotificationCache.delete(userId);
-  const id = generateId("notif");
+  const id = params.id || generateId("notif");
+  if (params.id && (preferTrainingLocal() || isDemoMode())) {
+    const existing = readTrainingStore().notifications.find((row) => row.id === id);
+    if (existing) return existing;
+  }
+  if (params.id && !(preferTrainingLocal() || isDemoMode())) {
+    const existing = await getDoc(doc(db, COLLECTIONS.notifications, id));
+    if (existing.exists()) return { id: existing.id, ...existing.data() } as Notification;
+  }
   const now = nowISO();
   const notification: Notification = {
     id,

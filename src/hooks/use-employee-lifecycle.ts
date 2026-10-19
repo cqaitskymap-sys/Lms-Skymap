@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   getEmployeeLifecycle,
   listEmployeesForLifecycle,
@@ -15,23 +15,30 @@ export function useEmployeeLifecycle(employeeId: string | undefined) {
   const [approvals, setApprovals] = useState<LifecycleApproval[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const requestGen = useRef(0);
 
   const refresh = useCallback(async () => {
-    if (!employeeId) return;
+    const gen = ++requestGen.current;
+    if (!employeeId) {
+      if (gen === requestGen.current) setLoading(false);
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
       const data = await getEmployeeLifecycle(employeeId);
+      if (gen !== requestGen.current) return;
       setEmployee(data.employee);
       setEvents(data.events);
       setApprovals(data.approvals);
     } catch (err) {
+      if (gen !== requestGen.current) return;
       setError(err instanceof Error ? err.message : "Failed to load employee");
       setEmployee(null);
       setEvents([]);
       setApprovals([]);
     } finally {
-      setLoading(false);
+      if (gen === requestGen.current) setLoading(false);
     }
   }, [employeeId]);
 

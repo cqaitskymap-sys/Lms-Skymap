@@ -26,6 +26,8 @@ test("QA, Production, and HR catalogs stay on their own departments", () => {
   );
   assert.equal(departmentHasResponsibilityCatalog({ name: "Quality Control", code: "QC" }), false);
   assert.equal(departmentHasResponsibilityCatalog({ name: "Packaging", code: "PKG" }), false);
+  assert.equal(departmentHasResponsibilityCatalog({ name: "QA Microbiology", code: "QAM" }), false);
+  assert.equal(departmentHasResponsibilityCatalog({ name: "Microbiology", code: "MICRO" }), false);
 });
 
 test("a production section shows only that section's designations", () => {

@@ -41,6 +41,7 @@ import {
   upsertDemoEmployee,
 } from "@/lib/lifecycle/demo-store";
 import { isDemoMode } from "@/lib/demo/data";
+import { calendarDateToIso } from "@/lib/utils";
 import {
   createNotification,
   notifyEmployee,
@@ -392,7 +393,7 @@ export async function markAttendance(
   }
 
   await updateDoc(doc(db, COLLECTIONS.trainingSessions, sessionId), {
-    attendance,
+    attendance: sanitizeForFirestore(attendance),
     status: "in_progress",
     updatedAt: now,
     updatedBy: actorId,
@@ -464,7 +465,8 @@ export async function completeTrainingSession(
     }
   };
 
-  for (const att of session.attendance.filter((a) => a.present)) {
+  const attendance = session.attendance || [];
+  for (const att of attendance.filter((a) => a.present && a.employeeId)) {
     await updateAssignmentStatus(att.employeeId, {
       status: "assessment_pending",
       trainingCompletedAt: now,
@@ -480,7 +482,7 @@ export async function completeTrainingSession(
     });
   }
 
-  for (const att of session.attendance.filter((a) => !a.present)) {
+  for (const att of attendance.filter((a) => !a.present && a.employeeId)) {
     await updateAssignmentStatus(att.employeeId, {
       status: "failed",
     });
@@ -777,6 +779,7 @@ export async function createJobDescription(
   );
   const jd: JobDescription = {
     ...data,
+    effectiveFrom: data.effectiveFrom ? calendarDateToIso(data.effectiveFrom) : data.effectiveFrom,
     id,
     jdNo,
     version,
@@ -915,6 +918,9 @@ export async function updateJobDescription(
     if (!Number.isInteger(safeUpdates.version) || safeUpdates.version < 0) {
       throw new Error("Revision no. must be a whole number");
     }
+  }
+  if (safeUpdates.effectiveFrom) {
+    safeUpdates.effectiveFrom = calendarDateToIso(safeUpdates.effectiveFrom);
   }
 
   const handoverChanged =
@@ -1568,9 +1574,10 @@ export async function updateAssignmentAfterAssessment(params: {
   score: number;
   attemptId: string;
   actorId: string;
+  status?: "passed" | "failed" | "assessment_pending" | "retraining";
 }): Promise<void> {
   const now = nowISO();
-  const status = params.passed ? "passed" : "failed";
+  const status = params.status ?? (params.passed ? "passed" : "failed");
 
   if (preferTrainingLocal()) {
     const store = readTrainingStore();

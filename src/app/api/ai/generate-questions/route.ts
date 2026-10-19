@@ -10,6 +10,7 @@ import {
   extractJsonObject,
   isOpenRouterConfigured,
   openRouterChat,
+  providerErrorStatus,
 } from "@/lib/ai/openrouter";
 import { normalizeQuestion, type QuestionDraftInput } from "@/lib/ai/normalize-question";
 
@@ -106,7 +107,7 @@ Generate ${count} questions now.`;
   if (!result.ok) {
     return NextResponse.json(
       { success: false, error: result.error },
-      { status: result.status && result.status >= 400 ? result.status : 502 }
+      { status: providerErrorStatus(result.status) }
     );
   }
 

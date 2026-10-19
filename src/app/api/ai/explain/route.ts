@@ -6,7 +6,7 @@ import {
   verifyAuthDetailed,
   requirePermission,
 } from "@/lib/rbac/middleware";
-import { isOpenRouterConfigured, openRouterChat } from "@/lib/ai/openrouter";
+import { isOpenRouterConfigured, openRouterChat, providerErrorStatus } from "@/lib/ai/openrouter";
 import type { Permission } from "@/lib/rbac/permissions";
 
 const bodySchema = z.object({
@@ -90,7 +90,7 @@ export async function POST(request: NextRequest) {
   if (!result.ok) {
     return NextResponse.json(
       { success: false, error: result.error },
-      { status: result.status && result.status >= 400 ? result.status : 502 }
+      { status: providerErrorStatus(result.status) }
     );
   }
 

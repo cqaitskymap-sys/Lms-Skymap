@@ -38,7 +38,7 @@ export function AnswerReview({ questions }: AnswerReviewProps) {
             key={q.questionId}
             question={q}
             index={i}
-            selected={q.selectedOptionIds}
+            selected={q.selectedOptionIds || []}
             onChange={() => undefined}
             disabled
             review

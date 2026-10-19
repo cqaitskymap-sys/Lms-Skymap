@@ -782,7 +782,11 @@ export async function createJdLifecycle(
   if (!employee) throw new Error("Employee not found");
 
   if (employee.jdId && employee.jdId !== jdId) {
-    throw new Error("Employee already linked to another Job Description");
+    const { getJobDescription } = await import("@/lib/services/training");
+    const linked = await getJobDescription(employee.jdId);
+    if (linked && linked.status !== "obsolete") {
+      throw new Error("Employee already linked to another Job Description");
+    }
   }
 
   const postHandover = [

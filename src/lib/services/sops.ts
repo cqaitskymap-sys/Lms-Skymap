@@ -32,7 +32,7 @@ import type {
   UserRole,
 } from "@/types";
 import { generateId, nowISO, addDays, stripUndefined } from "@/lib/services/helpers";
-import { reviewDateFromEffective } from "@/lib/utils";
+import { reviewDateFromEffective, calendarDateToIso } from "@/lib/utils";
 import { assertAllowedUpload, isTrainingEvidence, sanitizeStorageFileName } from "@/lib/uploads/safe-file";
 import { isDemoMode } from "@/lib/demo/data";
 import {
@@ -653,8 +653,12 @@ export async function createSopWithFiles(
     mimeType: primary.mimeType,
     status: "draft",
     attachments,
-    effectiveDate: data.effectiveDate,
-    reviewDate: data.reviewDate || (computedReview ? new Date(computedReview).toISOString() : addDays(now, 365)),
+    effectiveDate: data.effectiveDate ? calendarDateToIso(data.effectiveDate) : undefined,
+    reviewDate: data.reviewDate
+      ? calendarDateToIso(data.reviewDate)
+      : computedReview
+        ? calendarDateToIso(computedReview)
+        : addDays(now, 365),
     viewCount: 0,
     acknowledgementCount: 0,
     createdAt: now,
@@ -673,7 +677,7 @@ export async function createSopWithFiles(
     currentVersionNumber: parsedVersion.versionNumber,
     status: "draft",
     tags: data.tags,
-    effectiveDate: data.effectiveDate,
+    effectiveDate: version.effectiveDate,
     reviewDate: version.reviewDate,
     ownerUserId: actor.uid,
     viewCount: 0,
@@ -767,8 +771,8 @@ export async function reviseSopWithFiles(
     status: "draft",
     attachments,
     supersedesVersionId: current.id,
-    effectiveDate: params.effectiveDate,
-    reviewDate: params.reviewDate || addDays(now, 365),
+    effectiveDate: params.effectiveDate ? calendarDateToIso(params.effectiveDate) : undefined,
+    reviewDate: params.reviewDate ? calendarDateToIso(params.reviewDate) : addDays(now, 365),
     viewCount: 0,
     acknowledgementCount: 0,
     createdAt: now,
@@ -1117,8 +1121,16 @@ export async function bulkApproveSops(
         failed.push(`${item.sopNumber}: ${err instanceof Error ? err.message : "not assigned to you"}`);
         continue;
       }
-      const effectiveDate = item.effectiveDate || version.effectiveDate || now;
-      const reviewDate = item.reviewDate || version.reviewDate || addDays(now, 365);
+      const effectiveDate = item.effectiveDate
+        ? calendarDateToIso(item.effectiveDate)
+        : version.effectiveDate
+          ? calendarDateToIso(version.effectiveDate)
+          : now;
+      const reviewDate = item.reviewDate
+        ? calendarDateToIso(item.reviewDate)
+        : version.reviewDate
+          ? calendarDateToIso(version.reviewDate)
+          : addDays(now, 365);
       const isRevision = Boolean(version.supersedesVersionId);
       store.versions = store.versions.map((v) => {
         if (v.id === item.versionId) {
@@ -1342,10 +1354,8 @@ export async function updateSopDetails(
     mimeType = primary.mimeType;
   }
 
-  const effectiveDate = data.effectiveDate
-    ? new Date(data.effectiveDate).toISOString()
-    : undefined;
-  const reviewDate = data.reviewDate ? new Date(data.reviewDate).toISOString() : undefined;
+  const effectiveDate = data.effectiveDate ? calendarDateToIso(data.effectiveDate) : undefined;
+  const reviewDate = data.reviewDate ? calendarDateToIso(data.reviewDate) : undefined;
 
   if (await preferLocalSopStore()) {
     const store = readSopStore();
@@ -1451,8 +1461,16 @@ export async function approveSopVersionFull(
   const now = nowISO();
   let retrainCount = 0;
   const datesFor = (version: { effectiveDate?: string; reviewDate?: string }) => ({
-    effectiveDate: options?.effectiveDate || version.effectiveDate || now,
-    reviewDate: options?.reviewDate || version.reviewDate || addDays(now, 365),
+    effectiveDate: options?.effectiveDate
+      ? calendarDateToIso(options.effectiveDate)
+      : version.effectiveDate
+        ? calendarDateToIso(version.effectiveDate)
+        : now,
+    reviewDate: options?.reviewDate
+      ? calendarDateToIso(options.reviewDate)
+      : version.reviewDate
+        ? calendarDateToIso(version.reviewDate)
+        : addDays(now, 365),
   });
 
   if (await preferLocalSopStore()) {
@@ -1651,6 +1669,7 @@ function planSopRevisionRetrain(
         toUpdate.push({
           ...prev,
           sopVersionId: newVersionId,
+          status: prev.status === "failed" ? "retraining" : prev.status,
           isRetraining: true,
           triggeredBySopRevision: true,
           updatedAt: now,
@@ -1666,7 +1685,7 @@ function planSopRevisionRetrain(
     const prev = completed[0];
     if (!prev) continue;
     toCreate.push({
-      id: generateId("ta"),
+      id: `ta_${prev.employeeId}_${newVersionId}`,
       employeeId: prev.employeeId,
       sopId,
       sopVersionId: newVersionId,
@@ -1737,6 +1756,7 @@ export async function reassignTrainingOnRevision(
   for (const row of toUpdate) {
     await updateDoc(doc(db, COLLECTIONS.trainingAssignments, row.id), {
       sopVersionId: newVersionId,
+      status: row.status,
       isRetraining: true,
       triggeredBySopRevision: true,
       updatedAt: now,
@@ -1758,6 +1778,7 @@ export async function reassignTrainingOnRevision(
       const userId = empSnap.data()?.userId as string | undefined;
       if (userId) {
         await createNotification({
+          id: `notif_soprev_${newVersionId}_${userId}`,
           userId,
           type: "sop_revision",
           title: "SOP Revised — Retraining Required",

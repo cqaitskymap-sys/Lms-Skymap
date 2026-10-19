@@ -765,6 +765,8 @@ export interface AssessmentAttempt extends Timestamps {
   questions: AttemptQuestion[];
   /** Running answers map mirrored for autosave */
   answersDraft?: Record<string, string[]>;
+  /** Set when answers are sealed at submit so a retry cannot change them. */
+  answersLocked?: boolean;
   score?: number;
   maxScore?: number;
   percentage?: number;

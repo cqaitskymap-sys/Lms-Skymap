@@ -2,6 +2,7 @@
 const OPEN_ASSIGNMENT = new Set([
   "assigned",
   "in_progress",
+  "training_scheduled",
   "training_completed",
   "assessment_pending",
   "retraining",

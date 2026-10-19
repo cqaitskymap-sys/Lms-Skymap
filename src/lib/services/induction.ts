@@ -684,9 +684,16 @@ export async function completeInductionAssessment(params: {
   passed: boolean;
   actorId: string;
   employeeId: string;
+  /** When false, a failed exam stays open for another attempt. */
+  attemptsExhausted?: boolean;
 }): Promise<void> {
   const now = nowISO();
   const local = await preferLocal();
+  const status = params.passed
+    ? "passed"
+    : params.attemptsExhausted === false
+      ? "assessment_pending"
+      : "failed";
 
   if (local) {
     const store = readInductionStore();
@@ -694,7 +701,7 @@ export async function completeInductionAssessment(params: {
       a.id === params.assignmentId
         ? {
             ...a,
-            status: params.passed ? "passed" : "failed",
+            status,
             score: params.percentage,
             passed: params.passed,
             assessmentAttemptId: params.attemptId,
@@ -713,7 +720,7 @@ export async function completeInductionAssessment(params: {
   await updateDoc(
     doc(db, COLLECTIONS.inductionAssignments, params.assignmentId),
     stripUndefined({
-      status: params.passed ? "passed" : "failed",
+      status,
       score: params.percentage,
       passed: params.passed,
       assessmentAttemptId: params.attemptId,

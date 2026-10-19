@@ -845,11 +845,10 @@ function catalogForDepartment(dept: { name: string; code: string }): CatalogDepa
       const matcher = norm(raw);
       if (!matcher) return false;
       if (code === matcher || name === matcher) return true;
-      // Short codes must not match a later word. "In-Process QA" contains "qa"
-      // but is a different department from Quality Assurance.
-      if (matcher.length < 3) {
-        return name.startsWith(`${matcher} `) || code.startsWith(matcher);
-      }
+      // Short codes ("qa", "hr") match only the whole code or name. A prefix
+      // would treat QA Microbiology / QAM as Quality Assurance, and a later
+      // word would treat In-Process QA as Quality Assurance.
+      if (matcher.length < 3) return false;
       return name.includes(matcher);
     })
   );

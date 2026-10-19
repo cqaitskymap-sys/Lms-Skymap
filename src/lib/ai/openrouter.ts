@@ -31,6 +31,12 @@ export function isOpenRouterConfigured(): boolean {
   return Boolean(process.env.OPENROUTER_API_KEY?.trim());
 }
 
+/** Never forward a provider 401/403 — the app session is still valid. */
+export function providerErrorStatus(status?: number): number {
+  if (status === 429) return 429;
+  return 502;
+}
+
 export async function openRouterChat(
   options: OpenRouterChatOptions
 ): Promise<OpenRouterResult> {
@@ -74,10 +80,11 @@ export async function openRouterChat(
 
     const raw = await res.text();
     if (!res.ok) {
+      console.error("[openrouter]", res.status, raw.slice(0, 500));
       return {
         ok: false,
         status: res.status,
-        error: `OpenRouter error (${res.status}): ${raw.slice(0, 300)}`,
+        error: "The AI provider could not complete this request. Try again in a moment.",
       };
     }
 

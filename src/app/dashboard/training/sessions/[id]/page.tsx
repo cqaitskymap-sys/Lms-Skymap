@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useCallback, useEffect, useState } from "react";
+import { use, useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
@@ -37,8 +37,10 @@ export default function TrainingSessionPage({
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const refreshGen = useRef(0);
 
   const refresh = useCallback(async () => {
+    const gen = ++refreshGen.current;
     setLoading(true);
     setError(null);
     try {
@@ -60,6 +62,7 @@ export default function TrainingSessionPage({
         getTrainingSession(id),
         linkedPromise,
       ]);
+      if (gen !== refreshGen.current) return;
       setSession(s);
 
       const rosterIds = new Set<string>();
@@ -75,6 +78,7 @@ export default function TrainingSessionPage({
         );
         emps = fetched.filter((e): e is Employee => Boolean(e));
       }
+      if (gen !== refreshGen.current) return;
       setEmployees(emps);
 
       if (s) {
@@ -91,10 +95,11 @@ export default function TrainingSessionPage({
         setNotes(s.notes || "");
       }
     } catch (err) {
+      if (gen !== refreshGen.current) return;
       setError(err instanceof Error ? err.message : "Failed to load session");
       setSession(null);
     } finally {
-      setLoading(false);
+      if (gen === refreshGen.current) setLoading(false);
     }
   }, [id, profile?.role, profile?.employeeId]);
 
@@ -112,15 +117,13 @@ export default function TrainingSessionPage({
 
   const togglePresent = (employeeId: string) => {
     setAttendance((prev) =>
-      prev.map((a) =>
-        a.employeeId === employeeId
-          ? {
-              ...a,
-              present: !a.present,
-              signedAt: !a.present ? new Date().toISOString() : undefined,
-            }
-          : a
-      )
+      prev.map((a) => {
+        if (a.employeeId !== employeeId) return a;
+        const next = { ...a, present: !a.present };
+        if (!a.present) next.signedAt = new Date().toISOString();
+        else delete next.signedAt;
+        return next;
+      })
     );
   };
 

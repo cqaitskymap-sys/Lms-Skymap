@@ -80,9 +80,12 @@ export function useSopDetail(sopId: string | undefined) {
   const [acknowledgements, setAcknowledgements] = useState<SopAcknowledgement[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const requestGen = useRef(0);
 
   const refresh = useCallback(async () => {
+    const gen = ++requestGen.current;
     if (!sopId || authLoading || !profile?.role) {
+      if (gen !== requestGen.current) return;
       if (!sopId || (!authLoading && !profile)) setLoading(false);
       return;
     }
@@ -104,12 +107,14 @@ export function useSopDetail(sopId: string | undefined) {
         role: profile.role,
         userId: profile.uid,
       });
+      if (gen !== requestGen.current) return;
       setSop(data.sop);
       setVersions(data.versions);
       setCurrentVersion(data.currentVersion);
       setViews(data.views);
       setAcknowledgements(data.acknowledgements);
     } catch (err) {
+      if (gen !== requestGen.current) return;
       setError(err instanceof Error ? err.message : "Failed to load SOP");
       setSop(null);
       setVersions([]);
@@ -117,7 +122,7 @@ export function useSopDetail(sopId: string | undefined) {
       setViews([]);
       setAcknowledgements([]);
     } finally {
-      setLoading(false);
+      if (gen === requestGen.current) setLoading(false);
     }
   }, [sopId, authLoading, profile]);
 

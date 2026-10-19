@@ -1981,7 +1981,8 @@ export async function deleteOjtAttachment(
 ): Promise<OjtAssignment> {
   const assignment = await getOjtAssignment(assignmentId);
   if (!assignment) throw new Error("OJT assignment not found");
-  const att = assignment.attachments.find((a) => a.id === attachmentId);
+  const attachments = assignment.attachments || [];
+  const att = attachments.find((a) => a.id === attachmentId);
   if (!att) throw new Error("Attachment not found");
   if (!preferOjtLocal() && !isDemoMode() && att.storagePath && !att.storagePath.startsWith("demo/")) {
     try {
@@ -1992,7 +1993,7 @@ export async function deleteOjtAttachment(
   }
   const next: OjtAssignment = {
     ...assignment,
-    attachments: assignment.attachments.filter((a) => a.id !== attachmentId),
+    attachments: attachments.filter((a) => a.id !== attachmentId),
     updatedAt: nowISO(),
     updatedBy: actor.uid,
   };

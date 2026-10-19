@@ -18,13 +18,7 @@ import { TRAINING_UPDATED_EVENT, notifyTrainingUpdated } from "@/lib/training/de
 import { NOTIFICATIONS_UPDATED_EVENT } from "@/lib/services/notifications";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-
-function formatDate(value?: string): string {
-  if (!value) return "—";
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return "—";
-  return d.toLocaleDateString("en-GB");
-}
+import { formatDate } from "@/lib/utils";
 
 type PendingRow =
   | { kind: "jd"; key: string; row: JdPendingSignoffRow }

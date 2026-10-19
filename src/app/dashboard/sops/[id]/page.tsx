@@ -130,7 +130,7 @@ export default function SopDetailPage({ params }: { params: Promise<{ id: string
     setEditNumber(sop.sopNumber);
     setEditTitle(sop.title);
     setEditCategory(sop.category);
-    setEditDepts(sop.departmentIds);
+    setEditDepts(sop.departmentIds || []);
     setEditVersion(editable.versionNumber);
     setEditSummary(editable.changeSummary || "");
     setEditEffective(isoDateInput(editable.effectiveDate || sop.effectiveDate));
@@ -228,7 +228,7 @@ export default function SopDetailPage({ params }: { params: Promise<{ id: string
     setEditNumber(source.sopNumber);
     setEditTitle(source.title);
     setEditCategory(source.category);
-    setEditDepts(source.departmentIds);
+    setEditDepts(source.departmentIds || []);
     setEditVersion(version.versionNumber);
     setEditSummary(version.changeSummary || "");
     setEditEffective(isoDateInput(version.effectiveDate || source.effectiveDate));

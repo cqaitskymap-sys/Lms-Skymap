@@ -12,7 +12,7 @@ import {
   query,
 } from "firebase/firestore/lite";
 import { db, COLLECTIONS } from "@/lib/firebase/client";
-import { isoInLocalDateRange } from "@/lib/utils";
+import { isoInLocalDateRange, localDayBound } from "@/lib/utils";
 import { listAuditLogs } from "@/lib/services/audit-logs";
 import { listCertificates } from "@/lib/services/certificates";
 import { listDepartments } from "@/lib/services/departments";
@@ -305,7 +305,7 @@ function isOverdue(a: TrainingAssignment) {
   if (!a.dueDate) return false;
   // Graded outcomes are complete — not overdue.
   if (a.status === "passed" || a.status === "failed") return false;
-  return new Date(a.dueDate) < today();
+  return localDayBound(a.dueDate, true) < Date.now();
 }
 
 function catalogMeta(type: ReportType) {
@@ -653,7 +653,7 @@ function buildOverdue(filters: ReportFilters): ReportDataset {
       daysOverdue: a.dueDate
         ? Math.max(
             0,
-            Math.floor((today().getTime() - new Date(a.dueDate).getTime()) / 86400000)
+            Math.floor((Date.now() - localDayBound(a.dueDate, true)) / 86400000)
           )
         : 0,
       trainer: trainerName(a.trainerId),
@@ -730,7 +730,7 @@ function buildUpcomingExpiry(filters: ReportFilters): ReportDataset {
       type: "SOP review",
       reference: s.sopNumber,
       subject: s.title,
-      department: s.departmentIds.map(deptCode).join(", "),
+      department: (s.departmentIds || []).map(deptCode).join(", "),
       item: s.sopNumber,
       expiry: formatDate(s.reviewDate),
       daysLeft: Math.floor(
@@ -877,16 +877,17 @@ function buildSopCoverage(filters: ReportFilters): ReportDataset {
     .filter((s) =>
       filters.departmentId === "all"
         ? true
-        : s.departmentIds.includes(filters.departmentId)
+        : (s.departmentIds || []).includes(filters.departmentId)
     )
     .filter((s) => matchesSearch(`${s.sopNumber} ${s.title}`, filters.search))
     .map((s) => {
+      const departmentIds = s.departmentIds || [];
       const related = asg.filter((a) => a.sopId === s.id);
       const trained = related.filter((a) => a.status === "passed").length;
       const required = Math.max(
         related.length,
         allEmployees().filter((e) =>
-          Boolean(e.departmentId && s.departmentIds.includes(e.departmentId))
+          Boolean(e.departmentId && departmentIds.includes(e.departmentId))
         ).length
       );
       const coverage = required ? Math.round((trained / required) * 100) : 0;
@@ -894,7 +895,7 @@ function buildSopCoverage(filters: ReportFilters): ReportDataset {
         sop: s.sopNumber,
         title: s.title,
         status: s.status,
-        departments: s.departmentIds.map(deptCode).join(", "),
+        departments: departmentIds.map(deptCode).join(", "),
         assigned: related.length,
         trained,
         required,
