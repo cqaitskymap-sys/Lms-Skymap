@@ -1,3 +1,4 @@
+import { IPQA_SECTIONS } from "@/lib/jd/ipqa-responsibilities";
 import { PRODUCTION_SECTIONS } from "@/lib/jd/production-responsibilities";
 import { QA_SECTIONS } from "@/lib/jd/qa-responsibilities";
 
@@ -737,6 +738,11 @@ const RESPONSIBILITY_CATALOG: CatalogDepartment[] = [
     id: "production",
     matchers: ["production", "prd"],
     sections: PRODUCTION_SECTIONS,
+  },
+  {
+    id: "ipqa",
+    matchers: ["ipqa", "in process qa"],
+    sections: IPQA_SECTIONS,
   },
 ];
 

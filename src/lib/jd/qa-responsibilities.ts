@@ -219,6 +219,10 @@ export const QA_SECTIONS: { name: string; designations: QaRole[] }[] = [
         "Responsible for execution of all calibration activities as per the scheduled frequencies of the calibration planner.",
         "Responsible for handling of the equipment and instrument list of all the respective departments as per procedure.",
         "Responsible for master of documents, i.e. validation/qualification protocols, SOP, SMF, VMP and Quality Manual, as per the document and data control SOP.",
+        "Responsible for review & updation of Standard Operating Procedures.",
+      ]),
+      role("qa-validation-executive", executive, "Validation", [
+        "Responsible for review & updation of Standard Operating Procedures.",
       ]),
       role("qa-validation-manager", manager, "Validation", [
         "All CDSCO (WHO), FDA and client audits, including preparation and submission of corrective and preventive action (CAPA) to the auditing body, until final closure.",

@@ -7,7 +7,7 @@ interface DeveloperCreditProps {
 export function DeveloperCredit({ className }: DeveloperCreditProps) {
   return (
     <p className={cn("text-[11px] leading-relaxed tracking-wide", className)}>
-      Developed by <span className="font-medium">Satyajit </span> from Odisha
+      Developed by <span className="font-medium">Satyajit Patri</span> from Odisha
     </p>
   );
 }
