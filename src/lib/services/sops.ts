@@ -1770,7 +1770,10 @@ export async function reassignTrainingOnRevision(
   }
 
   for (const assignment of toCreate) {
-    await setDoc(doc(db, COLLECTIONS.trainingAssignments, assignment.id), stripUndefined(assignment));
+    const assignmentRef = doc(db, COLLECTIONS.trainingAssignments, assignment.id);
+    const existing = await getDoc(assignmentRef);
+    if (existing.exists()) continue;
+    await setDoc(assignmentRef, stripUndefined(assignment));
   }
 
   const employeeIds = Array.from(

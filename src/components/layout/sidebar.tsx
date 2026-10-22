@@ -149,7 +149,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
         <p className="text-[11px] font-medium uppercase tracking-[0.16em] text-sidebar-foreground/40">
           GMP / GDP Compliant
         </p>
-        <DeveloperCredit className="mt-1.5 text-sidebar-foreground/35" />
+        <DeveloperCredit className="mt-1.5 text-sidebar-foreground/70" />
       </div>
     </div>
   );

@@ -7,8 +7,6 @@ import {
   updateDoc,
   query,
   where,
-  orderBy,
-  limit,
   type QueryConstraint,
 } from "firebase/firestore/lite";
 import { auth, db, COLLECTIONS } from "@/lib/firebase/client";
@@ -42,6 +40,56 @@ export async function getEmployee(id: string): Promise<Employee | null> {
   const snap = await getDoc(doc(db, COLLECTIONS.employees, id));
   if (!snap.exists()) return null;
   return { id: snap.id, ...snap.data() } as Employee;
+}
+
+/** Fields needed to print a JD header. Safe to show to anyone who can open Job Descriptions. */
+export interface EmployeeCard {
+  id: string;
+  firstName: string;
+  lastName: string;
+  employeeCode: string;
+  dateOfJoining: string;
+  designation: string;
+  departmentId?: string;
+  departmentName?: string;
+  reportingManagerId?: string;
+  reportingManagerName?: string;
+}
+
+/** Load name, code, joining date and reporting manager even when the client employee query missed the record. */
+export async function fetchEmployeeCards(ids: string[]): Promise<EmployeeCard[]> {
+  const unique = [...new Set(ids.map((id) => id.trim()).filter(Boolean))].slice(0, 40);
+  if (!unique.length) return [];
+  if (isDemoMode()) {
+    return readLifecycleStore()
+      .employees.filter((row) => unique.includes(row.id))
+      .map((row) => ({
+        id: row.id,
+        firstName: row.firstName,
+        lastName: row.lastName,
+        employeeCode: row.employeeCode,
+        dateOfJoining: row.dateOfJoining,
+        designation: row.designation,
+        departmentId: row.departmentId,
+        departmentName: row.departmentName,
+        reportingManagerId: row.reportingManagerId,
+        reportingManagerName: row.reportingManagerName,
+      }));
+  }
+  const user = auth.currentUser;
+  if (!user) return [];
+  const token = await user.getIdToken();
+  const res = await fetch("/api/employees/cards", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ ids: unique }),
+  });
+  if (!res.ok) return [];
+  const json = (await res.json().catch(() => ({}))) as { employees?: EmployeeCard[] };
+  return Array.isArray(json.employees) ? json.employees : [];
 }
 
 export async function updateEmployee(
@@ -179,19 +227,24 @@ export async function listEmployees(params: {
   status?: string;
   search?: string;
 }): Promise<PaginatedResult<Employee>> {
+  const page = Math.max(1, params.page ?? 1);
   const pageSize = params.pageSize ?? 20;
-  const constraints: QueryConstraint[] = [orderBy("createdAt", "desc"), limit(pageSize)];
+  const constraints: QueryConstraint[] = [];
 
   if (params.departmentId) {
-    constraints.unshift(where("departmentId", "==", params.departmentId));
+    constraints.push(where("departmentId", "==", params.departmentId));
   }
   if (params.status) {
-    constraints.unshift(where("status", "==", params.status));
+    constraints.push(where("status", "==", params.status));
   }
 
-  const q = query(collection(db, COLLECTIONS.employees), ...constraints);
-  const snap = await getDocs(q);
+  const snap = await getDocs(
+    constraints.length
+      ? query(collection(db, COLLECTIONS.employees), ...constraints)
+      : collection(db, COLLECTIONS.employees)
+  );
   let data = snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Employee);
+  data.sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
 
   if (params.search) {
     const s = params.search.toLowerCase();
@@ -205,12 +258,14 @@ export async function listEmployees(params: {
     );
   }
 
+  const total = data.length;
+  const start = (page - 1) * pageSize;
   return {
-    data,
-    total: data.length,
-    page: params.page ?? 1,
+    data: data.slice(start, start + pageSize),
+    total,
+    page,
     pageSize,
-    totalPages: Math.ceil(data.length / pageSize) || 1,
+    totalPages: Math.ceil(total / pageSize) || 1,
   };
 }
 

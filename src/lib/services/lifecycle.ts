@@ -14,9 +14,6 @@ import {
   where,
   orderBy,
   limit,
-  startAfter,
-  type QueryDocumentSnapshot,
-  type DocumentData,
 } from "firebase/firestore/lite";
 import { db, COLLECTIONS } from "@/lib/firebase/client";
 import { auth } from "@/lib/firebase/client";
@@ -236,8 +233,6 @@ export async function deleteEmployeeLifecycle(employeeId: string): Promise<void>
   }
 }
 
-const EMPLOYEE_LIST_PAGE = 200;
-
 export type ListEmployeesOpts = {
   /** When set, fetch only this employee doc (safe for employee role). */
   employeeId?: string;
@@ -265,23 +260,12 @@ export async function listEmployeesForLifecycle(
     return [{ id: snap.id, ...snap.data() } as Employee];
   }
 
-  const all: Employee[] = [];
-  let cursor: QueryDocumentSnapshot<DocumentData> | undefined;
-
-  while (true) {
-    const base = [orderBy("createdAt", "desc"), limit(EMPLOYEE_LIST_PAGE)] as const;
-    const snap = cursor
-      ? await getDocs(
-          query(collection(db, COLLECTIONS.employees), ...base, startAfter(cursor))
-        )
-      : await getDocs(query(collection(db, COLLECTIONS.employees), ...base));
-    if (snap.empty) break;
-    all.push(...snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Employee));
-    if (snap.size < EMPLOYEE_LIST_PAGE) break;
-    cursor = snap.docs[snap.docs.length - 1];
-  }
-
-  return all;
+  // Do not orderBy(createdAt). Firestore hides documents that are missing that field,
+  // which dropped employees from JD, TNI, and print.
+  const snap = await getDocs(collection(db, COLLECTIONS.employees));
+  return snap.docs
+    .map((d) => ({ id: d.id, ...d.data() }) as Employee)
+    .sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
 }
 
 /** Create employee at lifecycle stage `created` and queue HR verification approval. */
@@ -1127,9 +1111,19 @@ export async function advanceToNext(
     case "exam":
       return markExamLifecycle(employeeId, actor);
     case "passed":
-      return markPassedLifecycle(employeeId, actor, 88);
+      return advanceLifecycle({
+        employeeId,
+        toStage: "passed",
+        actor,
+        description: "Marked passed by admin catch-up",
+      });
     case "certified":
-      return markCertifiedLifecycle(employeeId, generateId("cert"), actor);
+      return advanceLifecycle({
+        employeeId,
+        toStage: "certified",
+        actor,
+        description: "Marked certified by admin catch-up",
+      });
     case "qualified":
       return markQualifiedLifecycle(employeeId, actor);
     default:

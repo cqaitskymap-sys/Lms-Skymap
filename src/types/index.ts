@@ -387,6 +387,10 @@ export interface JobDescription extends Timestamps {
   /** Document number shown on the JD, e.g. JD-QA-001 */
   jdNo?: string;
   employeeId: string;
+  /** Copied when the JD is saved so print still shows the person. */
+  employeeName?: string;
+  employeeCode?: string;
+  employeeDateOfJoining?: string;
   departmentId: string;
   /** Sub department entered when the JD is created. */
   subDepartment?: string;

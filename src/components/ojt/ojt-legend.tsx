@@ -20,7 +20,7 @@ export function OjtMatrixLegend() {
     <div className="space-y-2">
       <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
         <LegendSwatch className="bg-muted/40" label="blank" hint="Not chosen yet — click to assign" />
-        <LegendSwatch className="bg-emerald-500/15 text-emerald-700" label="✓" hint="This person needs this training" />
+        <LegendSwatch className="bg-emerald-500/15 text-emerald-700 dark:text-emerald-300" label="✓" hint="This person needs this training" />
         <LegendSwatch className="bg-muted text-muted-foreground" label="NA" hint="Not needed for this person" />
       </div>
       <p className="text-[11px] text-muted-foreground">
@@ -66,5 +66,5 @@ export const MATRIX_CELL_CLASS: Record<string, string> = {
   failed: "bg-red-500/15 text-red-700 dark:text-red-300",
   retraining_required: "bg-orange-500/15 text-orange-800 dark:text-orange-200",
   overdue: "bg-red-500/20 text-red-800 dark:text-red-200",
-  cancelled: "bg-slate-200/60 text-slate-500",
+  cancelled: "bg-slate-200/60 text-slate-600 dark:bg-slate-700/50 dark:text-slate-300",
 };

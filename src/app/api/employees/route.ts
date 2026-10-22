@@ -13,12 +13,10 @@ export async function GET(request: NextRequest) {
   const denied = requirePermission(verified.auth, "employees:read");
   if (denied) return denied;
 
-  const snap = await adminDb
-    .collection(COLLECTIONS.employees)
-    .orderBy("createdAt", "desc")
-    .limit(500)
-    .get();
-  const data = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  const snap = await adminDb.collection(COLLECTIONS.employees).get();
+  const data = snap.docs
+    .map((d) => ({ id: d.id, ...d.data() }) as { id: string; createdAt?: string })
+    .sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
   return NextResponse.json({ success: true, data });
 }
 

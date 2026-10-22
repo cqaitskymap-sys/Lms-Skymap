@@ -61,14 +61,47 @@ async function getLockout(email: string): Promise<LoginLockout | null> {
   }
 }
 
-async function saveLockout(lock: LoginLockout): Promise<void> {
-  memoryLockouts.set(lock.id, lock);
-  if (!isAdminConfigured()) return;
-  try {
-    await adminDb.collection(COLLECTIONS.loginLockouts).doc(lock.id).set(lock, { merge: true });
-  } catch {
-    /* memory fallback already set */
-  }
+/** Firestore rejects undefined. Optional timestamps are omitted so the first failure still persists. */
+function lockoutForWrite(lock: LoginLockout): LoginLockout {
+  const next: LoginLockout = {
+    id: lock.id,
+    emailNormalized: lock.emailNormalized,
+    failedAttempts: lock.failedAttempts,
+    lockedUntil: lock.lockedUntil ?? null,
+    updatedAt: lock.updatedAt,
+  };
+  if (lock.lastFailedAt) next.lastFailedAt = lock.lastFailedAt;
+  if (lock.lastSuccessAt) next.lastSuccessAt = lock.lastSuccessAt;
+  return next;
+}
+
+function failureLock(id: string, email: string, existing: LoginLockout | null): LoginLockout {
+  const patch = computeLockoutAfterFailure(existing);
+  return lockoutForWrite({
+    id,
+    emailNormalized: normalizeEmail(email),
+    failedAttempts: patch.failedAttempts,
+    lockedUntil: patch.lockedUntil,
+    lastFailedAt: patch.lastFailedAt,
+    updatedAt: patch.updatedAt,
+    ...(existing?.lastSuccessAt ? { lastSuccessAt: existing.lastSuccessAt } : {}),
+  });
+}
+
+function lockoutResult(lock: LoginLockout): LockoutCheckResult {
+  const locked = isCurrentlyLocked(lock);
+  return {
+    allowed: !locked,
+    failedAttempts: lock.failedAttempts,
+    remainingAttempts: locked
+      ? 0
+      : Math.max(0, LOCKOUT_POLICY.maxFailedAttempts - lock.failedAttempts),
+    lockedUntil: lock.lockedUntil,
+    remainingMs: remainingLockMs(lock),
+    message: locked
+      ? `Account locked after ${LOCKOUT_POLICY.maxFailedAttempts} failed attempts. Try again later.`
+      : `Invalid credentials. ${Math.max(0, LOCKOUT_POLICY.maxFailedAttempts - lock.failedAttempts)} attempt(s) remaining.`,
+  };
 }
 
 export interface LockoutCheckResult {
@@ -106,41 +139,59 @@ export async function checkLoginAllowed(email: string): Promise<LockoutCheckResu
 
 export async function recordLoginFailure(email: string): Promise<LockoutCheckResult> {
   const id = lockoutDocId(email);
-  const existing = await getLockout(email);
-  const patch = computeLockoutAfterFailure(existing);
-  const lock: LoginLockout = {
-    id,
-    emailNormalized: normalizeEmail(email),
-    lastSuccessAt: existing?.lastSuccessAt,
-    ...patch,
-  };
-  await saveLockout(lock);
+  const startedAt = new Date().toISOString();
 
-  const locked = isCurrentlyLocked(lock);
-  return {
-    allowed: !locked,
-    failedAttempts: lock.failedAttempts,
-    remainingAttempts: Math.max(0, LOCKOUT_POLICY.maxFailedAttempts - lock.failedAttempts),
-    lockedUntil: lock.lockedUntil,
-    remainingMs: remainingLockMs(lock),
-    message: locked
-      ? `Account locked after ${LOCKOUT_POLICY.maxFailedAttempts} failed attempts. Try again later.`
-      : `Invalid credentials. ${Math.max(0, LOCKOUT_POLICY.maxFailedAttempts - lock.failedAttempts)} attempt(s) remaining.`,
-  };
+  if (!isAdminConfigured()) {
+    const lock = failureLock(id, email, memoryLockouts.get(id) ?? null);
+    memoryLockouts.set(id, lock);
+    return lockoutResult(lock);
+  }
+
+  const ref = adminDb.collection(COLLECTIONS.loginLockouts).doc(id);
+  let lock: LoginLockout | null = null;
+  try {
+    await adminDb.runTransaction(async (tx) => {
+      const snap = await tx.get(ref);
+      const existing = snap.exists ? ({ id: snap.id, ...snap.data() } as LoginLockout) : null;
+      if (existing?.lastSuccessAt && existing.lastSuccessAt > startedAt) {
+        lock = existing;
+        return;
+      }
+      const next = failureLock(id, email, existing);
+      lock = next;
+      tx.set(ref, next, { merge: true });
+    });
+  } catch {
+    lock = failureLock(id, email, memoryLockouts.get(id) ?? null);
+  }
+
+  const stored = lock ?? failureLock(id, email, null);
+  memoryLockouts.set(stored.id, stored);
+  return lockoutResult(stored);
 }
 
 export async function recordLoginSuccess(email: string): Promise<void> {
   const id = lockoutDocId(email);
   const now = new Date().toISOString();
-  const lock: LoginLockout = {
+  const lock = lockoutForWrite({
     id,
     emailNormalized: normalizeEmail(email),
     failedAttempts: 0,
     lockedUntil: null,
     lastSuccessAt: now,
     updatedAt: now,
-  };
-  await saveLockout(lock);
+  });
+  memoryLockouts.set(id, lock);
+  if (!isAdminConfigured()) return;
+
+  try {
+    const ref = adminDb.collection(COLLECTIONS.loginLockouts).doc(id);
+    await adminDb.runTransaction(async (tx) => {
+      tx.set(ref, lock, { merge: true });
+    });
+  } catch {
+    /* memory fallback already set */
+  }
 }
 
 export async function writeLoginAudit(params: {

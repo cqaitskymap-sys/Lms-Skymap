@@ -779,16 +779,6 @@ export async function getLeaderboard(examId: string, topN = 20): Promise<Leaderb
   }
 
   try {
-    const board = await getDoc(doc(db, COLLECTIONS.examLeaderboards, examId));
-    const cached = board.exists()
-      ? ((board.data().entries || []) as LeaderboardEntry[])
-      : [];
-    if (cached.length) return cached.slice(0, topN);
-  } catch (err) {
-    console.warn("[getLeaderboard] cache read failed:", err);
-  }
-
-  try {
     const res = await fetch(
       `/api/assessments/leaderboard?examId=${encodeURIComponent(examId)}&limit=${topN}`,
       { headers: await authHeaders() }
@@ -799,6 +789,16 @@ export async function getLeaderboard(examId: string, topN = 20): Promise<Leaderb
     }
   } catch (err) {
     console.warn("[getLeaderboard] api failed:", err);
+  }
+
+  try {
+    const board = await getDoc(doc(db, COLLECTIONS.examLeaderboards, examId));
+    const cached = board.exists()
+      ? ((board.data().entries || []) as LeaderboardEntry[])
+      : [];
+    if (cached.length) return cached.slice(0, topN);
+  } catch (err) {
+    console.warn("[getLeaderboard] cache read failed:", err);
   }
 
   return [];

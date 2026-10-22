@@ -182,11 +182,13 @@ export const onSopVersionApproved = onDocumentUpdated(
       affectedEmployees.push(employeeId);
     }
 
+    const updates = ops.filter((op) => op.type === "update");
+    const creates = ops.filter((op) => op.type === "set");
+
     let batch = db.batch();
     let writes = 0;
-    for (const op of ops) {
-      if (op.type === "update") batch.update(op.ref, op.data);
-      else batch.set(op.ref, op.data);
+    for (const op of updates) {
+      batch.update(op.ref, op.data);
       writes++;
       if (writes >= 400) {
         await batch.commit();
@@ -196,6 +198,14 @@ export const onSopVersionApproved = onDocumentUpdated(
     }
     if (writes > 0) {
       await batch.commit();
+    }
+
+    for (const op of creates) {
+      await db.runTransaction(async (tx) => {
+        const snap = await tx.get(op.ref);
+        if (snap.exists) return;
+        tx.set(op.ref, op.data);
+      });
     }
 
     const uniqueEmployees = Array.from(new Set(affectedEmployees));
@@ -539,12 +549,14 @@ export const overdueTrainingReminders = onSchedule("every day 09:00", async () =
     const emp = await db.collection("employees").doc(a.employeeId).get();
     const userId = emp.data()?.userId;
     if (userId) {
+      const day = new Date().toISOString().slice(0, 10);
       await notify(
         userId,
         "reminder",
         "Overdue Training",
         "You have an overdue training assignment. Please complete it promptly.",
-        `/dashboard/training`
+        `/dashboard/training`,
+        `notif_overdue_training_${doc.id}_${day}`
       );
     }
   }
@@ -574,22 +586,26 @@ export const overdueTrainingReminders = onSchedule("every day 09:00", async () =
     if (today.getTime() <= deadline.getTime()) continue;
     const emp = await db.collection("employees").doc(a.employeeId).get();
     const userId = emp.data()?.userId as string | undefined;
+    const day = new Date().toISOString().slice(0, 10);
     if (userId) {
       await notify(
         userId,
         "reminder",
         "Overdue OJT",
         `On Job Training is overdue: ${a.trainingTopic || "assigned topic"}.`,
-        `/dashboard/ojt/assignments/${docSnap.id}`
+        `/dashboard/ojt/assignments/${docSnap.id}`,
+        `notif_overdue_ojt_${docSnap.id}_${userId}_${day}`
       );
     }
     if (a.trainerId) {
+      const trainerId = a.trainerId as string;
       await notify(
-        a.trainerId as string,
+        trainerId,
         "reminder",
         "Overdue OJT — trainer action",
         `${a.employeeName || "Employee"} — ${a.trainingTopic || "OJT"} is overdue.`,
-        `/dashboard/ojt/assignments/${docSnap.id}`
+        `/dashboard/ojt/assignments/${docSnap.id}`,
+        `notif_overdue_ojt_${docSnap.id}_${trainerId}_${day}`
       );
     }
   }

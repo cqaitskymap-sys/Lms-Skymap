@@ -59,8 +59,9 @@ export default function EmployeesPage() {
     });
   }, [employees, search, status]);
 
-  const pageData = filtered.slice((page - 1) * pageSize, page * pageSize);
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const currentPage = Math.min(page, totalPages);
+  const pageData = filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
   const exportExcel = () => {
     const ws = XLSX.utils.json_to_sheet(
@@ -251,7 +252,7 @@ export default function EmployeesPage() {
               </TableBody>
             </Table>
             <div className="mt-4">
-              <Pagination page={page} totalPages={totalPages} onPageChange={setPage} />
+              <Pagination page={currentPage} totalPages={totalPages} onPageChange={setPage} />
             </div>
           </CardContent>
         </Card>

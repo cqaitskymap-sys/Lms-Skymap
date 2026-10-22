@@ -88,11 +88,12 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  const description = input.description?.trim();
   const department: Department = {
     id,
     code,
     name: input.name,
-    description: input.description || undefined,
+    ...(description ? { description } : {}),
     isActive: input.isActive ?? true,
     createdAt: now,
     updatedAt: now,

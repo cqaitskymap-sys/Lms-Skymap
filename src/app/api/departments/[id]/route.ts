@@ -6,6 +6,7 @@ import {
   requirePermission,
   writeAuditLog,
 } from "@/lib/rbac/middleware";
+import { FieldValue } from "firebase-admin/firestore";
 import { adminDb, isAdminConfigured } from "@/lib/firebase/admin";
 import { COLLECTIONS } from "@/lib/firebase/client";
 import { updateDepartmentSchema } from "@/lib/auth/department-schemas";
@@ -78,14 +79,25 @@ export async function PATCH(
   }
 
   const now = new Date().toISOString();
-  const updates: Partial<Department> = { updatedAt: now };
+  const updates: Record<string, unknown> = { updatedAt: now };
   if (input.code !== undefined) updates.code = input.code.toUpperCase();
   if (input.name !== undefined) updates.name = input.name;
-  if (input.description !== undefined) updates.description = input.description || undefined;
+  if (input.description !== undefined) {
+    const description = input.description.trim();
+    updates.description = description ? description : FieldValue.delete();
+  }
   if (input.isActive !== undefined) updates.isActive = input.isActive;
 
   await ref.update(updates);
-  const after = { ...before, ...updates };
+  const after: Department = { ...before, updatedAt: now };
+  if (typeof updates.code === "string") after.code = updates.code;
+  if (typeof updates.name === "string") after.name = updates.name;
+  if (typeof updates.isActive === "boolean") after.isActive = updates.isActive;
+  if (input.description !== undefined) {
+    const description = input.description.trim();
+    if (description) after.description = description;
+    else delete after.description;
+  }
 
   await writeAuditLog({
     actorId: verified.auth.uid,

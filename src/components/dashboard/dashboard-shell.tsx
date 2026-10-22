@@ -82,6 +82,8 @@ export function DashboardShell({ role, title, subtitle, children }: DashboardShe
         fresh,
       });
       setView(buildDashboardView(snap, dataRole || role));
+    } catch (err) {
+      console.warn("[dashboard] snapshot failed:", err);
     } finally {
       setLoading(false);
     }

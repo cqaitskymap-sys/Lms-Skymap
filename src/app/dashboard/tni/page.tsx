@@ -978,7 +978,7 @@ function TniPageInner() {
 
   return (
     <RequirePermission permission="tni:read">
-      <div className="mx-auto max-w-5xl space-y-6">
+      <div className="w-full space-y-6">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">
             Training Need Identification
@@ -1272,7 +1272,7 @@ function TniPageInner() {
                 </Button>
               </div>
             ) : visibleRecords.length === 0 ? (
-              <div className="py-8 text-center text-sm text-muted-foreground">
+              <div className="py-10 text-center text-base text-muted-foreground">
                 <p>
                   {records.length === 0
                     ? "No TNI records yet."
@@ -1303,7 +1303,7 @@ function TniPageInner() {
                 const highlighted = acknowledgeFromUrl === record.id;
                 const signoffLine = (label: string, signoff?: JdSignoff) =>
                   signoff?.name ? (
-                    <p className="text-xs text-muted-foreground">
+                    <p className="text-base text-muted-foreground">
                       {label}:{" "}
                       <span className="font-medium text-foreground">{signoff.name}</span>
                       {signoff.status === "acknowledged"
@@ -1315,13 +1315,13 @@ function TniPageInner() {
                   <div
                     key={record.id}
                     id={`tni-${record.id}`}
-                    className={`flex flex-wrap items-start justify-between gap-3 rounded-md border p-3 ${
+                    className={`flex w-full flex-wrap items-start justify-between gap-4 rounded-lg border p-5 ${
                       highlighted ? "border-primary ring-2 ring-primary/30" : ""
                     }`}
                   >
-                    <div className="space-y-1">
+                    <div className="min-w-0 flex-1 space-y-2">
                       <div className="flex flex-wrap items-center gap-2">
-                        <p className="text-sm font-semibold">
+                        <p className="text-xl font-semibold">
                           {emp
                             ? `${emp.firstName} ${emp.lastName} · ${emp.employeeCode}`
                             : record.employeeId}
@@ -1329,9 +1329,9 @@ function TniPageInner() {
                         <Badge variant={statusBadgeVariant(record.status)}>
                           {record.status}
                         </Badge>
-                        <span className="text-xs text-muted-foreground">v{record.version}</span>
+                        <span className="text-sm text-muted-foreground">v{record.version}</span>
                       </div>
-                      <p className="text-xs text-muted-foreground">
+                      <p className="text-base text-muted-foreground">
                         JD: {linkedJd?.title || record.jdId} · {(record.needs || []).length} need(s)
                       </p>
                       {record.sourceDocument?.downloadUrl && (
@@ -1339,7 +1339,7 @@ function TniPageInner() {
                           href={record.sourceDocument.downloadUrl}
                           target="_blank"
                           rel="noreferrer"
-                          className="text-xs font-medium text-primary hover:underline"
+                          className="text-base font-medium text-primary hover:underline"
                         >
                           Uploaded file: {record.sourceDocument.fileName}
                         </a>
@@ -1347,10 +1347,10 @@ function TniPageInner() {
                       {signoffLine("Prepared by", record.preparedBySignoff)}
                       {signoffLine("Approved by", record.approvedBySignoff)}
                       {qaWaiting && (
-                        <p className="text-xs text-amber-700">{TNI_QA_BEFORE_HOD_MESSAGE}</p>
+                        <p className="text-base text-amber-700">{TNI_QA_BEFORE_HOD_MESSAGE}</p>
                       )}
                       {record.approvedAt && (
-                        <p className="text-xs text-muted-foreground">
+                        <p className="text-base text-muted-foreground">
                           Approved {formatDateForPrint(record.approvedAt)}
                         </p>
                       )}
@@ -1359,7 +1359,6 @@ function TniPageInner() {
                       <Button
                         type="button"
                         variant="outline"
-                        size="sm"
                         onClick={() => handlePrintSaved(record)}
                       >
                         <Printer className="mr-1 h-3.5 w-3.5" />

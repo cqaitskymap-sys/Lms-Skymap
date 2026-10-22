@@ -571,40 +571,58 @@ function toLeaderboardEntries(results: ExamResult[]): LeaderboardEntry[] {
     }));
 }
 
-async function persistExamLeaderboard(examId: string, results: ExamResult[]): Promise<void> {
-  const entries = toLeaderboardEntries(results);
-  await adminDb.collection(COLLECTIONS.examLeaderboards).doc(examId).set({
-    examId,
-    entries,
-    updatedAt: new Date().toISOString(),
+function rankLeaderboard(entries: LeaderboardEntry[]): LeaderboardEntry[] {
+  return [...entries]
+    .sort((a, b) => {
+      if (b.percentage !== a.percentage) return b.percentage - a.percentage;
+      return a.timeSpentSeconds - b.timeSpentSeconds;
+    })
+    .slice(0, 50)
+    .map((entry, i) => ({ ...entry, rank: i + 1 }));
+}
+
+/** Merge one result into the cached board. A transaction keeps concurrent submits from dropping each other. */
+async function upsertExamLeaderboard(examId: string, result: ExamResult): Promise<void> {
+  const boardRef = adminDb.collection(COLLECTIONS.examLeaderboards).doc(examId);
+  const incoming: LeaderboardEntry = {
+    rank: 0,
+    employeeId: result.employeeId,
+    employeeName: result.employeeName,
+    percentage: result.percentage,
+    score: result.score,
+    timeSpentSeconds: result.timeSpentSeconds,
+    passed: result.passed,
+    submittedAt: result.createdAt,
+    attemptId: result.attemptId,
+  };
+  await adminDb.runTransaction(async (tx) => {
+    const snap = await tx.get(boardRef);
+    const cached = snap.exists
+      ? ((snap.data()?.entries || []) as LeaderboardEntry[])
+      : [];
+    tx.set(boardRef, {
+      examId,
+      entries: rankLeaderboard([
+        ...cached.filter((entry) => entry.attemptId !== incoming.attemptId),
+        incoming,
+      ]),
+      updatedAt: new Date().toISOString(),
+    });
   });
 }
 
-/** Slim public leaderboard. Builds the aggregate from result rows when the cache is empty. */
+/** Leaderboard from result rows. The cache is a fallback only — a stale snapshot must not hide a scored attempt. */
 export async function getOrBuildExamLeaderboard(
   examId: string,
   topN = 20
 ): Promise<LeaderboardEntry[]> {
-  const boardRef = adminDb.collection(COLLECTIONS.examLeaderboards).doc(examId);
-  const existing = await boardRef.get();
-  const cached = existing.exists
-    ? ((existing.data()?.entries || []) as LeaderboardEntry[])
-    : [];
-  if (cached.length) return cached.slice(0, topN);
-
   const peersSnap = await adminDb
     .collection(COLLECTIONS.examResults)
     .where("examId", "==", examId)
     .get();
   const peers = peersSnap.docs.map((d) => ({ id: d.id, ...d.data() }) as ExamResult);
   if (!peers.length) return [];
-  const entries = toLeaderboardEntries(peers);
-  await boardRef.set({
-    examId,
-    entries,
-    updatedAt: new Date().toISOString(),
-  });
-  return entries.slice(0, topN);
+  return toLeaderboardEntries(peers).slice(0, topN);
 }
 
 async function claimAttemptForSubmit(
@@ -756,7 +774,7 @@ export async function submitAssessmentServer(
   }
 
   try {
-    await persistExamLeaderboard(exam.id, peers);
+    await upsertExamLeaderboard(exam.id, result);
   } catch (err) {
     console.error("[submitAssessmentServer] leaderboard update failed:", err);
   }

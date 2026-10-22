@@ -95,7 +95,7 @@ export default function HomePage() {
         </div>
       </main>
 
-      <footer className="relative mx-auto flex max-w-6xl flex-col gap-1 px-6 pb-8 pt-4 text-slate-500">
+      <footer className="relative mx-auto flex max-w-6xl flex-col gap-1 px-6 pb-8 pt-4 text-slate-500 dark:text-slate-300">
         <p className="text-xs">© 2026 SKYMAP · PharmaLMS</p>
         <DeveloperCredit />
       </footer>

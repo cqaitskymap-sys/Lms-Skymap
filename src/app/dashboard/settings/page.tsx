@@ -325,20 +325,20 @@ function SettingsTabs() {
   const required =
     searchParams.get("reason") === "required" || Boolean(profile?.mustChangePassword);
   const tabParam = searchParams.get("tab");
-  const [tab, setTab] = useState(
+  const tabFromUrl =
     required || tabParam === "password"
       ? "password"
       : tabParam === "session"
         ? "session"
-        : "profile"
-  );
+        : "profile";
+  const [tab, setTab] = useState(tabFromUrl);
 
   useEffect(() => {
-    if (required) setTab("password");
-  }, [required]);
+    setTab(tabFromUrl);
+  }, [tabFromUrl]);
 
   const onPasswordChanged = () => {
-    router.replace("/dashboard/settings?tab=password");
+    router.replace("/dashboard/settings");
     setTab("profile");
   };
 

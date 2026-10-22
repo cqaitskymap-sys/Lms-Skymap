@@ -59,8 +59,10 @@ export async function GET(request: NextRequest) {
           id: data.id || doc.id,
           uid: data.uid || doc.id,
           displayName: data.displayName || "Staff",
+          username: data.username,
           role: data.role,
           departmentId: data.departmentId,
+          employeeId: data.employeeId,
           isActive: data.isActive !== false,
         } as UserProfile;
       })
