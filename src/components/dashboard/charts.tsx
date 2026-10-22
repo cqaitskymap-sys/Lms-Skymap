@@ -43,8 +43,8 @@ export function ComplianceTrendChart({
             <AreaChart data={data} margin={{ top: 8, right: 8, left: -18, bottom: 0 }}>
               <defs>
                 <linearGradient id="complianceFill" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="hsl(199, 89%, 40%)" stopOpacity={0.35} />
-                  <stop offset="100%" stopColor="hsl(199, 89%, 40%)" stopOpacity={0.02} />
+                  <stop offset="0%" stopColor="hsl(199, 95%, 62%)" stopOpacity={0.55} />
+                  <stop offset="100%" stopColor="hsl(217, 91%, 55%)" stopOpacity={0.02} />
                 </linearGradient>
               </defs>
               <CartesianGrid strokeDasharray="3 3" className="stroke-border/60" />
@@ -87,9 +87,9 @@ export function TrainingProgressChart({
               <YAxis tick={{ fontSize: 11 }} stroke="hsl(var(--muted-foreground))" />
               <Tooltip contentStyle={tooltipStyle} />
               <Legend wrapperStyle={{ fontSize: 12 }} />
-              <Bar dataKey="completed" name="Completed" fill="hsl(152, 61%, 40%)" radius={[4, 4, 0, 0]} />
-              <Bar dataKey="inProgress" name="In progress" fill="hsl(199, 89%, 45%)" radius={[4, 4, 0, 0]} />
-              <Bar dataKey="overdue" name="Overdue" fill="hsl(0, 72%, 55%)" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="completed" name="Completed" fill="hsl(168, 72%, 48%)" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="inProgress" name="In progress" fill="hsl(250, 92%, 68%)" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="overdue" name="Overdue" fill="hsl(350, 78%, 62%)" radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </div>
@@ -118,7 +118,7 @@ export function DepartmentComplianceChart({
               <XAxis type="number" domain={[0, 100]} tick={{ fontSize: 11 }} />
               <YAxis type="category" dataKey="name" width={80} tick={{ fontSize: 11 }} />
               <Tooltip contentStyle={tooltipStyle} />
-              <Bar dataKey="rate" name="Compliance %" fill="hsl(199, 89%, 40%)" radius={[0, 6, 6, 0]} />
+              <Bar dataKey="rate" name="Compliance %" fill="hsl(217, 91%, 62%)" radius={[0, 6, 6, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </div>
@@ -170,7 +170,7 @@ export function ComplianceRing({ value = 0 }: { value?: number }) {
   ];
   const fill =
     value >= 90
-      ? "hsl(152, 61%, 40%)"
+      ? "hsl(168, 72%, 48%)"
       : value >= 60
         ? "hsl(38, 92%, 50%)"
         : "hsl(0, 72%, 51%)";

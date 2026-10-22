@@ -33,7 +33,7 @@ export function UpcomingTrainingList({ items }: { items: DashTrainingItem[] }) {
             <Link
               key={item.id}
               href={item.href || "/dashboard/training"}
-              className="flex items-start gap-3 rounded-lg border border-white/10 bg-white/30 p-3 transition-colors hover:bg-white/50 dark:bg-white/5 dark:hover:bg-white/10"
+              className="flex items-start gap-3 rounded-lg border border-border bg-muted/60 p-3 transition-colors hover:bg-muted dark:border-white/10 dark:bg-white/5 dark:hover:bg-white/10"
             >
               <div className="mt-0.5 rounded-md bg-primary/15 p-2 text-primary">
                 <Clock className="h-4 w-4" />
@@ -76,9 +76,10 @@ export function OverdueTrainingList({ items }: { items: DashTrainingItem[] }) {
             <p className="text-sm text-muted-foreground">No overdue trainings.</p>
           )}
           {items.map((item) => (
-            <div
+            <Link
               key={item.id}
-              className="rounded-lg border border-red-500/20 bg-red-500/5 p-3 dark:bg-red-500/10"
+              href={item.href || "/dashboard/training"}
+              className="block rounded-lg border border-red-500/20 bg-red-500/5 p-3 transition-colors hover:bg-red-500/10 dark:bg-red-500/10 dark:hover:bg-red-500/15"
             >
               <div className="flex items-start gap-2">
                 <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-red-600" />
@@ -91,7 +92,7 @@ export function OverdueTrainingList({ items }: { items: DashTrainingItem[] }) {
                   </p>
                 </div>
               </div>
-            </div>
+            </Link>
           ))}
         </div>
       </GlassCard>

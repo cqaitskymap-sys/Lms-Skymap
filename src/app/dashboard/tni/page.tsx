@@ -1115,6 +1115,7 @@ function TniPageInner() {
                       type="button"
                       variant="ghost"
                       size="icon"
+                      aria-label={`Remove need ${idx + 1}`}
                       onClick={() => setNeeds((n) => n.filter((x) => x.id !== need.id))}
                     >
                       <Trash2 className="h-4 w-4" />

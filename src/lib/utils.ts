@@ -176,46 +176,85 @@ export function getInitials(name: string) {
 }
 
 export function statusColor(status: string): string {
+  const neutral = "status-chip-neutral";
+  const success = "status-chip-success";
+  const warning = "status-chip-warning";
+  const danger = "status-chip-danger";
+  const info = "status-chip-info";
+  const progress = "status-chip-progress";
+  const violet = "status-chip-violet";
   const map: Record<string, string> = {
-    draft: "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300",
-    active: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300",
-    approved: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300",
-    passed: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300",
-    completed: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300",
-    failed: "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300",
-    obsolete: "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300",
-    superseded: "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300",
-    pending: "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300",
-    pending_verification: "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300",
-    verified: "bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300",
-    qualified: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200",
-    induction_complete: "bg-teal-100 text-teal-700 dark:bg-teal-900/40 dark:text-teal-300",
-    in_progress: "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300",
-    assigned: "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300",
-    scheduled: "bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300",
-    retraining: "bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300",
-    induction: "bg-cyan-100 text-cyan-700 dark:bg-cyan-900/40 dark:text-cyan-300",
-    handed_over: "bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300",
-    under_review: "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300",
-    expired: "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300",
-    cancelled: "bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400",
-    selected: "bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300",
-    trainer_completed: "bg-teal-100 text-teal-700 dark:bg-teal-900/40 dark:text-teal-300",
-    employee_acknowledged: "bg-cyan-100 text-cyan-700 dark:bg-cyan-900/40 dark:text-cyan-300",
-    verification_pending: "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300",
-    qa_pending: "bg-violet-100 text-violet-700 dark:bg-violet-900/40 dark:text-violet-300",
-    retraining_required: "bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300",
-    rescheduled: "bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300",
-    overdue: "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300",
-    not_applicable: "bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400",
+    draft: neutral,
+    created: neutral,
+    inactive: neutral,
+    cancelled: neutral,
+    not_applicable: neutral,
+    not_started: neutral,
+    not_set: neutral,
+    not_assigned: neutral,
+    upcoming: neutral,
+    active: success,
+    approved: success,
+    passed: success,
+    completed: success,
+    qualified: success,
+    certified: success,
+    failed: danger,
+    obsolete: danger,
+    expired: danger,
+    overdue: danger,
+    rejected: danger,
+    terminated: danger,
+    blocked: danger,
+    not_competent: danger,
+    superseded: warning,
+    pending: warning,
+    pending_verification: warning,
+    hr_verification: warning,
+    under_review: warning,
+    verification_pending: warning,
+    verified: info,
+    induction: info,
+    induction_assigned: info,
+    in_progress: progress,
+    assigned: progress,
+    training: progress,
+    exam: progress,
+    scheduled: progress,
+    rescheduled: progress,
+    selected: info,
+    induction_complete: success,
+    induction_completed: success,
+    trainer_completed: success,
+    employee_acknowledged: info,
+    handed_over: violet,
+    department_handover: violet,
+    qa_pending: violet,
+    jd_created: info,
+    tni_created: info,
+    trainer_assigned: progress,
+    sop_assigned: progress,
+    retraining: warning,
+    retraining_required: warning,
+    assessment_pending: warning,
+    deferred: warning,
+    submitted: info,
+    identified: info,
+    prepared: info,
+    planned: info,
+    checked: progress,
+    current: progress,
+    training_scheduled: progress,
+    training_completed: success,
+    competent: success,
   };
-  return map[status] ?? "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300";
+  return map[status] ?? neutral;
 }
 
 export function formatBytes(bytes: number) {
-  if (bytes === 0) return "0 B";
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
   const k = 1024;
   const sizes = ["B", "KB", "MB", "GB"];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  const i = Math.min(sizes.length - 1, Math.floor(Math.log(bytes) / Math.log(k)));
   return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
 }

@@ -8,7 +8,6 @@ import type { SopActor } from "@/lib/services/sops";
 import { acknowledgeSop } from "@/lib/services/sops";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Label } from "@/components/ui/label";
 import { formatDateTime } from "@/lib/utils";
 
 interface SopAcknowledgementPanelProps {
@@ -103,9 +102,9 @@ export function SopAcknowledgementPanel({
               disabled={blockedByReading}
               onCheckedChange={(c) => setAgreed(Boolean(c))}
             />
-            <Label className="font-normal leading-snug">
+            <span className="font-normal leading-snug">
               I confirm I have reviewed the document and attachments
-            </Label>
+            </span>
           </label>
           <Button disabled={busy || !agreed || blockedByReading} onClick={() => void submit()}>
             {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}

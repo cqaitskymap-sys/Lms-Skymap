@@ -17,9 +17,12 @@ import { listTrainingSessions } from "@/lib/services/training";
 import { cn } from "@/lib/utils";
 
 export function MiniCalendar({ month }: { month?: Date }) {
-  const [now] = useState(() => new Date());
-  const viewMonth = month || now;
+  const [now, setNow] = useState<Date | null>(null);
   const [events, setEvents] = useState<{ date: string; tone: string }[]>([]);
+
+  useEffect(() => {
+    setNow(month ?? new Date());
+  }, [month]);
 
   useEffect(() => {
     const load = () => {
@@ -45,10 +48,11 @@ export function MiniCalendar({ month }: { month?: Date }) {
   }, []);
 
   const days = useMemo(() => {
-    const start = startOfWeek(startOfMonth(viewMonth));
-    const end = endOfWeek(endOfMonth(viewMonth));
+    if (!now) return [];
+    const start = startOfWeek(startOfMonth(now));
+    const end = endOfWeek(endOfMonth(now));
     return eachDayOfInterval({ start, end });
-  }, [viewMonth]);
+  }, [now]);
 
   const eventMap = new Map(events.map((e) => [e.date, e]));
 
@@ -63,7 +67,7 @@ export function MiniCalendar({ month }: { month?: Date }) {
     <MotionItem className="h-full">
       <GlassCard className="h-full">
         <GlassCardHeader
-          title={format(viewMonth, "MMMM yyyy")}
+          title={now ? format(now, "MMMM yyyy") : "Training calendar"}
           description="Training sessions"
         />
         <div className="grid grid-cols-7 gap-1 text-center text-[10px] text-muted-foreground">
@@ -75,8 +79,8 @@ export function MiniCalendar({ month }: { month?: Date }) {
           {days.map((day) => {
             const key = format(day, "yyyy-MM-dd");
             const event = eventMap.get(key);
-            const inMonth = isSameMonth(day, viewMonth);
-            const isToday = isSameDay(day, now);
+            const inMonth = now ? isSameMonth(day, now) : false;
+            const isToday = now ? isSameDay(day, now) : false;
             return (
               <div
                 key={key}

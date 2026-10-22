@@ -103,8 +103,9 @@ function LoginForm() {
           alt=""
           className="absolute inset-0 h-full w-full object-cover"
         />
-        <div className="absolute inset-0 bg-slate-950/55" />
-        <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/35 to-slate-900/20" />
+        <div className="absolute inset-0 bg-[#071433]/45" />
+        <div className="absolute inset-0 bg-gradient-to-t from-[#071433]/75 via-[#0c1c3d]/20 to-transparent" />
+        <div className="absolute inset-0 bg-gradient-to-r from-transparent via-transparent to-[#12306a]/35" />
         <div className="absolute inset-0 opacity-20 [background-image:linear-gradient(rgba(255,255,255,0.08)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.08)_1px,transparent_1px)] [background-size:48px_48px]" />
         <div className="relative flex h-full flex-col justify-between p-12 text-white">
           <div className="flex items-center gap-3">
@@ -123,6 +124,16 @@ function LoginForm() {
               Secure role-based access with session controls, login auditing, and GMP-aligned
               activity trails.
             </p>
+            <div className="flex flex-wrap gap-2 pt-2">
+              {["Live training", "Assessments", "Audit trail"].map((item) => (
+                <span
+                  key={item}
+                  className="rounded-full border border-white/20 bg-white/10 px-3 py-1.5 text-xs font-medium text-white/90 backdrop-blur"
+                >
+                  {item}
+                </span>
+              ))}
+            </div>
           </div>
           <div className="space-y-1">
             <p className="text-sm text-slate-300/80">© 2026 SKYMAP · PharmaLMS</p>
@@ -131,16 +142,12 @@ function LoginForm() {
         </div>
       </div>
 
-      <div className="relative flex w-full flex-col justify-center bg-gradient-to-br from-slate-50 via-white to-cyan-50/50 px-6 py-12 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 lg:w-1/2">
-        <div className="mx-auto w-full max-w-md space-y-6">
-          <div className="mb-4 flex items-center gap-2 lg:hidden">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src="/brand/skymap-logo.png"
-              alt="SKYMAP"
-              className="h-10 w-auto max-w-[160px] object-contain"
-            />
-          </div>
+      <div className="dashboard-atmosphere relative flex w-full flex-col justify-center overflow-hidden bg-gradient-to-br from-slate-50 via-white to-cyan-50/50 px-6 py-12 lg:w-1/2">
+        <div aria-hidden className="pointer-events-none absolute inset-0 hidden dark:block">
+          <div className="absolute left-1/2 top-[38%] h-72 w-72 -translate-x-1/2 -translate-y-1/2 rounded-full bg-sky-400/30 blur-[80px]" />
+          <div className="absolute -right-10 bottom-10 h-56 w-56 rounded-full bg-violet-500/30 blur-[70px]" />
+        </div>
+        <div className="relative mx-auto w-full max-w-md space-y-6">
 
           {deactivated && (
             <div className="rounded-xl border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
@@ -148,8 +155,20 @@ function LoginForm() {
             </div>
           )}
 
-          <Card className="border-border/60 shadow-lift">
+          <div className="relative">
+            <div
+              aria-hidden
+              className="pointer-events-none absolute -inset-8 -z-10 rounded-[2rem] bg-sky-400/25 blur-3xl"
+            />
+            <Card className="relative overflow-hidden border-white/25 shadow-[0_30px_80px_-40px_rgba(80,140,255,0.85)]">
+              <div className="pointer-events-none absolute inset-x-8 top-0 h-px bg-gradient-to-r from-transparent via-white/80 to-transparent" />
             <CardHeader className="space-y-1.5">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src="/brand/skymap-logo.png"
+                alt="SKYMAP"
+                className="mb-2 h-11 w-auto max-w-[150px] object-contain"
+              />
               <CardTitle className="font-display text-3xl font-semibold">Sign in</CardTitle>
               <CardDescription>
                 Sign in with your employee code or staff ID.
@@ -166,6 +185,7 @@ function LoginForm() {
                     autoComplete="username"
                     placeholder="EMP1001"
                     aria-invalid={!!errors.email}
+                    className="h-11"
                     {...register("email")}
                   />
                   {errors.email && (
@@ -188,7 +208,7 @@ function LoginForm() {
                       type={showPassword ? "text" : "password"}
                       autoComplete="current-password"
                       aria-invalid={!!errors.password}
-                      className="pr-10"
+                      className="h-11 pr-10"
                       {...register("password")}
                     />
                     <button
@@ -221,13 +241,14 @@ function LoginForm() {
                     Remember username
                   </Label>
                 </div>
-                <Button type="submit" className="h-11 w-full" disabled={isSubmitting}>
+                <Button type="submit" className="mt-1 h-11 w-full rounded-xl" disabled={isSubmitting}>
                   {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                   Sign in
                 </Button>
               </form>
             </CardContent>
-          </Card>
+            </Card>
+          </div>
 
           {isDemo && (
             <Card>

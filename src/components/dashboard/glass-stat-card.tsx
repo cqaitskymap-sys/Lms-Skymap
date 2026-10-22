@@ -33,13 +33,17 @@ export function GlassStatCard({
 }: GlassStatCardProps) {
   return (
     <MotionItem>
-      <GlassCard hover className={cn("h-full", className)}>
-        <div className="flex items-start justify-between gap-3">
+      <GlassCard hover className={cn("relative h-full overflow-hidden", className)}>
+        <span
+          aria-hidden
+          className="orb-c pointer-events-none absolute -right-8 -top-10 hidden h-28 w-28 rounded-full bg-sky-400/30 blur-2xl dark:block"
+        />
+        <div className="relative flex items-start justify-between gap-3">
           <div className="min-w-0 space-y-1">
             <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
               {title}
             </p>
-            <p className="truncate font-display text-2xl font-semibold tracking-tight md:text-3xl">{value}</p>
+            <p className="truncate text-2xl font-semibold tracking-tight md:text-3xl">{value}</p>
             {(description || trend) && (
               <p className="text-xs text-muted-foreground">
                 {trend && (
@@ -57,7 +61,12 @@ export function GlassStatCard({
               </p>
             )}
           </div>
-          <div className={cn("rounded-xl p-2.5", toneStyles[tone])}>
+          <div
+            className={cn(
+              "rounded-xl p-2.5 transition-transform duration-500 group-hover:scale-110 group-hover:-rotate-6",
+              toneStyles[tone]
+            )}
+          >
             <Icon className="h-4 w-4 md:h-5 md:w-5" />
           </div>
         </div>

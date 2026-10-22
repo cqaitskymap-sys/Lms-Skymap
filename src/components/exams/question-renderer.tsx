@@ -1,7 +1,6 @@
 "use client";
 
 import { Checkbox } from "@/components/ui/checkbox";
-import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
@@ -114,7 +113,7 @@ export function QuestionRenderer({
                   disabled={disabled}
                   onCheckedChange={() => toggle(o.id)}
                 />
-                <Label className="cursor-pointer font-normal leading-snug">{o.text}</Label>
+                <span className="font-normal leading-snug">{o.text}</span>
               </label>
             );
           })}

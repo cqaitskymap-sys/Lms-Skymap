@@ -4,7 +4,6 @@ import { useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 import { Download, Eye, FileText, Film, Presentation, Loader2 } from "lucide-react";
 import type { SopAttachment, SopVersion } from "@/types";
-import { PdfViewer } from "@/components/shared/pdf-viewer";
 import { VideoPlayer } from "@/components/shared/video-player";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -69,7 +68,7 @@ export function SopMediaPreview({
 
   return (
     <div className={cn("space-y-3", className)}>
-      <Tabs defaultValue={defaultTab}>
+      <Tabs key={version.id} defaultValue={defaultTab}>
         <TabsList className="flex h-auto flex-wrap gap-1">
           {pdfs.length > 0 && <TabsTrigger value="pdf">PDF Preview</TabsTrigger>}
           {videos.length > 0 && <TabsTrigger value="video">Video</TabsTrigger>}
@@ -96,17 +95,13 @@ export function SopMediaPreview({
                     Download
                   </Button>
                 </div>
-                {trackReading && index === 0 ? (
-                  <SopPdfReader
-                    url={pdf.downloadUrl}
-                    storagePath={pdf.storagePath}
-                    title={pdf.title}
-                    trackPages
-                    onPagesProgress={onPagesProgress}
-                  />
-                ) : (
-                  <PdfViewer url={pdf.downloadUrl} title={pdf.title} />
-                )}
+                <SopPdfReader
+                  url={pdf.downloadUrl}
+                  storagePath={pdf.storagePath}
+                  title={pdf.title}
+                  trackPages={trackReading && index === 0}
+                  onPagesProgress={trackReading && index === 0 ? onPagesProgress : undefined}
+                />
               </div>
             ))}
           </TabsContent>
@@ -128,6 +123,7 @@ export function SopMediaPreview({
             <AttachmentRow
               key={a.id}
               attachment={a}
+              disabled={!a.downloadUrl}
               onDownload={() => {
                 if (!a.downloadUrl) return;
                 onDownload?.(a);
@@ -144,9 +140,11 @@ export function SopMediaPreview({
 function AttachmentRow({
   attachment,
   onDownload,
+  disabled = false,
 }: {
   attachment: SopAttachment;
   onDownload: () => void;
+  disabled?: boolean;
 }) {
   const Icon =
     attachment.type === "pdf"
@@ -169,7 +167,7 @@ function AttachmentRow({
           </p>
         </div>
       </div>
-      <Button size="sm" variant="outline" onClick={onDownload}>
+      <Button size="sm" variant="outline" disabled={disabled} onClick={onDownload}>
         <Download className="mr-1 h-3.5 w-3.5" />
         Download
       </Button>

@@ -79,22 +79,30 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  await writeAuditLog({
-    actorId: auth.uid,
-    actorEmail: auth.email,
-    actorRole: auth.role,
-    action: "submit",
-    resourceType: "assessment_attempt",
-    resourceId: result.attempt.id,
-    description: `Assessment submitted · ${result.attempt.passed ? "PASS" : "FAIL"} · ${result.attempt.percentage ?? 0}%`,
-    after: {
-      examId: result.attempt.examId,
-      employeeId: result.attempt.employeeId,
-      passed: result.attempt.passed,
-      percentage: result.attempt.percentage,
-      assignmentId: result.attempt.assignmentId,
-    },
-  });
+  try {
+    await writeAuditLog({
+      actorId: auth.uid,
+      actorEmail: auth.email,
+      actorRole: auth.role,
+      action: "submit",
+      resourceType: "assessment_attempt",
+      resourceId: result.attempt.id,
+      description: `Assessment submitted · ${result.attempt.passed ? "PASS" : "FAIL"} · ${result.attempt.percentage ?? 0}%`,
+      after: {
+        examId: result.attempt.examId,
+        employeeId: result.attempt.employeeId,
+        passed: result.attempt.passed,
+        percentage: result.attempt.percentage,
+        assignmentId: result.attempt.assignmentId,
+      },
+    });
+  } catch (auditErr) {
+    console.error("[assessments/submit] audit log failed:", auditErr);
+  }
 
-  return NextResponse.json({ success: true, attempt: result.attempt });
+  return NextResponse.json({
+    success: true,
+    attempt: result.attempt,
+    ...(result.warning ? { warning: result.warning } : {}),
+  });
 }

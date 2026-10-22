@@ -121,12 +121,13 @@ export async function assignSopTraining(params: {
     } else {
       const dupQ = query(
         collection(db, COLLECTIONS.trainingAssignments),
-        where("employeeId", "==", employeeId),
-        where("sopId", "==", params.sopId)
+        where("employeeId", "==", employeeId)
       );
       const dupSnap = await getDocs(dupQ);
       const open = dupSnap.docs.some((d) => {
-        const status = d.data().status as TrainingAssignment["status"];
+        const data = d.data();
+        if (data.sopId !== params.sopId) return false;
+        const status = data.status as TrainingAssignment["status"];
         return status !== "passed" && status !== "failed";
       });
       if (open) {

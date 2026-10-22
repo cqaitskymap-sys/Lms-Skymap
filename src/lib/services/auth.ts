@@ -225,6 +225,9 @@ export async function precheckLogin(email: string): Promise<{
       remainingAttempts?: number;
       remainingMs?: number;
     };
+    if (!res.ok && res.status >= 500) {
+      return { allowed: true };
+    }
     if (typeof data.allowed === "boolean") {
       return {
         allowed: data.allowed,
@@ -238,10 +241,8 @@ export async function precheckLogin(email: string): Promise<{
       message: data.error || "Unable to verify account status. Try again in a moment.",
     };
   } catch {
-    return {
-      allowed: false,
-      message: "Unable to reach the login service. Check your connection and try again.",
-    };
+    // The session route still enforces lockout. A dead precheck must not block every sign-in.
+    return { allowed: true };
   }
 }
 

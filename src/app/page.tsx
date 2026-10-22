@@ -12,8 +12,8 @@ export default function HomePage() {
         alt=""
         className="pointer-events-none absolute inset-0 h-full w-full object-cover"
       />
-      <div className="pointer-events-none absolute inset-0 bg-gradient-to-r from-white/92 via-white/78 to-white/40 dark:from-slate-950/90 dark:via-slate-950/75 dark:to-slate-950/45" />
-      <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-white/30 via-transparent to-white/70 dark:from-slate-950/20 dark:to-slate-950/80" />
+      <div className="pointer-events-none absolute inset-0 bg-gradient-to-r from-white/92 via-white/78 to-white/40 dark:from-[hsl(224_70%_5%/0.92)] dark:via-[hsl(224_64%_7%/0.8)] dark:to-[hsl(222_80%_16%/0.45)]" />
+      <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-white/30 via-transparent to-white/70 dark:from-[hsl(217_91%_40%/0.18)] dark:to-[hsl(224_70%_5%/0.85)]" />
 
       <header className="relative mx-auto flex max-w-6xl items-center justify-between px-6 py-5">
         <div className="flex items-center gap-2 font-semibold tracking-tight">
@@ -33,7 +33,7 @@ export default function HomePage() {
 
       <main className="relative mx-auto max-w-6xl px-6 pb-20 pt-16 md:pt-24">
         <div className="max-w-2xl space-y-6 animate-fade-in">
-          <p className="inline-flex items-center rounded-full border border-primary/15 bg-white/70 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-primary shadow-sm backdrop-blur-md">
+          <p className="inline-flex items-center rounded-full border border-primary/15 bg-white/70 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-primary shadow-sm backdrop-blur-md dark:border-white/15 dark:bg-white/10">
             Pharmaceutical Training Platform
           </p>
           <h1 className="font-display text-5xl font-semibold leading-[1.05] tracking-tight text-foreground drop-shadow-sm md:text-6xl lg:text-7xl">
@@ -50,7 +50,7 @@ export default function HomePage() {
             <Button
               size="lg"
               variant="outline"
-              className="rounded-full bg-white/80 px-7 backdrop-blur-md"
+              className="rounded-full bg-white/80 px-7 backdrop-blur-md dark:border-white/20 dark:bg-white/10 dark:text-white dark:hover:bg-white/15"
               asChild
             >
               <Link href="/verify">Verify certificate</Link>
@@ -83,7 +83,7 @@ export default function HomePage() {
           ].map((f) => (
             <div
               key={f.title}
-              className="group rounded-2xl border border-white/70 bg-white/80 p-5 shadow-soft backdrop-blur-md transition-all duration-300 hover:-translate-y-1 hover:shadow-lift dark:border-white/10 dark:bg-slate-900/60"
+              className="group glass-panel rounded-2xl p-5 transition-all duration-300 hover:-translate-y-1 hover:shadow-lift"
             >
               <div className="mb-4 inline-flex rounded-xl bg-primary/10 p-2.5 text-primary transition-colors group-hover:bg-primary group-hover:text-primary-foreground">
                 <f.icon className="h-5 w-5" />

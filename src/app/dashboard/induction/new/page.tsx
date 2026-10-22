@@ -102,7 +102,7 @@ export default function NewInductionModulePage() {
       <div className="mx-auto max-w-3xl space-y-6">
         <div className="flex items-start gap-3">
           <Button variant="ghost" size="icon" asChild className="mt-0.5 shrink-0">
-            <Link href="/dashboard/induction">
+            <Link href="/dashboard/induction" aria-label="Back to induction">
               <ArrowLeft className="h-4 w-4" />
             </Link>
           </Button>

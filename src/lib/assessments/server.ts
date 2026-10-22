@@ -358,6 +358,7 @@ export async function startAssessmentServer(
       if (!recovered.ok) {
         return { ok: false, status: recovered.status, error: recovered.error };
       }
+      return { ok: true, resumed: false, attempt: recovered.attempt };
     }
     return {
       ok: false,
@@ -366,13 +367,30 @@ export async function startAssessmentServer(
     };
   }
 
+  // A retraining or induction assignment is a new cycle. Earlier fails on a
+  // previous assignment must not consume this cycle's attempt allowance.
+  // When both ids are present, the attempt must belong to both.
+  const inCycle = (a: AssessmentAttempt) => {
+    if (input.assignmentId && input.inductionAssignmentId) {
+      return (
+        a.assignmentId === input.assignmentId &&
+        a.inductionAssignmentId === input.inductionAssignmentId
+      );
+    }
+    if (input.assignmentId) return a.assignmentId === input.assignmentId;
+    if (input.inductionAssignmentId) {
+      return a.inductionAssignmentId === input.inductionAssignmentId;
+    }
+    return true;
+  };
+
   const open = prior
     .filter((a) => a.status === "in_progress")
     .sort((a, b) => b.startedAt.localeCompare(a.startedAt));
 
-  // Resume an open attempt that has not expired
+  // Resume only an open attempt in this assignment cycle.
   const now = new Date();
-  const resumable = open.find((a) => new Date(a.expiresAt) > now);
+  const resumable = open.find((a) => inCycle(a) && new Date(a.expiresAt) > now);
   if (resumable) {
     return {
       ok: true,
@@ -398,15 +416,6 @@ export async function startAssessmentServer(
   }
 
   const enforceMaxAttempts = input.enforceMaxAttempts !== false;
-  // A retraining or induction assignment is a new cycle. Earlier fails on a
-  // previous assignment must not consume this cycle's attempt allowance.
-  const inCycle = (a: AssessmentAttempt) => {
-    if (input.assignmentId) return a.assignmentId === input.assignmentId;
-    if (input.inductionAssignmentId) {
-      return a.inductionAssignmentId === input.inductionAssignmentId;
-    }
-    return true;
-  };
   const finished = prior.filter(
     (a) => inCycle(a) && ["passed", "failed", "expired"].includes(a.status)
   );
@@ -464,10 +473,63 @@ export async function startAssessmentServer(
       : {}),
   };
 
-  await adminDb
+  const attemptRef = adminDb.collection(COLLECTIONS.assessmentAttempts).doc(id);
+  const attemptsQuery = adminDb
     .collection(COLLECTIONS.assessmentAttempts)
-    .doc(id)
-    .set(stripUndefined(attemptForPersistence(attempt)));
+    .where("examId", "==", input.examId)
+    .where("employeeId", "==", input.employeeId);
+  const held: { resumed?: AssessmentAttempt } = {};
+
+  try {
+    await adminDb.runTransaction(async (tx) => {
+      held.resumed = undefined;
+      const snap = await tx.get(attemptsQuery);
+      const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }) as AssessmentAttempt);
+      const nowTx = new Date();
+      const openNow = rows
+        .filter(
+          (a) => inCycle(a) && a.status === "in_progress" && new Date(a.expiresAt) > nowTx
+        )
+        .sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+      if (openNow[0]) {
+        held.resumed = openNow[0];
+        return;
+      }
+      const finishedNow = rows.filter(
+        (a) => inCycle(a) && ["passed", "failed", "expired"].includes(a.status)
+      );
+      const staleOpenNow = rows.filter(
+        (a) => inCycle(a) && a.status === "in_progress" && new Date(a.expiresAt) <= nowTx
+      );
+      if (
+        enforceMaxAttempts &&
+        finishedNow.length + staleOpenNow.length >= exam.maxAttempts
+      ) {
+        throw new Error("MAX_ATTEMPTS");
+      }
+      tx.set(attemptRef, stripUndefined(attemptForPersistence(attempt)));
+    });
+  } catch (err) {
+    if (err instanceof Error && err.message === "MAX_ATTEMPTS") {
+      return {
+        ok: false,
+        status: 400,
+        error: `Maximum attempts (${exam.maxAttempts}) reached for this exam`,
+      };
+    }
+    throw err;
+  }
+
+  if (held.resumed) {
+    return {
+      ok: true,
+      resumed: true,
+      attempt: {
+        ...held.resumed,
+        questions: sanitizeAttemptForClient(held.resumed.questions, false),
+      },
+    };
+  }
 
   return {
     ok: true,
@@ -486,7 +548,7 @@ export type SubmitAssessmentServerInput = {
 };
 
 export type SubmitAssessmentServerResult =
-  | { ok: true; attempt: AssessmentAttempt }
+  | { ok: true; attempt: AssessmentAttempt; warning?: string }
   | { ok: false; status: number; error: string };
 
 function toLeaderboardEntries(results: ExamResult[]): LeaderboardEntry[] {
@@ -683,16 +745,14 @@ export async function submitAssessmentServer(
   const revealAnswers = !!exam.allowReview && !!exam.showResultsImmediately;
   await attemptRef.set(stripUndefined(attemptForPersistence(updated, revealAnswers)));
   finalized = true;
+  const warnings: string[] = [];
   try {
     await adminDb.collection(COLLECTIONS.examResults).doc(result.id).set(stripUndefined(result));
   } catch (resultErr) {
     console.error("[submitAssessmentServer] result write failed:", resultErr);
-    return {
-      ok: false,
-      status: 500,
-      error:
-        "Your exam was scored, but the result record did not save. Do not retake it — refresh or ask QA.",
-    };
+    warnings.push(
+      "Your exam was scored, but the result record did not save. Do not retake it — refresh or ask QA."
+    );
   }
 
   try {
@@ -715,6 +775,7 @@ export async function submitAssessmentServer(
   }
 
   let trainingOutOfSync = false;
+  let inductionOutOfSync = false;
   if (attempt.assignmentId) {
     let trainingOk = false;
     let lastTrainingError: unknown;
@@ -764,6 +825,7 @@ export async function submitAssessmentServer(
           { merge: true }
         );
     } catch (err) {
+      inductionOutOfSync = true;
       console.error("[submitAssessmentServer] induction update failed:", err);
     }
   }
@@ -781,15 +843,18 @@ export async function submitAssessmentServer(
 
   const reveal = revealAnswers;
   if (trainingOutOfSync) {
-    return {
-      ok: false,
-      status: 500,
-      error:
-        "Your exam was scored, but the training record did not update. Do not retake it — ask QA to refresh this assignment.",
-    };
+    warnings.push(
+      "Your exam was scored, but the training record did not update. Do not retake it — ask QA to refresh this assignment."
+    );
+  }
+  if (inductionOutOfSync) {
+    warnings.push(
+      "Your exam was scored, but the induction record did not update. Do not retake it — ask HR to refresh this assignment."
+    );
   }
   return {
     ok: true,
+    ...(warnings.length ? { warning: warnings.join(" ") } : {}),
     attempt: {
       ...updated,
       questions: sanitizeAttemptForClient(updated.questions, reveal),

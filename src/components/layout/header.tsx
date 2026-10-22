@@ -86,9 +86,9 @@ export function Header({ onMenuClick, examLocked = false }: HeaderProps) {
   }
 
   return (
-    <header className="sticky top-0 z-40 flex h-16 items-center gap-2 border-b border-border/70 bg-background/75 px-4 backdrop-blur-xl supports-[backdrop-filter]:bg-background/60">
+    <header className="header-live sticky top-0 z-40 flex h-16 items-center gap-2 border-b border-border bg-background px-4 dark:border-white/10">
       {onMenuClick && (
-        <Button variant="ghost" size="icon" className="lg:hidden" onClick={onMenuClick}>
+        <Button variant="ghost" size="icon" className="lg:hidden" onClick={onMenuClick} aria-label="Open menu">
           <Menu className="h-5 w-5" />
         </Button>
       )}
@@ -111,7 +111,7 @@ export function Header({ onMenuClick, examLocked = false }: HeaderProps) {
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button variant="ghost" className="relative h-10 gap-2 rounded-full px-1.5 pr-3">
-            <Avatar className="h-8 w-8 ring-2 ring-border/70">
+            <Avatar className="h-8 w-8 ring-2 ring-border/70 dark:ring-primary/50">
               <AvatarImage src={profile?.photoURL} />
               <AvatarFallback className="text-xs font-semibold">
                 {getInitials(profile?.displayName || "U")}

@@ -287,6 +287,7 @@ export function QuestionFormFields({ banks, values, onChange }: QuestionFormFiel
                   type="button"
                   size="icon"
                   variant="ghost"
+                  aria-label={`Remove option ${idx + 1}`}
                   onClick={() =>
                     onChange({
                       options: values.options.filter((x) => x.id !== o.id),

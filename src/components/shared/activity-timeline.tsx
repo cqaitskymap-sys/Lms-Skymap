@@ -2,7 +2,6 @@
 
 import { formatDateTime } from "@/lib/utils";
 import { auditActorText } from "@/lib/services/audit-logs";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import type { AuditLog } from "@/types";
 
 interface ActivityTimelineProps {
@@ -15,8 +14,8 @@ interface ActivityTimelineProps {
 
 export function ActivityTimeline({ items, maxHeight = "400px" }: ActivityTimelineProps) {
   return (
-    <ScrollArea style={{ maxHeight }}>
-      <div className="relative space-y-0 pl-6">
+    <div className="w-full overflow-y-auto pr-1" style={{ maxHeight }}>
+      <div className="relative space-y-0 pl-6 pr-3">
         <div className="absolute left-2 top-2 bottom-2 w-px bg-border" />
         {items.map((item) => (
           <div key={item.id} className="relative pb-6 last:pb-0">
@@ -31,6 +30,6 @@ export function ActivityTimeline({ items, maxHeight = "400px" }: ActivityTimelin
           <p className="text-sm text-muted-foreground">No recent activity</p>
         )}
       </div>
-    </ScrollArea>
+    </div>
   );
 }

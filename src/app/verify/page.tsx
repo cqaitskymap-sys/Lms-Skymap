@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import { Suspense } from "react";
-import { CheckCircle2, Loader2, ShieldCheck, XCircle } from "lucide-react";
+import { ArrowLeft, CheckCircle2, Loader2, ShieldCheck, XCircle } from "lucide-react";
 import { verifyCertificate, getCertificateByNumber } from "@/lib/services/certificates";
 import { TrainingCertificate } from "@/components/certificates/training-certificate";
 import { Button } from "@/components/ui/button";
@@ -29,6 +29,7 @@ function VerifyInner() {
   const [result, setResult] = useState<CertificateVerification | null>(null);
   const [cert, setCert] = useState<Certificate | null>(null);
   const [qr, setQr] = useState<string>();
+  const resultAnchor = useRef<HTMLDivElement>(null);
 
   const runVerify = async (value: string) => {
     const trimmed = value.trim();
@@ -67,9 +68,14 @@ function VerifyInner() {
     if (initial) void runVerify(initial);
   }, [initial]);
 
+  useEffect(() => {
+    if (!result || loading) return;
+    resultAnchor.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }, [result, loading]);
+
   return (
     <div
-      className="min-h-screen px-4 py-12"
+      className="verify-surface min-h-screen px-4 py-12"
       style={{
         background:
           "radial-gradient(ellipse at top, #e8f2f4 0%, #f7f5f0 45%, #f0ebe3 100%)",
@@ -92,6 +98,14 @@ function VerifyInner() {
           </p>
         </div>
 
+        <div className="mx-auto w-full max-w-lg">
+          <Button variant="outline" asChild className="border-[#0b3d4a]/20 bg-white text-[#0b3d4a] hover:bg-[#0b3d4a]/5 hover:text-[#0b3d4a] dark:hover:text-[#0b3d4a]">
+            <Link href="/">
+              <ArrowLeft className="mr-1.5 h-4 w-4" />
+              Back
+            </Link>
+          </Button>
+        </div>
         <Card className="mx-auto max-w-lg border-[#0b3d4a]/15">
           <CardHeader>
             <CardTitle className="text-base">Verify</CardTitle>
@@ -121,7 +135,9 @@ function VerifyInner() {
           </CardContent>
         </Card>
 
-        {result?.valid && (
+        {result && (
+        <div ref={resultAnchor} className="scroll-mt-6">
+        {result.valid && (
           <Card className="border-emerald-500/40">
             <CardContent className="flex flex-col items-center gap-3 py-8 text-center">
               <CheckCircle2 className="h-12 w-12 text-emerald-600" />
@@ -150,7 +166,7 @@ function VerifyInner() {
                 ) : null}
                 <p>
                   <span className="text-muted-foreground">Average score:</span>{" "}
-                  {result.percentage}%
+                  {result.percentage != null ? `${result.percentage}%` : "—"}
                 </p>
                 <p>
                   <span className="text-muted-foreground">Issued:</span>{" "}
@@ -164,7 +180,7 @@ function VerifyInner() {
           </Card>
         )}
 
-        {result && !result.valid && (
+        {!result.valid && (
           <Card className="border-destructive/40">
             <CardContent className="flex flex-col items-center gap-3 py-8 text-center">
               <XCircle className="h-12 w-12 text-destructive" />
@@ -174,6 +190,8 @@ function VerifyInner() {
               <p className="text-sm text-muted-foreground">{result.message}</p>
             </CardContent>
           </Card>
+        )}
+        </div>
         )}
 
         {cert && result?.valid && (

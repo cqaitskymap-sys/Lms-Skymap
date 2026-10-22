@@ -163,20 +163,31 @@ function ExamsPageInner() {
           employeeId: profile.employeeId || profile.uid,
           employeeName: profile.displayName,
           inductionAssignmentId: inductionAssignmentId || undefined,
-          assignmentId: assignmentId || undefined,
+          assignmentId: inductionAssignmentId ? undefined : assignmentId || undefined,
           actorId: profile.uid,
         });
         setExam(examDoc);
         setAttempt(started);
+        setSelectedExamId(examId);
+        if (started.status !== "in_progress") {
+          unlockExam();
+          setPhase(examDoc.showResultsImmediately ? "result" : "list");
+          toast.message(
+            started.passed
+              ? `Already submitted — passed with ${started.percentage}%`
+              : "This exam was already submitted."
+          );
+          router.replace("/dashboard/exams");
+          return;
+        }
         setAnswers(started.answersDraft || {});
         setCurrentIndex(0);
         setLastSavedAt(started.lastSavedAt || null);
-        setSelectedExamId(examId);
         setPhase("exam");
         lockExam({ attemptId: started.id, examTitle: examDoc.title });
         router.replace("/dashboard/exams");
         toast.success(
-          started.status === "in_progress" && started.answersDraft
+          started.answersDraft && Object.keys(started.answersDraft).length
             ? "Resumed in-progress exam"
             : "Exam started — submit to unlock navigation"
         );
@@ -308,6 +319,7 @@ function ExamsPageInner() {
           reveal && resultHasKey ? result.questions : full?.questions || result.questions,
       });
       unlockExam();
+      if (result.syncWarning) toast.warning(result.syncWarning);
       if (exam?.showResultsImmediately) {
         setPhase("result");
       } else {
@@ -333,7 +345,22 @@ function ExamsPageInner() {
         );
       });
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Submit failed");
+      const message = e instanceof Error ? e.message : "Submit failed";
+      try {
+        const saved = await getAttempt(attempt.id, {
+          revealAnswers: !!(exam?.allowReview && exam?.showResultsImmediately),
+        });
+        if (saved && saved.status !== "in_progress" && saved.status !== "submitted") {
+          setAttempt(saved);
+          unlockExam();
+          setPhase(exam?.showResultsImmediately ? "result" : "list");
+          toast.message("Your exam was already scored.");
+          return;
+        }
+      } catch {
+        /* keep the original submit error */
+      }
+      toast.error(message);
     } finally {
       submittingRef.current = false;
       setBusy(false);
@@ -730,7 +757,11 @@ function ExamsPageInner() {
                             onClick={(ev) => {
                               ev.stopPropagation();
                               if (!unlocked) return;
-                              void startExam(e.id, inductionAssignmentId || null, assignmentId);
+                              void startExam(
+                                e.id,
+                                inductionAssignmentId || null,
+                                e.inductionModuleId ? undefined : assignmentId
+                              );
                             }}
                           >
                             <Play className="mr-1.5 h-3.5 w-3.5" />

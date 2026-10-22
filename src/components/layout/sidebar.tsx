@@ -84,8 +84,8 @@ export function Sidebar({ open, onClose }: SidebarProps) {
       : [];
 
   const content = (
-    <div className="flex h-full flex-col bg-sidebar text-sidebar-foreground">
-      <div className="flex h-16 items-center justify-between border-b border-sidebar-border/80 px-4">
+    <div className="flex h-full flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground dark:border-white/10">
+      <div className="flex h-16 items-center justify-between border-b border-sidebar-border/80 px-4 dark:border-white/10">
         <Link href="/dashboard" className="flex items-center gap-2 font-semibold tracking-tight">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
@@ -95,7 +95,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
           />
         </Link>
         {onClose && (
-          <Button variant="ghost" size="icon" className="lg:hidden text-sidebar-foreground" onClick={onClose}>
+          <Button variant="ghost" size="icon" className="lg:hidden text-sidebar-foreground" onClick={onClose} aria-label="Close menu">
             <X className="h-4 w-4" />
           </Button>
         )}
@@ -123,18 +123,18 @@ export function Sidebar({ open, onClose }: SidebarProps) {
                 href={item.href}
                 onClick={onClose}
                 className={cn(
-                  "group flex items-center gap-3 rounded-xl px-2.5 py-2 text-sm font-medium transition-all duration-200",
+                  "group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-300",
                   active
-                    ? "bg-white/10 text-white shadow-sm"
-                    : "text-sidebar-foreground/65 hover:bg-white/5 hover:text-white"
+                    ? "nav-pill bg-[linear-gradient(180deg,hsl(250_78%_58%),hsl(250_70%_46%))] text-white"
+                    : "text-sidebar-foreground/80 hover:bg-white/10 hover:text-white"
                 )}
               >
                 <span
                   className={cn(
-                    "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-colors",
+                    "flex h-5 w-5 shrink-0 items-center justify-center transition-transform duration-300",
                     active
-                      ? "bg-sidebar-accent text-white shadow-sm shadow-cyan-900/30"
-                      : "bg-white/5 text-sidebar-foreground/70 group-hover:bg-white/10"
+                      ? "text-white"
+                      : "text-sidebar-foreground/75 group-hover:text-white"
                   )}
                 >
                   <Icon className="h-4 w-4" />
@@ -157,7 +157,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
   return (
     <>
       {/* Desktop */}
-      <aside className="hidden w-64 shrink-0 lg:block">{content}</aside>
+      <aside className="relative z-10 hidden w-64 shrink-0 lg:block">{content}</aside>
       {/* Mobile overlay */}
       {open && (
         <div className="fixed inset-0 z-50 lg:hidden">

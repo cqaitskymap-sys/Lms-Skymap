@@ -56,7 +56,6 @@ const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 const DEMO_SESSION_KEY = "pharma_lms_demo_session";
 const DEMO_LOCKOUT_KEY = "pharma_lms_demo_lockouts";
 const PROFILE_CACHE_KEY = "pharma_lms_profile_cache";
-const PROFILE_CACHE_MS = 10 * 60 * 1000;
 
 function readProfileCache(uid: string): { profile: UserProfile; at: number } | null {
   if (typeof sessionStorage === "undefined") return null;
@@ -121,10 +120,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const fetchProfile = useCallback(async (firebaseUser: User) => {
     const cached = readProfileCache(firebaseUser.uid);
     if (cached) setProfile(cached.profile);
-    if (
-      cached &&
-      (firestoreReadsBlocked() || Date.now() - cached.at < PROFILE_CACHE_MS)
-    ) {
+    // Paint from cache immediately, but only skip Firestore when reads are blocked.
+    // A time-based skip kept demoted or deactivated roles active until the cache expired.
+    if (cached && firestoreReadsBlocked()) {
       return cached.profile;
     }
 

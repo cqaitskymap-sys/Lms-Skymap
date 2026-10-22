@@ -1538,11 +1538,18 @@ export async function approveSopVersionFull(
     const versionSnap = await getDoc(doc(db, COLLECTIONS.sopVersions, versionId));
     if (!versionSnap.exists()) throw new Error("SOP version not found");
     const version = { id: versionSnap.id, ...versionSnap.data() } as SopVersion;
-    if (version.status !== "under_review") {
+    if (version.status !== "under_review" && version.status !== "approved") {
       throw new Error("Submit the version for QA review before approval");
     }
     const parentSnap = await getDoc(doc(db, COLLECTIONS.sops, sopId));
     const parent = parentSnap.exists() ? (parentSnap.data() as SopDocument) : undefined;
+    if (
+      version.status === "approved" &&
+      parent?.status === "approved" &&
+      parent.currentVersionId === versionId
+    ) {
+      return { retrainCount: 0 };
+    }
     assertAssignedApprover(
       {
         assignedApproverId: version.assignedApproverId || parent?.assignedApproverId,
@@ -1553,18 +1560,20 @@ export async function approveSopVersionFull(
     const isRevision = Boolean(version.supersedesVersionId);
     const { effectiveDate, reviewDate } = datesFor(version);
 
-    await updateDoc(doc(db, COLLECTIONS.sopVersions, versionId), {
-      status: "approved",
-      approvedBy: actor.uid,
-      approvedByName: actor.name,
-      approvedAt: now,
-      effectiveDate,
-      reviewDate,
-      updatedAt: now,
-      updatedBy: actor.uid,
-    });
+    if (version.status !== "approved") {
+      await updateDoc(doc(db, COLLECTIONS.sopVersions, versionId), {
+        status: "approved",
+        approvedBy: actor.uid,
+        approvedByName: actor.name,
+        approvedAt: now,
+        effectiveDate,
+        reviewDate,
+        updatedAt: now,
+        updatedBy: actor.uid,
+      });
+    }
 
-    if (version.supersedesVersionId) {
+    if (version.status !== "approved" && version.supersedesVersionId) {
       await updateDoc(doc(db, COLLECTIONS.sopVersions, version.supersedesVersionId), {
         status: "superseded",
         archivedAt: now,
@@ -1575,14 +1584,10 @@ export async function approveSopVersionFull(
 
     // Archive other approved versions
     const others = await getDocs(
-      query(
-        collection(db, COLLECTIONS.sopVersions),
-        where("sopId", "==", sopId),
-        where("status", "==", "approved")
-      )
+      query(collection(db, COLLECTIONS.sopVersions), where("sopId", "==", sopId))
     );
     for (const d of others.docs) {
-      if (d.id === versionId) continue;
+      if (d.id === versionId || d.data().status !== "approved") continue;
       await updateDoc(d.ref, {
         status: "obsolete",
         archivedAt: now,

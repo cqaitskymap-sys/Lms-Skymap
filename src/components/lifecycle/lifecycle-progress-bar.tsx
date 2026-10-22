@@ -30,7 +30,7 @@ export function LifecycleProgressBar({
         </div>
       )}
       <Progress value={value} className="h-2.5" />
-      <p className="text-xs text-muted-foreground">{def.description}</p>
+      <p className="text-xs text-foreground/80">{def.description}</p>
     </div>
   );
 }

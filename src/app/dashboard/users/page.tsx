@@ -375,13 +375,18 @@ export default function UserManagementPage() {
                 <div className="space-y-2 md:col-span-2">
                   <Label>Department {role === "department_head" ? "" : "(optional)"}</Label>
                   <Select
-                    value={departmentId || ""}
-                    onValueChange={(v) => setValue("departmentId", v, { shouldValidate: true })}
+                    value={role === "trainer" ? departmentId || "__none" : departmentId || ""}
+                    onValueChange={(v) =>
+                      setValue("departmentId", v === "__none" ? "" : v, { shouldValidate: true })
+                    }
                   >
                     <SelectTrigger>
                       <SelectValue placeholder="Select department" />
                     </SelectTrigger>
                     <SelectContent>
+                      {role === "trainer" && (
+                        <SelectItem value="__none">No department</SelectItem>
+                      )}
                       {activeDepartments.map((d) => (
                         <SelectItem key={d.id} value={d.id}>
                           {d.name} ({d.code})

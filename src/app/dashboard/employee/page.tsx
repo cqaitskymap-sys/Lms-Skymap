@@ -51,13 +51,13 @@ export default function EmployeeDashboardPage() {
           {loading ? (
             <p className="text-sm text-muted-foreground">Loading your SOPs…</p>
           ) : !progress.hasTni ? (
-            <div className="rounded-xl border border-dashed border-white/30 bg-white/20 p-6 text-sm text-muted-foreground dark:bg-white/5">
+            <div className="rounded-xl border border-dashed border-border bg-muted/60 p-6 text-sm text-muted-foreground">
               <GraduationCap className="mb-2 h-8 w-8 opacity-60" />
               After induction handover, your department will create your Job Description and TNI.
               SOPs added there will appear here.
             </div>
           ) : progress.items.length === 0 ? (
-            <div className="rounded-xl border border-dashed border-white/30 bg-white/20 p-6 text-sm text-muted-foreground dark:bg-white/5">
+            <div className="rounded-xl border border-dashed border-border bg-muted/60 p-6 text-sm text-muted-foreground">
               <BookOpen className="mb-2 h-8 w-8 opacity-60" />
               Your TNI has no SOPs yet. Department will add the SOPs you need to read.
             </div>
@@ -66,7 +66,7 @@ export default function EmployeeDashboardPage() {
               {progress.items.map((item) => (
                 <div
                   key={item.sopId}
-                  className="flex flex-col gap-3 rounded-xl border border-white/20 bg-white/30 p-4 sm:flex-row sm:items-center sm:justify-between dark:bg-white/5"
+                  className="flex flex-col gap-3 rounded-xl border border-border bg-muted/40 p-4 sm:flex-row sm:items-center sm:justify-between"
                 >
                   <div className="min-w-0 space-y-1">
                     <p className="font-medium">{item.title}</p>

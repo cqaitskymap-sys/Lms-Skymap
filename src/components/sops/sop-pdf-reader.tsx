@@ -32,6 +32,7 @@ export function SopPdfReader({
   const [source, setSource] = useState<string>(url);
   const [numPages, setNumPages] = useState(0);
   const [width, setWidth] = useState(640);
+  const [aspect, setAspect] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
   const [renderedCount, setRenderedCount] = useState(0);
@@ -85,12 +86,17 @@ export function SopPdfReader({
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
-    const measure = () => setWidth(Math.max(320, el.clientWidth - 24));
+    const measure = () => {
+      const boxW = Math.max(320, el.clientWidth - 24);
+      const boxH = Math.max(360, el.clientHeight - 16);
+      const next = aspect && aspect > 0 ? Math.min(boxW, boxH / aspect) : boxW;
+      setWidth(Math.max(280, Math.floor(next)));
+    };
     measure();
     const observer = new ResizeObserver(measure);
     observer.observe(el);
     return () => observer.disconnect();
-  }, [source]);
+  }, [source, aspect]);
 
   const emit = useCallback(() => {
     if (!trackPages || !onPagesProgress || numPages <= 0) return;
@@ -166,7 +172,7 @@ export function SopPdfReader({
   }
 
   return (
-    <div className="flex h-full min-h-[480px] flex-col overflow-hidden rounded-lg border bg-muted/30">
+    <div className="flex h-[min(78vh,920px)] min-h-[520px] flex-col overflow-hidden rounded-lg border bg-muted/30">
       <div className="flex items-center justify-between gap-2 border-b bg-card px-3 py-2 text-sm font-medium">
         <span className="flex items-center gap-2">
           <FileText className="h-4 w-4 text-primary" />
@@ -227,6 +233,11 @@ export function SopPdfReader({
               onVisible={markPage}
               onBottomVisible={markLastPage}
               onRendered={markRendered}
+              onMetrics={
+                i === 0
+                  ? (ratio) => setAspect((current) => current ?? ratio)
+                  : undefined
+              }
             />
           ))}
         </Document>
@@ -243,6 +254,7 @@ function TrackedPage({
   onVisible,
   onBottomVisible,
   onRendered,
+  onMetrics,
 }: {
   pageNumber: number;
   last: boolean;
@@ -251,6 +263,7 @@ function TrackedPage({
   onVisible: (page: number) => void;
   onBottomVisible: () => void;
   onRendered?: (page: number) => void;
+  onMetrics?: (heightOverWidth: number) => void;
 }) {
   const topRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -275,13 +288,17 @@ function TrackedPage({
   }, [root, pageNumber, last, onVisible, onBottomVisible, width]);
 
   return (
-    <div className={cn("relative w-full max-w-full shadow-sm")}>
+    <div className={cn("relative w-fit max-w-full shadow-sm")}>
       <div ref={topRef} className="h-1 w-full" />
       <Page
         pageNumber={pageNumber}
         width={width}
         renderTextLayer={false}
         renderAnnotationLayer={false}
+        onLoadSuccess={(page) => {
+          const viewport = page.getViewport({ scale: 1 });
+          if (viewport.width > 0) onMetrics?.(viewport.height / viewport.width);
+        }}
         onRenderSuccess={() => onRendered?.(pageNumber)}
         className="overflow-hidden rounded-sm bg-white"
       />

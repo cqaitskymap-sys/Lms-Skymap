@@ -1,6 +1,7 @@
 import { IPQA_SECTIONS } from "@/lib/jd/ipqa-responsibilities";
 import { PRODUCTION_SECTIONS } from "@/lib/jd/production-responsibilities";
 import { QA_SECTIONS } from "@/lib/jd/qa-responsibilities";
+import { QC_SECTIONS } from "@/lib/jd/qc-responsibilities";
 
 export interface JdResponsibilityLine {
   id: string;
@@ -743,6 +744,11 @@ const RESPONSIBILITY_CATALOG: CatalogDepartment[] = [
     id: "ipqa",
     matchers: ["ipqa", "in process qa"],
     sections: IPQA_SECTIONS,
+  },
+  {
+    id: "qc",
+    matchers: ["qc", "quality control"],
+    sections: QC_SECTIONS,
   },
 ];
 

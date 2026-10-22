@@ -197,7 +197,7 @@ export async function getAttempt(
       const snap = await getDoc(doc(db, COLLECTIONS.assessmentAttempts, id));
       if (snap.exists()) attempt = { id: snap.id, ...snap.data() } as AssessmentAttempt;
     } catch {
-      attempt = readAssessmentStore().attempts.find((a) => a.id === id) || null;
+      return null;
     }
   }
   if (!attempt) return null;
@@ -388,7 +388,7 @@ export async function submitAssessment(
   attemptId: string,
   answers: Record<string, string[]>,
   actorId: string
-): Promise<AssessmentAttempt> {
+): Promise<AssessmentAttempt & { syncWarning?: string }> {
   if (!(await preferLocalData())) {
     const res = await fetch("/api/assessments/submit", {
       method: "POST",
@@ -398,12 +398,13 @@ export async function submitAssessment(
     const body = (await res.json().catch(() => ({}))) as {
       success?: boolean;
       error?: string;
+      warning?: string;
       attempt?: AssessmentAttempt;
     };
     if (!res.ok || !body.attempt) {
       throw new Error(body.error || "Could not submit assessment");
     }
-    return body.attempt;
+    return body.warning ? { ...body.attempt, syncWarning: body.warning } : body.attempt;
   }
 
   const attempt: AssessmentAttempt | null =
@@ -754,9 +755,7 @@ export async function listAttemptsForEmployee(
     );
     return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as AssessmentAttempt);
   } catch {
-    return readAssessmentStore().attempts.filter(
-      (a) => a.examId === examId && a.employeeId === employeeId
-    );
+    return [];
   }
 }
 

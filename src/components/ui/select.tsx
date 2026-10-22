@@ -16,7 +16,7 @@ const SelectTrigger = React.forwardRef<
   <SelectPrimitive.Trigger
     ref={ref}
       className={cn(
-        "flex h-10 w-full items-center justify-between whitespace-nowrap rounded-xl border border-input/80 bg-muted/35 px-3.5 py-2 text-sm shadow-none ring-offset-background transition-all placeholder:text-muted-foreground focus:border-primary/40 focus:bg-background focus:outline-none focus:ring-4 focus:ring-primary/10 disabled:cursor-not-allowed disabled:opacity-50 [&>span]:line-clamp-1",
+        "flex h-10 w-full items-center justify-between whitespace-nowrap rounded-xl border border-input bg-background px-3.5 py-2 text-sm shadow-none ring-offset-background transition-all placeholder:text-muted-foreground focus:border-primary/40 focus:outline-none focus:ring-4 focus:ring-primary/10 disabled:cursor-not-allowed disabled:opacity-50 [&>span]:line-clamp-1 dark:border-white/10 dark:bg-white/[0.04] dark:shadow-[inset_0_1px_0_hsl(0_0%_100%/0.04)] dark:focus:border-primary/50 dark:focus:bg-white/[0.06] dark:focus:ring-primary/20",
         className
       )}
     {...props}
@@ -48,7 +48,11 @@ const SelectContent = React.forwardRef<
         <ChevronUp className="h-4 w-4" />
       </SelectPrimitive.ScrollUpButton>
       <SelectPrimitive.Viewport
-        className={cn("p-1", position === "popper" && "h-[var(--radix-select-trigger-height)] w-full min-w-[var(--radix-select-trigger-width)]")}
+        className={cn(
+          "p-1",
+          position === "popper" &&
+            "max-h-80 w-full min-w-[var(--radix-select-trigger-width)] overflow-y-auto"
+        )}
       >
         {children}
       </SelectPrimitive.Viewport>

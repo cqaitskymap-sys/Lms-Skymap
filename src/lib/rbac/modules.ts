@@ -71,7 +71,7 @@ export const APP_MODULE_DEFS: AppModuleDef[] = [
     id: "departments",
     title: "Departments",
     href: "/dashboard/departments",
-    roles: ["super_admin", "hr", "qa"],
+    roles: ["super_admin", "hr", "qa", "department_head"],
   },
   {
     id: "jd",

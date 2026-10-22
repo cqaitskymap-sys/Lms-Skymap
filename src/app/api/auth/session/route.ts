@@ -6,6 +6,7 @@ import {
 } from "@/constants/auth";
 import { adminAuth, isAdminConfigured } from "@/lib/firebase/admin";
 import {
+  checkLoginAllowed,
   recordLoginSuccess,
   updateUserLastLogin,
   writeActivityLogServer,
@@ -65,6 +66,20 @@ export async function POST(request: NextRequest) {
     }
 
     const decoded = await adminAuth.verifyIdToken(idToken, true);
+    const lockEmail = decoded.email?.trim();
+    if (lockEmail) {
+      try {
+        const gate = await checkLoginAllowed(lockEmail);
+        if (!gate.allowed) {
+          return NextResponse.json(
+            { success: false, error: gate.message || "Account is temporarily locked" },
+            { status: 423 }
+          );
+        }
+      } catch (lockErr) {
+        console.error("[auth/session] lockout check failed:", lockErr);
+      }
+    }
     let sessionCookie: string;
     try {
       sessionCookie = await adminAuth.createSessionCookie(idToken, {

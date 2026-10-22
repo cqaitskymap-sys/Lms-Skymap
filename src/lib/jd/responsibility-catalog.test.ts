@@ -44,7 +44,12 @@ test("QA, Production, and HR catalogs stay on their own departments", () => {
       (row) => row.designation === "Officer HR"
     )
   );
-  assert.equal(departmentHasResponsibilityCatalog({ name: "Quality Control", code: "QC" }), false);
+  assert.equal(departmentHasResponsibilityCatalog({ name: "Quality Control", code: "QC" }), true);
+  assert.ok(sectionsForDepartment({ name: "Quality Control", code: "QC" }).includes("RM / PM"));
+  assert.equal(
+    sectionsForDepartment({ name: "Quality Assurance", code: "QA" }).includes("RM / PM"),
+    false
+  );
   assert.equal(departmentHasResponsibilityCatalog({ name: "Packaging", code: "PKG" }), false);
   assert.equal(departmentHasResponsibilityCatalog({ name: "QA Microbiology", code: "QAM" }), false);
   assert.equal(departmentHasResponsibilityCatalog({ name: "Microbiology", code: "MICRO" }), false);

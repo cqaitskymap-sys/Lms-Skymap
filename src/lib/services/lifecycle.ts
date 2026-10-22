@@ -204,8 +204,9 @@ export async function listPendingApprovals(): Promise<LifecycleApproval[]> {
       return snap.docs
         .map((d) => ({ id: d.id, ...d.data() }) as LifecycleApproval)
         .sort((a, b) => (b.requestedAt || "").localeCompare(a.requestedAt || ""));
-    } catch {
-      return readLifecycleStore().approvals.filter((a) => a.status === "pending");
+    } catch (fallbackErr) {
+      console.warn("[lifecycle] pending approvals unavailable", fallbackErr);
+      return [];
     }
   }
 }

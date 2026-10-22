@@ -31,10 +31,10 @@ export function NotificationsPanel({ items }: { items: DashNotification[] }) {
               key={n.id}
               href={n.href || "/dashboard/notifications"}
               className={cn(
-                "block rounded-lg border px-3 py-2.5 transition-colors hover:bg-white/40 dark:hover:bg-white/5",
+                "block rounded-lg border px-3 py-2.5 transition-colors hover:bg-muted dark:hover:bg-white/5",
                 n.unread
                   ? "border-primary/30 bg-primary/5"
-                  : "border-transparent bg-white/20 dark:bg-white/5"
+                  : "border-transparent bg-muted/70 dark:bg-white/5"
               )}
             >
               <div className="flex items-start gap-2">
@@ -63,7 +63,7 @@ export function QuickActions({ actions }: { actions: DashQuickAction[] }) {
             <Link
               key={a.href + a.label}
               href={a.href}
-              className="group flex flex-col items-center gap-2 rounded-xl border border-white/20 bg-white/25 px-3 py-4 text-center transition-all hover:-translate-y-0.5 hover:bg-white/50 dark:bg-white/5 dark:hover:bg-white/10"
+              className="group flex flex-col items-center gap-2 rounded-xl border border-border bg-muted/70 px-3 py-4 text-center transition-all hover:-translate-y-0.5 hover:bg-muted dark:border-white/10 dark:bg-white/5 dark:hover:bg-white/10"
             >
               <div className="rounded-lg bg-primary/15 p-2.5 text-primary transition-colors group-hover:bg-primary group-hover:text-primary-foreground">
                 <a.icon className="h-4 w-4" />
@@ -89,25 +89,34 @@ export function TodaysTasks({ tasks }: { tasks: DashTask[] }) {
       <GlassCard className="h-full">
         <GlassCardHeader title="Today's tasks" description="Prioritized for your role" />
         <div className="space-y-2">
-          {tasks.map((t) => (
-            <Link
-              key={t.id}
-              href={t.href || "#"}
-              className="flex items-start gap-3 rounded-lg border border-transparent px-2 py-2 transition-colors hover:border-border hover:bg-white/40 dark:hover:bg-white/5"
-            >
-              {t.done ? (
-                <CheckCircle2 className="mt-0.5 h-4 w-4 text-emerald-600" />
-              ) : (
-                <Circle className="mt-0.5 h-4 w-4 text-muted-foreground" />
-              )}
-              <div className="min-w-0 flex-1">
-                <p className="text-sm font-medium leading-snug">{t.title}</p>
-                <p className={cn("text-[11px]", priorityColor[t.priority])}>
-                  {t.priority.toUpperCase()} · {t.due}
-                </p>
+          {tasks.map((t) => {
+            const className =
+              "flex items-start gap-3 rounded-lg border border-transparent px-2 py-2 transition-colors hover:border-border hover:bg-muted dark:hover:bg-white/5";
+            const body = (
+              <>
+                {t.done ? (
+                  <CheckCircle2 className="mt-0.5 h-4 w-4 text-emerald-600" />
+                ) : (
+                  <Circle className="mt-0.5 h-4 w-4 text-muted-foreground" />
+                )}
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium leading-snug">{t.title}</p>
+                  <p className={cn("text-[11px]", priorityColor[t.priority])}>
+                    {t.priority.toUpperCase()} · {t.due}
+                  </p>
+                </div>
+              </>
+            );
+            return t.href ? (
+              <Link key={t.id} href={t.href} className={className}>
+                {body}
+              </Link>
+            ) : (
+              <div key={t.id} className={className}>
+                {body}
               </div>
-            </Link>
-          ))}
+            );
+          })}
         </div>
       </GlassCard>
     </MotionItem>
@@ -116,8 +125,8 @@ export function TodaysTasks({ tasks }: { tasks: DashTask[] }) {
 
 export function RecentActivities({ items }: { items: DashActivity[] }) {
   return (
-    <MotionItem className="h-full">
-      <GlassCard className="h-full">
+    <MotionItem>
+      <GlassCard>
         <GlassCardHeader title="Recent activities" description="Live operational trail" />
         <ActivityTimeline
           items={items.map((a) => ({
@@ -127,7 +136,7 @@ export function RecentActivities({ items }: { items: DashActivity[] }) {
             actorEmail: a.actor,
             action: a.action as never,
           }))}
-          maxHeight="280px"
+          maxHeight="320px"
         />
       </GlassCard>
     </MotionItem>

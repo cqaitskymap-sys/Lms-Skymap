@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { Plus, FileText, Eye, PenLine, Layers, CheckCircle2, Send } from "lucide-react";
 import { toast } from "sonner";
@@ -8,6 +8,7 @@ import { RequirePermission } from "@/components/auth/require-permission";
 import { AdminDeleteButton } from "@/components/auth/admin-delete-button";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { DataToolbar } from "@/components/shared/data-toolbar";
+import { Pagination } from "@/components/shared/pagination";
 import {
   SopBulkApproveDialog,
   SopSendForApprovalDialog,
@@ -32,6 +33,8 @@ import { SopLoading } from "@/components/sops/sop-media-preview";
 import type { SopDocument, SopVersion } from "@/types";
 
 type SopRow = SopDocument & { version?: SopVersion };
+
+const PAGE_SIZE = 50;
 
 function approverIdOf(sop: SopRow) {
   return sop.assignedApproverId || sop.version?.assignedApproverId || "";
@@ -94,6 +97,8 @@ export default function SopsPage() {
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState<string | null>(null);
   const [approveTargets, setApproveTargets] = useState<SopRow[]>([]);
+  const [page, setPage] = useState(1);
+  const listRef = useRef<HTMLDivElement>(null);
 
   const mine = useMemo(
     () =>
@@ -117,6 +122,20 @@ export default function SopsPage() {
     });
   }, [sops, search, status, mineOnly, profile?.uid]);
 
+  useEffect(() => {
+    setPage(1);
+  }, [search, status, mineOnly]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const pageStart = filtered.length === 0 ? 0 : (currentPage - 1) * PAGE_SIZE;
+  const pageRows = filtered.slice(pageStart, pageStart + PAGE_SIZE);
+
+  const changePage = (next: number) => {
+    setPage(next);
+    listRef.current?.scrollTo({ top: 0 });
+  };
+
   const selectable = useMemo(
     () => filtered.filter((sop) => workflowOf(sop) !== null),
     [filtered]
@@ -138,7 +157,10 @@ export default function SopsPage() {
       (!approverIdOf(sop) || approverIdOf(sop) === profile?.uid)
   );
   const allSelected = selectable.length > 0 && selectable.every((sop) => selected.has(sop.id));
-  const someSelected = selectable.some((sop) => selected.has(sop.id));
+  const pageSelectable = pageRows.filter((sop) => workflowOf(sop) !== null);
+  const pageAllSelected =
+    pageSelectable.length > 0 && pageSelectable.every((sop) => selected.has(sop.id));
+  const pageSomeSelected = pageSelectable.some((sop) => selected.has(sop.id));
 
   useEffect(() => {
     const ids = new Set(sops.map((sop) => sop.id));
@@ -153,17 +175,19 @@ export default function SopsPage() {
       .map((id) => departments.find((d) => d.id === id)?.code || id)
       .join(", ");
 
-  const toggleAll = () => {
+  const toggleMany = (rows: SopRow[], clear: boolean) => {
     setSelected((prev) => {
       const next = new Set(prev);
-      if (allSelected) {
-        for (const sop of selectable) next.delete(sop.id);
-      } else {
-        for (const sop of selectable) next.add(sop.id);
+      for (const sop of rows) {
+        if (clear) next.delete(sop.id);
+        else next.add(sop.id);
       }
       return next;
     });
   };
+
+  const toggleAll = () => toggleMany(selectable, allSelected);
+  const togglePage = () => toggleMany(pageSelectable, pageAllSelected);
 
   const toggleOne = (id: string, on: boolean) => {
     setSelected((prev) => {
@@ -271,7 +295,8 @@ export default function SopsPage() {
 
   return (
     <RequirePermission permission={["sops:read"]}>
-      <div className="space-y-6 pb-24">
+      <div className={`flex min-w-0 w-full flex-col gap-4 ${canBulk && selected.size > 0 ? "pb-44 sm:pb-28" : ""}`}>
+        <div className="shrink-0 space-y-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h1 className="text-2xl font-bold tracking-tight">
@@ -379,8 +404,9 @@ export default function SopsPage() {
             if (key === "status") setStatus(value);
           }}
         />
+        </div>
 
-        <Card>
+        <Card className="flex min-h-[320px] min-w-0 w-full flex-col">
           <CardHeader className="flex flex-row items-center justify-between gap-3 space-y-0">
             <CardTitle className="text-base">{filtered.length} documents</CardTitle>
             <div className="flex flex-wrap gap-2">
@@ -400,17 +426,17 @@ export default function SopsPage() {
               )}
             </div>
           </CardHeader>
-          <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
+          <CardContent className="min-w-0 pb-2">
+            <Table className="min-w-[1100px]" containerClassName="min-w-0 w-full" containerRef={listRef}>
+              <TableHeader className="sop-table-head">
+                <TableRow className="hover:bg-transparent">
                   {canBulk && (
                     <TableHead className="w-10">
                       <Checkbox
-                        checked={allSelected ? true : someSelected ? "indeterminate" : false}
-                        onCheckedChange={toggleAll}
-                        disabled={selectable.length === 0}
-                        aria-label="Select all SOPs"
+                        checked={pageAllSelected ? true : pageSomeSelected ? "indeterminate" : false}
+                        onCheckedChange={togglePage}
+                        disabled={pageSelectable.length === 0}
+                        aria-label="Select SOPs on this page"
                       />
                     </TableHead>
                   )}
@@ -455,7 +481,7 @@ export default function SopsPage() {
                     </TableCell>
                   </TableRow>
                 ) : (
-                  filtered.map((s) => {
+                  pageRows.map((s) => {
                     const canSelect = workflowOf(s) !== null;
                     const pendingWorkflow = workflowOf(s);
                     const approverName = approverNameOf(s);
@@ -533,10 +559,23 @@ export default function SopsPage() {
               </TableBody>
             </Table>
           </CardContent>
+          <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-t border-border/70 px-6 py-3">
+            <p className="text-sm text-muted-foreground">
+              {filtered.length === 0
+                ? "0 documents"
+                : `Showing ${pageStart + 1}–${pageStart + pageRows.length} of ${filtered.length} · 50 per page`}
+            </p>
+            <Pagination
+              page={currentPage}
+              totalPages={totalPages}
+              onPageChange={changePage}
+              className="pt-0"
+            />
+          </div>
         </Card>
 
         {canBulk && selected.size > 0 && (
-          <div className="pointer-events-none fixed inset-x-0 bottom-6 z-40 flex justify-center px-4 lg:pl-64">
+          <div className="pointer-events-none fixed inset-x-0 bottom-4 z-40 flex justify-center px-4 sm:bottom-6 sm:pr-44 lg:pl-64">
             <div className="pointer-events-auto flex flex-wrap items-center gap-2 rounded-2xl border bg-background px-4 py-3 shadow-lift">
               <p className="mr-1 text-sm font-medium">{selected.size} selected</p>
               {canWrite && (
