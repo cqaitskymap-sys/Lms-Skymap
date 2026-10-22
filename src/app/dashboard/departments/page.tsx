@@ -94,7 +94,6 @@ function DepartmentForm({
             placeholder="QA"
             className="uppercase"
             {...register("code")}
-            disabled={Boolean(defaultValues?.code)}
           />
           {errors.code && <p className="text-xs text-destructive">{errors.code.message}</p>}
         </div>
@@ -162,6 +161,7 @@ export default function DepartmentsPage() {
   const handleEdit = async (data: CreateDepartmentInput) => {
     if (!editing) return;
     const patch: UpdateDepartmentInput = {
+      code: data.code,
       name: data.name,
       description: data.description,
     };
@@ -369,7 +369,7 @@ export default function DepartmentsPage() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Edit department</DialogTitle>
-            <DialogDescription>Code cannot be changed after creation.</DialogDescription>
+            <DialogDescription>Update the department code, name, and description.</DialogDescription>
           </DialogHeader>
           {editing && (
             <DepartmentForm
