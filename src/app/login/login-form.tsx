@@ -95,7 +95,7 @@ function LoginForm() {
   ];
 
   return (
-    <div className="flex min-h-screen">
+    <div className="flex min-h-screen lg:h-screen lg:overflow-hidden">
       <div className="relative hidden w-1/2 overflow-hidden bg-slate-900 lg:block">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
@@ -142,7 +142,7 @@ function LoginForm() {
         </div>
       </div>
 
-      <div className="dashboard-atmosphere relative flex w-full flex-col justify-center overflow-hidden bg-gradient-to-br from-slate-50 via-white to-cyan-50/50 px-6 py-12 lg:w-1/2">
+      <div className="dashboard-atmosphere relative flex min-h-screen w-full flex-col justify-center overflow-y-auto bg-gradient-to-br from-slate-50 via-white to-cyan-50/50 px-6 py-12 lg:h-full lg:min-h-0 lg:w-1/2 dark:from-transparent dark:via-transparent dark:to-transparent">
         <div aria-hidden className="pointer-events-none absolute inset-0 hidden dark:block">
           <div className="absolute left-1/2 top-[38%] h-72 w-72 -translate-x-1/2 -translate-y-1/2 rounded-full bg-sky-400/30 blur-[80px]" />
           <div className="absolute -right-10 bottom-10 h-56 w-56 rounded-full bg-violet-500/30 blur-[70px]" />

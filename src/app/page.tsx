@@ -5,7 +5,7 @@ import { DeveloperCredit } from "@/components/shared/developer-credit";
 
 export default function HomePage() {
   return (
-    <div className="relative min-h-screen overflow-hidden bg-slate-100 dark:bg-slate-950">
+    <div className="relative min-h-screen overflow-x-hidden bg-slate-100 dark:bg-slate-950">
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
         src="/brand/landing-bg.jpg"
