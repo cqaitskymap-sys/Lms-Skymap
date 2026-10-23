@@ -29,7 +29,7 @@ export function SopPdfReader({
   trackPages = false,
   onPagesProgress,
 }: SopPdfReaderProps) {
-  const [source, setSource] = useState<string>(url);
+  const [file, setFile] = useState<Blob | string | null>(null);
   const [numPages, setNumPages] = useState(0);
   const [width, setWidth] = useState(640);
   const [aspect, setAspect] = useState<number | null>(null);
@@ -40,48 +40,88 @@ export function SopPdfReader({
   const renderedRef = useRef<Set<number>>(new Set());
   const seenRef = useRef<Set<number>>(new Set());
   const lastPageRef = useRef(false);
-  const objectUrlRef = useRef<string | null>(null);
+  const loadIdRef = useRef(0);
+  const fileLoadIdRef = useRef(0);
+  const onPagesProgressRef = useRef(onPagesProgress);
+  onPagesProgressRef.current = onPagesProgress;
 
   useEffect(() => {
-    let cancelled = false;
+    const loadId = ++loadIdRef.current;
     setLoading(true);
     setFailed(false);
+    setFile(null);
     setNumPages(0);
+    setAspect(null);
     setRenderedCount(0);
     seenRef.current = new Set();
     renderedRef.current = new Set();
     lastPageRef.current = false;
 
-    const apply = (next: string) => {
-      if (!cancelled) setSource(next);
+    const stillCurrent = () => loadId === loadIdRef.current;
+
+    const commit = (next: Blob | string) => {
+      if (!stillCurrent()) return;
+      fileLoadIdRef.current = loadId;
+      setFile(next);
+      setFailed(false);
     };
 
-    if (url.startsWith("data:") || !isFirebasePath(storagePath)) {
-      apply(url);
-      return () => {
-        cancelled = true;
-      };
-    }
-
-    void getBlob(storageRef(storage, storagePath!))
-      .then((blob) => {
-        if (cancelled) return;
-        const objectUrl = URL.createObjectURL(blob);
-        objectUrlRef.current = objectUrl;
-        apply(objectUrl);
-      })
-      .catch(() => {
-        if (!cancelled) apply(url);
-      });
-
-    return () => {
-      cancelled = true;
-      if (objectUrlRef.current) {
-        URL.revokeObjectURL(objectUrlRef.current);
-        objectUrlRef.current = null;
+    const giveUp = () => {
+      if (!stillCurrent()) return;
+      setFailed(true);
+      setLoading(false);
+      if (trackPages) {
+        onPagesProgressRef.current?.({
+          pageCount: 0,
+          pagesSeen: [],
+          reachedLastPage: false,
+          allPagesViewed: false,
+        });
       }
     };
-  }, [url, storagePath]);
+
+    const load = async () => {
+      if (!url) {
+        giveUp();
+        return;
+      }
+
+      if (url.startsWith("data:")) {
+        commit(url);
+        return;
+      }
+
+      if (isFirebasePath(storagePath)) {
+        try {
+          const blob = await getBlob(storageRef(storage, storagePath!));
+          if (!stillCurrent()) return;
+          commit(blob);
+          return;
+        } catch {
+          // Download URL is the fallback when the Storage SDK request fails.
+        }
+      }
+
+      try {
+        const response = await fetch(url);
+        if (!response.ok) throw new Error(String(response.status));
+        const blob = await response.blob();
+        if (!stillCurrent()) return;
+        commit(blob);
+      } catch {
+        if (!isFirebasePath(storagePath) && url) {
+          commit(url);
+          return;
+        }
+        giveUp();
+      }
+    };
+
+    void load();
+    return () => {
+      loadIdRef.current += 1;
+    };
+  }, [url, storagePath, trackPages]);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -96,7 +136,7 @@ export function SopPdfReader({
     const observer = new ResizeObserver(measure);
     observer.observe(el);
     return () => observer.disconnect();
-  }, [source, aspect]);
+  }, [file, aspect]);
 
   const emit = useCallback(() => {
     if (!trackPages || !onPagesProgress || numPages <= 0) return;
@@ -194,10 +234,12 @@ export function SopPdfReader({
             <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
           </div>
         )}
+        {file && (
         <Document
-          file={source}
+          file={file}
           loading=""
           onLoadSuccess={({ numPages: count }) => {
+            if (fileLoadIdRef.current !== loadIdRef.current) return;
             setNumPages(count);
             setLoading(false);
             if (trackPages) {
@@ -210,6 +252,7 @@ export function SopPdfReader({
             }
           }}
           onLoadError={() => {
+            if (fileLoadIdRef.current !== loadIdRef.current) return;
             setFailed(true);
             setLoading(false);
             if (trackPages) {
@@ -241,6 +284,7 @@ export function SopPdfReader({
             />
           ))}
         </Document>
+        )}
       </div>
     </div>
   );

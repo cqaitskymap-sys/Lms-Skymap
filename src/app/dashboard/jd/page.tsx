@@ -1927,7 +1927,7 @@ function JdPageInner() {
                 const highlighted = acknowledgeFromUrl === record.id;
                 const signoffLine = (label: string, signoff?: { name?: string; status?: string; acknowledgedAt?: string }) =>
                   signoff?.name ? (
-                    <p className="text-base text-muted-foreground">
+                    <p className="text-xs text-muted-foreground">
                       {label}:{" "}
                       <span className="font-medium text-foreground">{signoff.name}</span>
                       {signoff.status === "acknowledged"
@@ -1939,22 +1939,22 @@ function JdPageInner() {
                   <div
                     key={record.id}
                     id={`jd-${record.id}`}
-                    className={`flex w-full flex-wrap items-start justify-between gap-4 rounded-lg border p-5 ${
+                    className={`flex w-full flex-wrap items-start justify-between gap-3 rounded-lg border p-3 ${
                       highlighted ? "border-primary ring-2 ring-primary/30" : ""
                     }`}
                   >
-                    <div className="min-w-0 flex-1 space-y-2">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <p className="text-xl font-semibold">{record.title}</p>
+                    <div className="min-w-0 flex-1 space-y-0.5">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <p className="text-sm font-semibold leading-tight">{record.title}</p>
                         <Badge variant={statusBadgeVariant(record.status)}>
                           {record.status}
                         </Badge>
-                        <span className="font-mono text-sm text-muted-foreground">
+                        <span className="font-mono text-xs text-muted-foreground">
                           {record.jdNo || record.id}
                         </span>
-                        <span className="text-sm text-muted-foreground">Rev. {record.version}</span>
+                        <span className="text-xs text-muted-foreground">Rev. {record.version}</span>
                       </div>
-                      <p className="text-base text-muted-foreground">
+                      <p className="text-xs text-muted-foreground">
                         {(() => {
                           const card = employeeCards[record.employeeId];
                           const name = readablePersonName(
@@ -1968,7 +1968,7 @@ function JdPageInner() {
                         })()}{" "}
                         · {departmentLabel(departments, record.departmentId)}
                       </p>
-                      <p className="text-base text-muted-foreground">
+                      <p className="text-xs text-muted-foreground">
                         Effective: {formatDate(record.effectiveFrom)}
                         {record.approvedAt
                           ? ` · Approved ${formatDate(record.approvedAt)}`
@@ -1979,13 +1979,13 @@ function JdPageInner() {
                           href={record.sourceDocument.downloadUrl}
                           target="_blank"
                           rel="noreferrer"
-                          className="text-base font-medium text-primary hover:underline"
+                          className="text-xs font-medium text-primary hover:underline"
                         >
                           Uploaded file: {record.sourceDocument.fileName}
                         </a>
                       )}
                       {record.absenceHandoverName && (
-                        <p className="text-base text-muted-foreground">
+                        <p className="text-xs text-muted-foreground">
                           Absence handover:{" "}
                           <span className="font-medium text-foreground">
                             {record.absenceHandoverName}
@@ -2000,29 +2000,30 @@ function JdPageInner() {
                       {record.absenceHandoverStatus === "acknowledged" &&
                         (record.absenceHandoverAcknowledgedByName ||
                           record.absenceHandoverSignatureText) && (
-                          <div className="rounded-md border border-dashed bg-muted/40 px-4 py-3">
+                          <div className="mt-1.5 w-fit max-w-full rounded-md border border-dashed bg-muted/40 px-2.5 py-1.5">
                             <p
-                              className="text-2xl leading-tight text-blue-900"
+                              className="text-base leading-tight text-blue-800 dark:text-blue-300"
                               style={{ fontFamily: '"Segoe Script", "Lucida Handwriting", cursive' }}
                             >
                               {record.absenceHandoverAcknowledgedByName ||
                                 record.absenceHandoverName}
                             </p>
-                            <p className="text-sm italic text-muted-foreground">
+                            <p className="text-[11px] italic leading-tight text-muted-foreground">
                               Electronically computer-generated signature
                             </p>
                             {record.absenceHandoverSignatureText && (
-                              <p className="text-sm text-muted-foreground">
+                              <p className="text-[11px] leading-tight text-muted-foreground">
                                 {record.absenceHandoverSignatureText}
                               </p>
                             )}
                           </div>
                         )}
                     </div>
-                    <div className="flex flex-wrap gap-2">
+                    <div className="flex flex-wrap items-center gap-1.5">
                       <Button
                         type="button"
                         variant="outline"
+                        size="sm"
                         onClick={() => void handlePrint(record)}
                       >
                         <Printer className="mr-1 h-3.5 w-3.5" />
