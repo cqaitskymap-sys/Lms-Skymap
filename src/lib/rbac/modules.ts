@@ -77,13 +77,13 @@ export const APP_MODULE_DEFS: AppModuleDef[] = [
     id: "jd",
     title: "Job Descriptions",
     href: "/dashboard/jd",
-    roles: ["super_admin", "department_head", "employee", "hr"],
+    roles: ["super_admin", "department_head", "employee", "hr", "qa", "trainer"],
   },
   {
     id: "tni",
     title: "TNI",
     href: "/dashboard/tni",
-    roles: ["super_admin", "department_head", "employee", "hr", "qa"],
+    roles: ["super_admin", "department_head", "employee", "hr", "qa", "trainer"],
   },
   {
     id: "sops",

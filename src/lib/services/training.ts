@@ -441,37 +441,64 @@ export async function completeTrainingSession(
 
   if (!session) return;
 
+  const presentAdvanceFrom = new Set([
+    "assigned",
+    "in_progress",
+    "training_scheduled",
+    "training_completed",
+    "retraining",
+  ]);
+  const absentFailFrom = new Set([
+    "assigned",
+    "in_progress",
+    "training_scheduled",
+    "training_completed",
+  ]);
+
   const updateAssignmentStatus = async (
     employeeId: string,
-    patch: Partial<TrainingAssignment>
+    patch: Partial<TrainingAssignment>,
+    allowed: Set<string>
   ) => {
+    let changed = 0;
     if (local) {
       const store = readTrainingStore();
-      store.assignments = store.assignments.map((a) =>
-        a.employeeId === employeeId && a.sessionId === sessionId
-          ? { ...a, ...patch, updatedAt: now, updatedBy: actorId }
-          : a
-      );
+      store.assignments = store.assignments.map((a) => {
+        if (a.employeeId !== employeeId || a.sessionId !== sessionId || !allowed.has(a.status)) {
+          return a;
+        }
+        changed += 1;
+        return { ...a, ...patch, updatedAt: now, updatedBy: actorId };
+      });
       writeTrainingStore(store);
-    } else {
-      const q = query(
-        collection(db, COLLECTIONS.trainingAssignments),
-        where("employeeId", "==", employeeId),
-        where("sessionId", "==", sessionId)
-      );
-      const snap = await getDocs(q);
-      for (const d of snap.docs) {
-        await updateDoc(d.ref, { ...patch, updatedAt: now, updatedBy: actorId });
-      }
+      return changed;
     }
+    const q = query(
+      collection(db, COLLECTIONS.trainingAssignments),
+      where("employeeId", "==", employeeId),
+      where("sessionId", "==", sessionId)
+    );
+    const snap = await getDocs(q);
+    for (const d of snap.docs) {
+      const status = (d.data() as { status?: string }).status || "";
+      if (!allowed.has(status)) continue;
+      changed += 1;
+      await updateDoc(d.ref, { ...patch, updatedAt: now, updatedBy: actorId });
+    }
+    return changed;
   };
 
   const attendance = session.attendance || [];
   for (const att of attendance.filter((a) => a.present && a.employeeId)) {
-    await updateAssignmentStatus(att.employeeId, {
-      status: "assessment_pending",
-      trainingCompletedAt: now,
-    });
+    const changed = await updateAssignmentStatus(
+      att.employeeId,
+      {
+        status: "assessment_pending",
+        trainingCompletedAt: now,
+      },
+      presentAdvanceFrom
+    );
+    if (!changed) continue;
 
     await notifyEmployee({
       employeeId: att.employeeId,
@@ -484,9 +511,14 @@ export async function completeTrainingSession(
   }
 
   for (const att of attendance.filter((a) => !a.present && a.employeeId)) {
-    await updateAssignmentStatus(att.employeeId, {
-      status: "failed",
-    });
+    const changed = await updateAssignmentStatus(
+      att.employeeId,
+      {
+        status: "failed",
+      },
+      absentFailFrom
+    );
+    if (!changed) continue;
 
     await notifyEmployee({
       employeeId: att.employeeId,

@@ -1076,14 +1076,14 @@ export async function advanceToNext(
   switch (next) {
     case "hr_verification":
       return verifyEmployee(employeeId, actor);
-    case "induction_assigned": {
-      if (!employee.inductionSignedPaper?.downloadUrl) {
-        throw new Error(
-          "Upload the signed induction PDF on the Induction page before advancing"
-        );
-      }
-      return completeInductionLifecycle(employeeId, actor);
-    }
+    case "induction_assigned":
+      return advanceLifecycle({
+        employeeId,
+        toStage: "induction_assigned",
+        actor,
+        description: "Moved to induction paper",
+        employeePatch: { status: "induction", inductionStatus: "in_progress" },
+      });
     case "induction_completed":
       return completeInductionLifecycle(employeeId, actor);
     case "department_handover": {
@@ -1105,7 +1105,9 @@ export async function advanceToNext(
         "Assign a trainer from the Training page — admin catch-up cannot skip trainer selection"
       );
     case "sop_assigned":
-      return assignSopLifecycle(employeeId, "sop_001", actor);
+      throw new Error(
+        "Assign SOP training from the Training or TNI page — admin catch-up cannot invent an SOP"
+      );
     case "training":
       return markTrainingLifecycle(employeeId, actor);
     case "exam":

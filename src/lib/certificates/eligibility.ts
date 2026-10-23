@@ -41,6 +41,7 @@ export function evaluateProgrammeEligibility(
 } {
   const bestByExam = new Map<string, AssessmentAttempt>();
   for (const attempt of attempts) {
+    if (attempt.preview) continue;
     if (attempt.status !== "passed" || !attempt.passed) continue;
     if (attempt.certificateEligible === false) continue;
     const prev = bestByExam.get(attempt.examId);

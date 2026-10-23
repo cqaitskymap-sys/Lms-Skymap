@@ -311,7 +311,7 @@ export default function DepartmentsPage() {
                       <TableCell className="text-right">
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
-                            <Button variant="outline" size="sm" disabled={busyId === dept.id}>
+                            <Button variant="outline" size="sm" disabled={busyId === dept.id} aria-label={`Actions for ${dept.name}`}>
                               {busyId === dept.id ? (
                                 <Loader2 className="h-4 w-4 animate-spin" />
                               ) : (

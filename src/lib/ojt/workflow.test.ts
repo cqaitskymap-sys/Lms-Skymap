@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  criterionIsFail,
+  evaluationDidFail,
   statusAfterEmployeeAck,
   statusAfterHodDecision,
+  statusAfterQaDecision,
   statusAfterTrainerCompletion,
 } from "./workflow";
 
@@ -47,6 +50,36 @@ test("trainer completion follows the configured gates", () => {
   assert.equal(
     statusAfterTrainerCompletion({ ...allOn, requireEmployeeAck: false }, true),
     "verification_pending"
+  );
+});
+
+test("required NA is not a competent result", () => {
+  assert.equal(criterionIsFail({ result: "na", isRequired: true }), true);
+  assert.equal(criterionIsFail({ result: "na" }), true);
+  assert.equal(criterionIsFail({ result: "na", isRequired: false }), false);
+  assert.equal(criterionIsFail({ result: "pass" }), false);
+  assert.equal(
+    evaluationDidFail([
+      { criterionId: "gmp", label: "GMP", result: "pass", isRequired: true },
+      { criterionId: "sop", label: "SOP", result: "na", isRequired: true },
+    ]),
+    true
+  );
+});
+
+test("QA rejection returns to the previous enabled step", () => {
+  assert.equal(statusAfterQaDecision(allOn, "approved"), "completed");
+  assert.equal(statusAfterQaDecision(allOn, "rejected"), "verification_pending");
+  assert.equal(
+    statusAfterQaDecision({ ...allOn, requireHodVerification: false }, "rejected"),
+    "trainer_completed"
+  );
+  assert.equal(
+    statusAfterQaDecision(
+      { ...allOn, requireHodVerification: false, requireEmployeeAck: false },
+      "rejected"
+    ),
+    "in_progress"
   );
 });
 

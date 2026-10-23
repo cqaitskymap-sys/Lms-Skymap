@@ -224,6 +224,8 @@ export type StartAssessmentServerInput = {
   enforceMaxAttempts?: boolean;
   /** Staff preview should not require the actor's TNI acknowledgements. */
   skipTniGate?: boolean;
+  /** Practice run: score the attempt, but do not write results, training, or certificates. */
+  preview?: boolean;
 };
 
 export type StartAssessmentServerResult =
@@ -471,6 +473,7 @@ export async function startAssessmentServer(
     ...(input.inductionAssignmentId
       ? { inductionAssignmentId: input.inductionAssignmentId }
       : {}),
+    ...(input.preview ? { preview: true } : {}),
   };
 
   const attemptRef = adminDb.collection(COLLECTIONS.assessmentAttempts).doc(id);
@@ -699,7 +702,8 @@ export async function submitAssessmentServer(
 
   const evaluated = evaluateAttempt(questionsWithKeys, mergedAnswers, exam);
   const passed = !expired && evaluated.passed;
-  const certificateEligible = !expired && evaluated.certificateEligible;
+  const certificateEligible =
+    !attempt.preview && !expired && evaluated.certificateEligible;
 
   const updated: AssessmentAttempt = {
     ...attempt,
@@ -764,6 +768,15 @@ export async function submitAssessmentServer(
   await attemptRef.set(stripUndefined(attemptForPersistence(updated, revealAnswers)));
   finalized = true;
   const warnings: string[] = [];
+  if (attempt.preview) {
+    return {
+      ok: true,
+      attempt: {
+        ...updated,
+        questions: sanitizeAttemptForClient(updated.questions, revealAnswers),
+      },
+    };
+  }
   try {
     await adminDb.collection(COLLECTIONS.examResults).doc(result.id).set(stripUndefined(result));
   } catch (resultErr) {

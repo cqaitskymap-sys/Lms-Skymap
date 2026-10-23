@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useState } from "react";
+import { Loader2 } from "lucide-react";
 import dynamic from "next/dynamic";
 import { AuthGuard } from "@/components/auth/auth-guard";
 import { AppProviders } from "@/components/providers/app-providers";
@@ -40,9 +41,17 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   return (
     <AppProviders>
-      <AuthGuard>
-        <DashboardShell>{children}</DashboardShell>
-      </AuthGuard>
+      <Suspense
+        fallback={
+          <div className="flex h-screen items-center justify-center">
+            <Loader2 className="h-8 w-8 animate-spin text-primary" />
+          </div>
+        }
+      >
+        <AuthGuard>
+          <DashboardShell>{children}</DashboardShell>
+        </AuthGuard>
+      </Suspense>
     </AppProviders>
   );
 }

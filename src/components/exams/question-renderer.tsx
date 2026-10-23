@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -32,6 +33,7 @@ export function QuestionRenderer({
   disabled,
   review,
 }: QuestionRendererProps) {
+  const [failedMediaUrl, setFailedMediaUrl] = useState("");
   const multi = question.type === "multi_select";
   const options = question.options || [];
   const correctIds = question.correctOptionIds || [];
@@ -81,12 +83,20 @@ export function QuestionRenderer({
       <CardContent className="space-y-3">
         {question.media?.url && (
           <div className="relative aspect-video w-full overflow-hidden rounded-md border bg-muted">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={question.media.url}
-              alt={question.media.alt || "Question media"}
-              className="h-full w-full object-cover"
-            />
+            {failedMediaUrl === question.media.url ? (
+              <div className="flex h-full items-center justify-center px-4 text-center text-sm text-muted-foreground">
+                Image unavailable
+                {question.media.alt ? ` — ${question.media.alt}` : ""}
+              </div>
+            ) : (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={question.media.url}
+                alt={question.media.alt || "Question media"}
+                className="h-full w-full object-cover"
+                onError={() => setFailedMediaUrl(question.media?.url || "")}
+              />
+            )}
           </div>
         )}
 

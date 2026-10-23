@@ -165,6 +165,8 @@ export interface OjtCriterionScore {
   rating?: number;
   result?: "pass" | "fail" | "na";
   comments?: string;
+  /** Copied from the criterion so a later NA still fails a required item. */
+  isRequired?: boolean;
 }
 
 export interface OjtEvaluation {

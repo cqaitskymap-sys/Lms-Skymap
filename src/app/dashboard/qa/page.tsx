@@ -22,11 +22,16 @@ import type { SopDocument } from "@/types";
 export default function QaDashboardPage() {
   const [sops, setSops] = useState<SopDocument[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
+    setError(null);
     try {
       setSops(await listSopsDetailed());
+    } catch (err) {
+      setSops([]);
+      setError(err instanceof Error ? err.message : "Could not load SOPs");
     } finally {
       setLoading(false);
     }
@@ -65,6 +70,13 @@ export default function QaDashboardPage() {
             {loading ? (
               <div className="flex items-center gap-2 py-6 text-muted-foreground">
                 <Loader2 className="h-4 w-4 animate-spin" /> Loading SOPs…
+              </div>
+            ) : error ? (
+              <div className="flex flex-wrap items-center justify-between gap-3 py-6 text-sm text-destructive">
+                <p>Could not load the SOP register. {error}</p>
+                <Button size="sm" variant="outline" onClick={() => void refresh()}>
+                  Retry
+                </Button>
               </div>
             ) : (
               <Table>

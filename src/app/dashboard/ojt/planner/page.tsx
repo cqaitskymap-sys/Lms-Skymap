@@ -312,7 +312,7 @@ export default function OjtPlannerPage() {
             />
           ) : (
             <div className="max-h-[70vh] overflow-auto rounded-md border">
-              <Table>
+              <Table containerClassName="overflow-visible">
                 <TableHeader>
                   <TableRow>
                     <TableHead className="sticky left-0 top-0 z-20 min-w-[56px] bg-background">S. No.</TableHead>

@@ -16,6 +16,7 @@ import {
   Briefcase,
 } from "lucide-react";
 import { latestAssignmentsByCell } from "@/lib/training/matrix";
+import { localDayBound } from "@/lib/utils";
 import { listEmployeesForLifecycle, lifecycleDashboardStats } from "@/lib/services/lifecycle";
 import { getEmployee } from "@/lib/services/employees";
 import { listDepartments } from "@/lib/services/departments";
@@ -306,7 +307,9 @@ function isOverdue(dueDate?: string, status?: string) {
   if (!dueDate || status === "passed" || status === "failed" || status === "expired") {
     return false;
   }
-  return new Date(dueDate) < new Date();
+  const end = localDayBound(dueDate, true);
+  if (Number.isNaN(end)) return false;
+  return end < Date.now();
 }
 
 function sopAwaitingReview(sop: { status?: string; pendingStatus?: string; pendingVersionId?: string }) {

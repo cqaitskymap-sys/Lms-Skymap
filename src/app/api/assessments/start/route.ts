@@ -65,6 +65,7 @@ export async function POST(request: NextRequest) {
     actorId: auth.uid,
     enforceMaxAttempts,
     skipTniGate: auth.role !== "employee",
+    preview: auth.role !== "employee" && !isAssignedTake,
   });
 
   if (!result.ok) {

@@ -229,7 +229,8 @@ async function departmentHeadUserId(departmentId?: string): Promise<string | und
 async function notifyOjtApproverQueue(assignment: OjtAssignment, actor: OjtActor) {
   await safeNotify(async () => {
     if (assignment.status === "verification_pending") {
-      const hodId = assignment.hodUserId || (await departmentHeadUserId(assignment.departmentId));
+      const hodId =
+        (await departmentHeadUserId(assignment.departmentId)) || assignment.hodUserId;
       if (hodId && hodId !== actor.uid) {
         await createNotification({
           userId: hodId,
@@ -1582,7 +1583,8 @@ export async function approveOjtByQa(
   if (decision === "rejected" && !comments.trim()) {
     throw new Error("Comments are required when rejecting QA approval");
   }
-  const nextStatus = statusAfterQaDecision(decision);
+  const nextStatus = statusAfterQaDecision(assignment, decision);
+  const rejected = decision === "rejected";
   assertTransition(assignment.status, nextStatus);
   const next: OjtAssignment = {
     ...assignment,
@@ -1601,7 +1603,11 @@ export async function approveOjtByQa(
     status: nextStatus,
     overallCompetency: decision === "approved" ? "competent" : assignment.overallCompetency,
     failureReason: decision === "rejected" ? comments : assignment.failureReason,
-    hodVerification: decision === "rejected" ? undefined : assignment.hodVerification,
+    hodVerification: rejected ? undefined : assignment.hodVerification,
+    acknowledgement:
+      rejected && nextStatus !== "verification_pending" ? undefined : assignment.acknowledgement,
+    evaluation: rejected && nextStatus === "in_progress" ? undefined : assignment.evaluation,
+    trainerSignoff: rejected && nextStatus === "in_progress" ? undefined : assignment.trainerSignoff,
     updatedAt: nowISO(),
     updatedBy: actor.uid,
   };

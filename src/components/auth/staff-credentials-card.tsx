@@ -97,6 +97,7 @@ export function StaffCredentialsCard({
                 <button
                   type="button"
                   className="rounded p-1 text-muted-foreground hover:bg-muted"
+                  aria-label={showPassword ? "Hide password" : "Show password"}
                   onClick={() => setShowPassword((s) => !s)}
                 >
                   {showPassword ? (
@@ -108,6 +109,7 @@ export function StaffCredentialsCard({
                 <button
                   type="button"
                   className="rounded p-1 text-muted-foreground hover:bg-muted"
+                  aria-label="Copy password"
                   onClick={() => void copy("Password", credentials.temporaryPassword)}
                 >
                   <Copy className="h-3.5 w-3.5" />

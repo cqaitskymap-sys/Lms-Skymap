@@ -17,12 +17,15 @@ import {
   evaluateProgrammeEligibility,
   requiredExamsForEmployee,
 } from "@/lib/certificates/eligibility";
+import { hasOutstandingTraining } from "@/lib/assessments/training-cycle";
+import { getStageIndex } from "@/lib/lifecycle/stages";
 import type {
   AssessmentAttempt,
   Certificate,
   Employee,
   Exam,
   TrainingAssignment,
+  LifecycleStage,
   TrainingNeedIdentification,
 } from "@/types";
 
@@ -128,6 +131,9 @@ export async function issueCertificateForAttemptServer(
   }
 
   const attempt = { id: attemptSnap.id, ...attemptSnap.data() } as AssessmentAttempt;
+  if (attempt.preview) {
+    return { ok: false, status: 400, error: "Practice attempts cannot issue a certificate" };
+  }
   if (attempt.status !== "passed" || !attempt.passed) {
     return { ok: false, status: 400, error: "Attempt is not passed — certificate cannot be issued" };
   }
@@ -149,6 +155,22 @@ export async function issueCertificateForAttemptServer(
   const attempts = await loadPassedAttempts(attempt.employeeId);
   if (!attempts.some((row) => row.id === attempt.id)) {
     attempts.push(attempt);
+  }
+
+  const assignmentSnap = await adminDb
+    .collection(COLLECTIONS.trainingAssignments)
+    .where("employeeId", "==", attempt.employeeId)
+    .get();
+  const assignmentRows = assignmentSnap.docs.map((d) => {
+    const data = d.data() as { sopId?: string; status?: string };
+    return { id: d.id, sopId: data.sopId, status: data.status };
+  });
+  if (hasOutstandingTraining(assignmentRows, "")) {
+    return {
+      ok: false,
+      status: 409,
+      error: "Certificate waits until every assigned SOP is passed",
+    };
   }
 
   const eligibility = evaluateProgrammeEligibility(requiredExams, attempts);
@@ -281,19 +303,32 @@ export async function issueCertificateForAttemptServer(
       )
   );
 
-  await adminDb
+  const employeeSnap = await adminDb
     .collection(COLLECTIONS.employees)
     .doc(attempt.employeeId)
-    .set(
-      {
-        lifecycleStage: "certified",
-        lifecycleProgress: 96,
-        status: "active",
-        updatedAt: now,
-        updatedBy: actorId,
-      },
-      { merge: true }
-    );
+    .get();
+  const employeeStage = employeeSnap.data()?.lifecycleStage as string | undefined;
+  const employeeStatus = employeeSnap.data()?.status as string | undefined;
+  const alreadyQualified = employeeStage === "qualified" || employeeStatus === "qualified";
+  if (
+    !alreadyQualified &&
+    employeeStage !== "certified" &&
+    getStageIndex("certified") > getStageIndex((employeeStage || "created") as LifecycleStage)
+  ) {
+    await adminDb
+      .collection(COLLECTIONS.employees)
+      .doc(attempt.employeeId)
+      .set(
+        {
+          lifecycleStage: "certified",
+          lifecycleProgress: 96,
+          status: "active",
+          updatedAt: now,
+          updatedBy: actorId,
+        },
+        { merge: true }
+      );
+  }
 
   try {
     const empSnap = await adminDb

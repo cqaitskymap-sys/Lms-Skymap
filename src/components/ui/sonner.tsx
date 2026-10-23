@@ -33,7 +33,7 @@ export function Toaster({ ...props }: ToasterProps) {
       expand
       visibleToasts={4}
       gap={14}
-      offset={20}
+      offset={{ top: 76, right: 16 }}
       duration={4200}
       closeButton
       toastOptions={{
@@ -50,7 +50,7 @@ export function Toaster({ ...props }: ToasterProps) {
           cancelButton:
             "mt-1.5 inline-flex h-7 shrink-0 items-center rounded-lg bg-black/[0.04] px-2.5 text-xs font-medium transition hover:bg-black/[0.08] dark:bg-white/10 dark:hover:bg-white/15",
           closeButton:
-            "absolute right-2.5 top-2.5 flex size-6 items-center justify-center rounded-full border-0 bg-transparent text-current/40 opacity-0 transition-all hover:bg-black/[0.06] hover:text-current group-hover:opacity-100 dark:hover:bg-white/10",
+            "absolute right-2.5 top-2.5 flex size-6 items-center justify-center rounded-full border-0 bg-transparent text-current/70 opacity-100 transition-all hover:bg-black/[0.06] hover:text-current dark:hover:bg-white/10",
           icon: "shrink-0",
         },
       }}

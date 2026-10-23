@@ -22,6 +22,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { BrandLogo } from "@/components/shared/brand-logo";
 import { DeveloperCredit } from "@/components/shared/developer-credit";
 
 function LoginForm() {
@@ -45,7 +46,7 @@ function LoginForm() {
   });
 
   useEffect(() => {
-    if (!loading && user && !isSubmitting) {
+    if (!loading && user && !isSubmitting && searchParams.get("error") !== "deactivated") {
       const redirect = safeInternalPath(searchParams.get("redirect"), "/dashboard");
       router.replace(redirect);
     }
@@ -63,7 +64,7 @@ function LoginForm() {
   const onSubmit = async (data: LoginInput) => {
     try {
       const email = await resolveLoginIdentifier(data.email);
-      const profile = await signIn(email, data.password, true);
+      const profile = await signIn(email, data.password, rememberPassword);
       if (rememberPassword) {
         saveRememberedLogin(data.email.trim());
       } else {
@@ -109,12 +110,7 @@ function LoginForm() {
         <div className="absolute inset-0 opacity-20 [background-image:linear-gradient(rgba(255,255,255,0.08)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.08)_1px,transparent_1px)] [background-size:48px_48px]" />
         <div className="relative flex h-full flex-col justify-between p-12 text-white">
           <div className="flex items-center gap-3">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src="/brand/skymap-logo.png"
-              alt="SKYMAP"
-              className="h-12 w-auto max-w-[180px] object-contain"
-            />
+            <BrandLogo className="h-12 w-auto max-w-[180px] object-contain" />
           </div>
           <div className="space-y-4">
             <h1 className="max-w-md font-display text-4xl font-semibold leading-tight tracking-tight drop-shadow-md md:text-5xl">
@@ -142,12 +138,12 @@ function LoginForm() {
         </div>
       </div>
 
-      <div className="dashboard-atmosphere relative flex min-h-screen w-full flex-col justify-center overflow-y-auto bg-gradient-to-br from-slate-50 via-white to-cyan-50/50 px-6 py-12 lg:h-full lg:min-h-0 lg:w-1/2 dark:from-transparent dark:via-transparent dark:to-transparent">
+      <div className="dashboard-atmosphere relative flex min-h-screen w-full flex-col overflow-y-auto bg-gradient-to-br from-slate-50 via-white to-cyan-50/50 px-6 py-12 lg:h-full lg:min-h-0 lg:w-1/2 dark:from-transparent dark:via-transparent dark:to-transparent">
         <div aria-hidden className="pointer-events-none absolute inset-0 hidden dark:block">
           <div className="absolute left-1/2 top-[38%] h-72 w-72 -translate-x-1/2 -translate-y-1/2 rounded-full bg-sky-400/30 blur-[80px]" />
           <div className="absolute -right-10 bottom-10 h-56 w-56 rounded-full bg-violet-500/30 blur-[70px]" />
         </div>
-        <div className="relative mx-auto w-full max-w-md space-y-6">
+        <div className="relative mx-auto my-auto w-full max-w-md space-y-6">
 
           {deactivated && (
             <div className="rounded-xl border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
@@ -163,12 +159,7 @@ function LoginForm() {
             <Card className="relative overflow-hidden border-white/25 shadow-[0_30px_80px_-40px_rgba(80,140,255,0.85)]">
               <div className="pointer-events-none absolute inset-x-8 top-0 h-px bg-gradient-to-r from-transparent via-white/80 to-transparent" />
             <CardHeader className="space-y-1.5">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src="/brand/skymap-logo.png"
-                alt="SKYMAP"
-                className="mb-2 h-11 w-auto max-w-[150px] object-contain"
-              />
+              <BrandLogo className="mb-2 h-11 w-auto max-w-[150px] object-contain" />
               <CardTitle className="font-display text-3xl font-semibold">Sign in</CardTitle>
               <CardDescription>
                 Sign in with your employee code or staff ID.

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { Button } from "@/components/ui/button";
 import dynamic from "next/dynamic";
 import { Loader2 } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
@@ -63,6 +64,7 @@ interface DashboardShellProps {
 export function DashboardShell({ role, title, subtitle, children }: DashboardShellProps) {
   const { profile, loading: authLoading } = useAuth();
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [view, setView] = useState(() =>
     buildDashboardView(emptyDashboardSnapshot(), role)
   );
@@ -71,8 +73,13 @@ export function DashboardShell({ role, title, subtitle, children }: DashboardShe
   const dataRole = profile?.role;
 
   const refresh = useCallback(async (fresh = false) => {
-    if (authLoading || !profile?.role) return;
+    if (authLoading) return;
+    if (!profile?.role) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
+    setError(null);
     try {
       const snap = await fetchDashboardSnapshot({
         userId: profile.uid,
@@ -84,6 +91,7 @@ export function DashboardShell({ role, title, subtitle, children }: DashboardShe
       setView(buildDashboardView(snap, dataRole || role));
     } catch (err) {
       console.warn("[dashboard] snapshot failed:", err);
+      setError(err instanceof Error ? err.message : "The dashboard could not be loaded");
     } finally {
       setLoading(false);
     }
@@ -123,6 +131,15 @@ export function DashboardShell({ role, title, subtitle, children }: DashboardShe
           <p className="text-sm text-muted-foreground md:text-base">{subtitle}</p>
         </div>
       </MotionItem>
+
+      {error && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+          <p>Could not refresh the dashboard. {error}</p>
+          <Button type="button" size="sm" variant="outline" onClick={() => void refresh(true)}>
+            Retry
+          </Button>
+        </div>
+      )}
 
       <JdHandoverPendingCard />
 

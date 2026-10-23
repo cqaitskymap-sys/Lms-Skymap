@@ -50,6 +50,27 @@ test("programme eligibility ignores passes below the certificate threshold", () 
   assert.equal(result.remaining.length, 1);
 });
 
+test("practice attempts do not satisfy programme eligibility", () => {
+  const required = [exam({ id: "e1", sopId: "s1" })];
+  const practice = {
+    id: "a1",
+    examId: "e1",
+    employeeId: "emp",
+    status: "passed",
+    passed: true,
+    preview: true,
+    percentage: 100,
+    startedAt: "2026-01-01T00:00:00.000Z",
+    expiresAt: "2026-01-01T01:00:00.000Z",
+    questions: [],
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+    createdBy: "qa",
+  } as AssessmentAttempt;
+  const result = evaluateProgrammeEligibility(required, [practice]);
+  assert.equal(result.ready, false);
+});
+
 test("only the latest active exam is required for each SOP", () => {
   const exams = [
     exam({ id: "old", sopId: "s1", updatedAt: "2026-01-01T00:00:00.000Z" }),

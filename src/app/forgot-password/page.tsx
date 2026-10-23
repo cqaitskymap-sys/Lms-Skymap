@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { ArrowLeft, Loader2, Mail } from "lucide-react";
 import { AppProviders } from "@/components/providers/app-providers";
 import { requestPasswordReset } from "@/lib/services/auth";
+import { resolveLoginIdentifier } from "@/lib/services/onboarding";
 import { forgotPasswordSchema, type ForgotPasswordInput } from "@/lib/auth/schemas";
 import { isDemoMode } from "@/lib/demo/data";
 import { Button } from "@/components/ui/button";
@@ -15,8 +16,14 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
+function isMissingAccount(err: unknown): boolean {
+  const code = (err as { code?: string } | null)?.code;
+  return code === "auth/user-not-found" || code === "auth/invalid-email";
+}
+
 function ForgotPasswordForm() {
   const [sent, setSent] = useState(false);
+  const [needsHr, setNeedsHr] = useState(false);
   const {
     register,
     handleSubmit,
@@ -27,7 +34,12 @@ function ForgotPasswordForm() {
 
   const onSubmit = async (data: ForgotPasswordInput) => {
     try {
-      await requestPasswordReset(data.email);
+      const email = await resolveLoginIdentifier(data.email);
+      if (email.endsWith("@pharma.local")) {
+        setNeedsHr(true);
+        return;
+      }
+      await requestPasswordReset(email);
       setSent(true);
       toast.success(
         isDemoMode()
@@ -35,12 +47,12 @@ function ForgotPasswordForm() {
           : "If an account exists, a reset link has been sent"
       );
     } catch (err) {
-      // Always show generic success-style message to avoid email enumeration
-      setSent(true);
-      toast.message(
-        err instanceof Error
-          ? "If an account exists, a reset link has been sent"
-          : "If an account exists, a reset link has been sent"
+      if (isMissingAccount(err)) {
+        setNeedsHr(true);
+        return;
+      }
+      toast.error(
+        err instanceof Error ? err.message : "Could not send a reset link. Try again."
       );
     }
   };
@@ -51,11 +63,25 @@ function ForgotPasswordForm() {
         <CardHeader>
           <CardTitle className="font-display text-3xl font-semibold">Forgot password</CardTitle>
           <CardDescription>
-            Enter your work email and we&apos;ll send a secure reset link.
+            Enter your employee code. Staff passwords are reset by HR.
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {sent ? (
+          {needsHr ? (
+            <div className="space-y-4 text-center">
+              <p className="text-sm text-muted-foreground">
+                This account signs in with an employee code. A reset email cannot reach it. Ask HR
+                to reset the password from User Management, then sign in with the temporary password
+                on the credentials card.
+              </p>
+              <Button asChild variant="outline" className="w-full">
+                <Link href="/login">
+                  <ArrowLeft className="mr-2 h-4 w-4" />
+                  Back to sign in
+                </Link>
+              </Button>
+            </div>
+          ) : sent ? (
             <div className="space-y-4 text-center">
               <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
                 <Mail className="h-6 w-6 text-primary" />
@@ -74,8 +100,8 @@ function ForgotPasswordForm() {
           ) : (
             <form onSubmit={handleSubmit(onSubmit)} className="space-y-4" noValidate>
               <div className="space-y-2">
-                <Label htmlFor="email">Email</Label>
-                <Input id="email" type="email" autoComplete="email" {...register("email")} />
+                <Label htmlFor="email">Employee code or email</Label>
+                <Input id="email" type="text" autoComplete="username" {...register("email")} />
                 {errors.email && (
                   <p className="text-xs text-destructive">{errors.email.message}</p>
                 )}

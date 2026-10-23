@@ -13,6 +13,10 @@ export async function POST(request: NextRequest) {
     return unauthorized(verified.message, status);
   }
 
+  if (verified.auth.role !== "employee") {
+    return NextResponse.json({ success: false, error: "Forbidden" }, { status: 403 });
+  }
+
   const employeeId = verified.auth.profile.employeeId || verified.auth.uid;
   const attemptsSnap = await adminDb
     .collection(COLLECTIONS.assessmentAttempts)

@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useMemo } from "react";
-import { useRouter, usePathname } from "next/navigation";
+import { useEffect, useMemo, useRef } from "react";
+import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { useAuth } from "@/contexts/auth-context";
 import {
   hasAnyPermission,
@@ -14,9 +14,15 @@ import { needsFirstLoginOnboarding } from "@/lib/services/onboarding";
 import { Loader2 } from "lucide-react";
 
 export function AuthGuard({ children }: { children: React.ReactNode }) {
-  const { user, profile, loading, role } = useAuth();
+  const { user, profile, loading, role, signOut } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const signingOut = useRef(false);
+  const acknowledgeSignoff =
+    Boolean(searchParams.get("acknowledge")) &&
+    ((pathname === "/dashboard/tni" && role === "trainer") ||
+      (pathname === "/dashboard/jd" && (role === "trainer" || role === "qa")));
 
   const onOnboardingPath = pathname.startsWith("/dashboard/onboarding");
 
@@ -25,6 +31,10 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
     if (profile.isActive === false) return { ok: false as const, reason: "inactive" };
 
     if (onOnboardingPath) return { ok: true as const };
+
+    if (acknowledgeSignoff && hasPermission(role, "notifications:read")) {
+      return { ok: true as const };
+    }
 
     if (!canAccessPath(role, profile.allowedModules, pathname)) {
       return { ok: false as const, reason: "forbidden" };
@@ -48,7 +58,7 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
     }
 
     return { ok: false as const, reason: "forbidden" };
-  }, [pathname, profile, role, onOnboardingPath]);
+  }, [acknowledgeSignoff, pathname, profile, role, onOnboardingPath]);
 
   useEffect(() => {
     if (loading) return;
@@ -57,7 +67,11 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
       return;
     }
     if (profile && profile.isActive === false) {
-      router.replace("/login?error=deactivated");
+      if (signingOut.current) return;
+      signingOut.current = true;
+      void signOut().finally(() => {
+        router.replace("/login?error=deactivated");
+      });
       return;
     }
     if (needsFirstLoginOnboarding(profile) && !onOnboardingPath) {
@@ -76,7 +90,7 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
     if (access.reason === "forbidden") {
       router.replace(`/dashboard/unauthorized?from=${encodeURIComponent(pathname)}`);
     }
-  }, [user, profile, loading, router, pathname, access.reason, onOnboardingPath]);
+  }, [user, profile, loading, router, pathname, access.reason, onOnboardingPath, signOut]);
 
   if (loading) {
     return (

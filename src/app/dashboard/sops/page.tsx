@@ -427,7 +427,7 @@ export default function SopsPage() {
             </div>
           </CardHeader>
           <CardContent className="min-w-0 pb-2">
-            <Table className="min-w-[1100px]" containerClassName="min-w-0 w-full" containerRef={listRef}>
+            <Table className="min-w-[1100px]" containerClassName="max-h-[70vh] min-w-0 w-full overflow-auto" containerRef={listRef}>
               <TableHeader className="sop-table-head">
                 <TableRow className="hover:bg-transparent">
                   {canBulk && (
@@ -574,8 +574,10 @@ export default function SopsPage() {
           </div>
         </Card>
 
+        {canBulk && selected.size > 0 && <div className="h-28 shrink-0" aria-hidden />}
+
         {canBulk && selected.size > 0 && (
-          <div className="pointer-events-none fixed inset-x-0 bottom-4 z-40 flex justify-center px-4 sm:bottom-6 sm:pr-44 lg:pl-64">
+          <div className="pointer-events-none fixed inset-x-0 bottom-20 z-40 flex justify-center px-4 sm:bottom-6 sm:pr-44 lg:pl-64">
             <div className="pointer-events-auto flex flex-wrap items-center gap-2 rounded-2xl border bg-background px-4 py-3 shadow-lift">
               <p className="mr-1 text-sm font-medium">{selected.size} selected</p>
               {canWrite && (

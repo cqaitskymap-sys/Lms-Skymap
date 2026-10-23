@@ -272,6 +272,7 @@ export default function OjtTopicsPage() {
                     <TableCell>
                       {canWrite ? (
                         <Switch
+                          aria-label={`Active: ${t.trainingTopic}`}
                           checked={t.isActive}
                           onCheckedChange={(v) => {
                             if (!profile) return;

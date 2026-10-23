@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ArrowRight, Shield, FileCheck, Award, ClipboardList } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { BrandLogo } from "@/components/shared/brand-logo";
 import { DeveloperCredit } from "@/components/shared/developer-credit";
 
 export default function HomePage() {
@@ -17,12 +18,7 @@ export default function HomePage() {
 
       <header className="relative mx-auto flex max-w-6xl items-center justify-between px-6 py-5">
         <div className="flex items-center gap-2 font-semibold tracking-tight">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src="/brand/skymap-logo.png"
-            alt="SKYMAP"
-            className="h-10 w-auto max-w-[180px] object-contain"
-          />
+          <BrandLogo className="h-10 w-auto max-w-[180px] object-contain" />
         </div>
         <Button asChild className="rounded-full shadow-soft">
           <Link href="/login">

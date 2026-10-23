@@ -161,13 +161,13 @@ function AttachmentRow({
         </div>
         <div className="min-w-0">
           <p className="truncate text-sm font-medium">{attachment.title}</p>
-          <p className="text-xs text-muted-foreground">
+          <p className="truncate text-xs text-muted-foreground">
             {attachment.type.toUpperCase()} · {formatBytes(attachment.fileSize)} ·{" "}
             {attachment.fileName}
           </p>
         </div>
       </div>
-      <Button size="sm" variant="outline" disabled={disabled} onClick={onDownload}>
+      <Button size="sm" variant="outline" className="shrink-0" disabled={disabled} onClick={onDownload}>
         <Download className="mr-1 h-3.5 w-3.5" />
         Download
       </Button>

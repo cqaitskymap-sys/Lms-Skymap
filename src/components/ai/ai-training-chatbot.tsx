@@ -263,6 +263,11 @@ export function AiTrainingChatbot() {
           transition: dragging ? "none" : undefined,
         }}
         onPointerDown={onDragStart}
+        onKeyDown={(event) => {
+          if (event.key !== "Enter" && event.key !== " ") return;
+          event.preventDefault();
+          setOpen((value) => !value);
+        }}
         aria-label={open ? "Close training assistant" : "Ask AI. Drag to move."}
       >
         <MessageCircle className="h-5 w-5" />

@@ -479,6 +479,7 @@ export default function LegacyEmployeesPage() {
                             type="button"
                             variant="ghost"
                             size="icon"
+                            aria-label="Remove row"
                             disabled={locked}
                             onClick={() => setRows((current) => current.filter((item) => item.key !== row.key))}
                           >

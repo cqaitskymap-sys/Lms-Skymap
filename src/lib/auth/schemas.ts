@@ -16,7 +16,7 @@ export const loginSchema = z.object({
 });
 
 export const forgotPasswordSchema = z.object({
-  email: z.string().email("Enter a valid email address"),
+  email: z.string().trim().min(1, "Enter your employee code or email").max(120),
 });
 
 export const changePasswordSchema = z

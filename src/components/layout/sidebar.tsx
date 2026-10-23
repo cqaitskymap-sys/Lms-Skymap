@@ -36,6 +36,7 @@ import {
 } from "@/lib/rbac/modules";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
+import { BrandLogo } from "@/components/shared/brand-logo";
 import { DeveloperCredit } from "@/components/shared/developer-credit";
 
 const MODULE_ICONS: Record<AppModule, LucideIcon> = {
@@ -84,15 +85,10 @@ export function Sidebar({ open, onClose }: SidebarProps) {
       : [];
 
   const content = (
-    <div className="flex h-full flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground dark:border-white/10">
+    <div className="flex h-full min-h-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground dark:border-white/10">
       <div className="flex h-16 items-center justify-between border-b border-sidebar-border/80 px-4 dark:border-white/10">
         <Link href="/dashboard" className="flex items-center gap-2 font-semibold tracking-tight">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src="/brand/skymap-logo.png"
-            alt="SKYMAP"
-            className="h-8 w-auto max-w-[148px] object-contain"
-          />
+          <BrandLogo className="h-8 w-auto max-w-[148px] object-contain" />
         </Link>
         {onClose && (
           <Button variant="ghost" size="icon" className="lg:hidden text-sidebar-foreground" onClick={onClose} aria-label="Close menu">
@@ -100,7 +96,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
           </Button>
         )}
       </div>
-      <ScrollArea className="flex-1 px-3 py-4">
+      <ScrollArea className="min-h-0 flex-1 px-3 py-4">
         <nav className="space-y-1">
           {items.map((item) => {
             const active =
@@ -157,7 +153,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
   return (
     <>
       {/* Desktop */}
-      <aside className="relative z-10 hidden w-64 shrink-0 lg:block">{content}</aside>
+      <aside className="relative z-10 hidden h-full min-h-0 w-64 shrink-0 lg:block">{content}</aside>
       {/* Mobile overlay */}
       {open && (
         <div className="fixed inset-0 z-50 lg:hidden">

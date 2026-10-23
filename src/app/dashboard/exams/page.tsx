@@ -186,10 +186,14 @@ function ExamsPageInner() {
         setPhase("exam");
         lockExam({ attemptId: started.id, examTitle: examDoc.title });
         router.replace("/dashboard/exams");
+        const practice =
+          profile.role !== "employee" && !assignmentId && !inductionAssignmentId;
         toast.success(
           started.answersDraft && Object.keys(started.answersDraft).length
             ? "Resumed in-progress exam"
-            : "Exam started — submit to unlock navigation"
+            : practice
+              ? "Practice exam — this score is not saved to training or certificates"
+              : "Exam started — submit to unlock navigation"
         );
       } catch (e) {
         deepLinkStarted.current = false;
@@ -747,7 +751,7 @@ function ExamsPageInner() {
                             }}
                           >
                             <Play className="mr-1.5 h-3.5 w-3.5" />
-                            Start
+                            Preview
                           </Button>
                         )}
                         {isEmployee && (

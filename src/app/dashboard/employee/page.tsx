@@ -14,7 +14,7 @@ import { Progress } from "@/components/ui/progress";
 export default function EmployeeDashboardPage() {
   const { profile } = useAuth();
   const employeeId = profile?.employeeId;
-  const { progress, loading } = useMyTniLearning(employeeId, profile?.uid);
+  const { progress, loading, error, refresh } = useMyTniLearning(employeeId, profile?.uid);
   const percent =
     progress.items.length === 0
       ? 0
@@ -50,6 +50,13 @@ export default function EmployeeDashboardPage() {
           </div>
           {loading ? (
             <p className="text-sm text-muted-foreground">Loading your SOPs…</p>
+          ) : error ? (
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-destructive/40 bg-destructive/10 p-4 text-sm text-destructive">
+              <p>Could not load your TNI. {error}</p>
+              <Button size="sm" variant="outline" onClick={() => void refresh()}>
+                Retry
+              </Button>
+            </div>
           ) : !progress.hasTni ? (
             <div className="rounded-xl border border-dashed border-border bg-muted/60 p-6 text-sm text-muted-foreground">
               <GraduationCap className="mb-2 h-8 w-8 opacity-60" />

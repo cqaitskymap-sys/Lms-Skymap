@@ -107,11 +107,9 @@ export async function assignTniSopsToEmployee(params: {
   const local = preferTrainingLocal() || isDemoMode();
 
   for (const sopId of sopIds) {
-    const already = existing.some(
-      (a) =>
-        a.sopId === sopId && a.status !== "passed" && a.status !== "failed"
-    );
-    if (already) continue;
+    // A passed, failed, or still-open row already covers this SOP.
+    // Re-saving the TNI must not open another assigned copy of a finished SOP.
+    if (existing.some((a) => a.sopId === sopId)) continue;
 
     const sop = catalog.find((s) => s.id === sopId);
     const assignment: TrainingAssignment = {

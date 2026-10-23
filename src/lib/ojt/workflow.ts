@@ -25,7 +25,15 @@ const TRANSITIONS: Record<OjtStatus, readonly OjtStatus[]> = {
   ],
   employee_acknowledged: ["verification_pending", "qa_pending", "completed", "cancelled"],
   verification_pending: ["qa_pending", "completed", "failed", "retraining_required", "in_progress", "trainer_completed", "cancelled"],
-  qa_pending: ["completed", "failed", "retraining_required", "verification_pending", "cancelled"],
+  qa_pending: [
+    "completed",
+    "failed",
+    "retraining_required",
+    "verification_pending",
+    "trainer_completed",
+    "in_progress",
+    "cancelled",
+  ],
   completed: [],
   failed: ["retraining_required", "cancelled"],
   retraining_required: ["rescheduled", "cancelled"],
@@ -62,10 +70,19 @@ export function criterionScaleForModel(
   return criterionScale;
 }
 
-/** 1–5 scores below 3, or any explicit Fail, mean not competent. */
-export function criterionIsFail(score: Pick<OjtCriterionScore, "result" | "rating">): boolean {
+/**
+ * 1–5 scores below 3, or any explicit Fail, mean not competent.
+ * Required criteria marked NA (or left blank) are not a pass.
+ * Only an explicit isRequired: false treats NA as excluded.
+ */
+export function criterionIsFail(
+  score: Pick<OjtCriterionScore, "result" | "rating" | "isRequired">
+): boolean {
   if (score.result === "fail") return true;
-  return typeof score.rating === "number" && score.rating < 3;
+  if (typeof score.rating === "number" && score.rating < 3) return true;
+  if (score.isRequired === false) return false;
+  if (score.result === "na") return true;
+  return score.result == null && score.rating == null;
 }
 
 export function evaluationDidFail(criteria: OjtCriterionScore[]): boolean {
@@ -114,9 +131,14 @@ export function statusAfterHodDecision(
   return "completed";
 }
 
-export function statusAfterQaDecision(decision: "approved" | "rejected"): OjtStatus {
-  if (decision === "rejected") return "verification_pending";
-  return "completed";
+export function statusAfterQaDecision(
+  config: OjtApprovalConfig,
+  decision: "approved" | "rejected"
+): OjtStatus {
+  if (decision === "approved") return "completed";
+  if (approvalRequired(config.requireHodVerification)) return "verification_pending";
+  if (approvalRequired(config.requireEmployeeAck)) return "trainer_completed";
+  return "in_progress";
 }
 
 export function isOjtOverdue(

@@ -69,6 +69,21 @@ import type {
 
 const SELF_SIGNOFF = "__self__";
 
+const STAFF_DIRECTORY_ROLES: UserProfile["role"][] = [
+  "super_admin",
+  "hr",
+  "qa",
+  "department_head",
+  "trainer",
+];
+
+function staffOptionLabel(user: Pick<UserProfile, "displayName" | "username" | "role">): string {
+  const name = (user.displayName || "").trim() || "Staff";
+  const staffId = (user.username || "").trim();
+  const role = ROLE_LABELS[user.role] || user.role;
+  return [name, staffId, role].filter(Boolean).join(" · ");
+}
+
 const POST_JD_STAGES = [
   "jd_created",
   "tni_created",
@@ -171,7 +186,7 @@ function TniPageInner() {
   const [departments, setDepartments] = useState<Department[]>([]);
   const [jds, setJds] = useState<JobDescription[]>([]);
   const [sops, setSops] = useState<SopDocument[]>([]);
-  const [qaUsers, setQaUsers] = useState<UserProfile[]>([]);
+  const [staffUsers, setStaffUsers] = useState<UserProfile[]>([]);
   const [employeeId, setEmployeeId] = useState("");
   const [jdId, setJdId] = useState("");
   const [jobTitle, setJobTitle] = useState("");
@@ -229,7 +244,7 @@ function TniPageInner() {
           setDepartments([]);
           setJds([]);
           setSops([]);
-          setQaUsers([]);
+          setStaffUsers([]);
           setRecords(pack.items);
           if (!pack.items.length) {
             setError("Your account is not linked to an employee profile");
@@ -260,8 +275,27 @@ function TniPageInner() {
         setDepartments(depts.filter((d) => d.isActive));
         setJds(jdList);
         setSops(sopList);
-        setQaUsers([]);
+        setStaffUsers([]);
         setRecords(mergeTniRecords(tniList, pack.items));
+        return;
+      }
+
+      if (profile?.role === "trainer") {
+        const pack = await packPromise;
+        setAssignedIds(new Set(pack.items.map((row) => row.id)));
+        setMyPendingSignoffs(pack.pending);
+        const ids = [
+          ...new Set(pack.items.map((row) => row.employeeId).filter((id) => Boolean(id))),
+        ];
+        const people = (
+          await Promise.all(ids.map((id) => getEmployee(id).catch(() => null)))
+        ).filter((row): row is Employee => Boolean(row));
+        setEmployees(people);
+        setDepartments([]);
+        setJds([]);
+        setSops([]);
+        setStaffUsers([]);
+        setRecords(pack.items);
         return;
       }
 
@@ -273,19 +307,19 @@ function TniPageInner() {
         setDepartments([]);
         setJds([]);
         setSops([]);
-        setQaUsers([]);
+        setStaffUsers([]);
         setRecords(pack.items);
         return;
       }
 
-      const [pack, emps, depts, jdList, sopList, tniList, qa] = await Promise.all([
+      const [pack, emps, depts, jdList, sopList, tniList, staff] = await Promise.all([
         packPromise,
         listEmployeesForLifecycle(),
         listDepartments(),
         listJobDescriptions(),
         listSopsDetailed({ status: "approved" }),
         listTNIs(),
-        listUsersByRoles(["qa"]).catch(() => [] as UserProfile[]),
+        listUsersByRoles(STAFF_DIRECTORY_ROLES).catch(() => [] as UserProfile[]),
       ]);
       setAssignedIds(new Set(pack.items.map((row) => row.id)));
       setMyPendingSignoffs(pack.pending);
@@ -293,14 +327,14 @@ function TniPageInner() {
       setDepartments(depts.filter((d) => d.isActive));
       setJds(jdList);
       setSops(sopList);
-      setQaUsers(qa);
+      setStaffUsers(staff);
       setRecords(mergeTniRecords(tniList, pack.items));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load TNI data");
       setEmployees([]);
       setJds([]);
       setSops([]);
-      setQaUsers([]);
+      setStaffUsers([]);
       setRecords([]);
     } finally {
       setLoading(false);
@@ -413,16 +447,32 @@ function TniPageInner() {
     [scopedEmployees, employeeId, profile?.employeeId]
   );
 
-  const qaPickerUsers = useMemo(
-    () => qaUsers.filter((u) => u.uid && u.uid !== profile?.uid),
-    [qaUsers, profile?.uid]
-  );
+  const staffSignoffUsers = useMemo(() => {
+    const linkedUids = new Set<string>();
+    const listedEmpIds = new Set<string>();
+    for (const row of signoffEmployees) {
+      listedEmpIds.add(row.id);
+      if (row.userId) linkedUids.add(row.userId);
+    }
+    return staffUsers.filter((user) => {
+      if (!user.uid || user.isActive === false) return false;
+      if (user.uid === profile?.uid) return false;
+      if (linkedUids.has(user.uid)) return false;
+      if (
+        user.employeeId &&
+        (listedEmpIds.has(user.employeeId) ||
+          user.employeeId === employeeId ||
+          user.employeeId === profile?.employeeId)
+      ) {
+        return false;
+      }
+      return true;
+    });
+  }, [staffUsers, signoffEmployees, profile?.uid, profile?.employeeId, employeeId]);
 
-  const qaUserIds = useMemo(() => new Set(qaPickerUsers.map((u) => u.uid)), [qaPickerUsers]);
-
-  const approvedByEmployees = useMemo(
-    () => signoffEmployees.filter((e) => !e.userId || !qaUserIds.has(e.userId)),
-    [signoffEmployees, qaUserIds]
+  const staffSignoffIds = useMemo(
+    () => new Set(staffSignoffUsers.map((user) => user.uid)),
+    [staffSignoffUsers]
   );
 
   const extraPickerItem = (
@@ -445,21 +495,25 @@ function TniPageInner() {
     if (key.startsWith("user:")) {
       const uid = key.slice(5);
       if (!uid || uid === profile?.uid || listedUserIds.has(uid)) return null;
-      const user = qaUsers.find((u) => u.uid === uid);
-      return { value: key, label: user?.displayName || uid };
+      const user = staffUsers.find((u) => u.uid === uid);
+      return { value: key, label: user ? staffOptionLabel(user) : uid };
     }
     return { value: key, label: key };
   };
 
+  const listedSignoffEmpIds = useMemo(
+    () => new Set(signoffEmployees.map((e) => e.id)),
+    [signoffEmployees]
+  );
   const extraPreparedItem = extraPickerItem(
     preparedByKey,
-    new Set(signoffEmployees.map((e) => e.id)),
-    qaUserIds
+    listedSignoffEmpIds,
+    staffSignoffIds
   );
   const extraApprovedItem = extraPickerItem(
     approvedByKey,
-    new Set(approvedByEmployees.map((e) => e.id)),
-    qaUserIds
+    listedSignoffEmpIds,
+    staffSignoffIds
   );
 
   useEffect(() => {
@@ -705,14 +759,20 @@ function TniPageInner() {
     }
     if (key.startsWith("user:")) {
       const uid = key.slice(5);
-      const user = qaUsers.find((u) => u.uid === uid);
+      const user = staffUsers.find((u) => u.uid === uid);
       if (user) {
-        const linkedEmp = employees.find((e) => e.userId === uid);
+        const linkedEmp = employees.find(
+          (e) => e.userId === uid || (user.employeeId ? e.id === user.employeeId : false)
+        );
         return {
           userId: uid,
-          name: user.displayName,
+          name: (user.displayName || "").trim() || "Staff",
           designation: ROLE_LABELS[user.role] || user.role,
-          ...(linkedEmp ? { employeeId: linkedEmp.id } : {}),
+          ...(linkedEmp
+            ? { employeeId: linkedEmp.id }
+            : user.employeeId
+              ? { employeeId: user.employeeId }
+              : {}),
           status: "pending",
         };
       }
@@ -1182,6 +1242,11 @@ function TniPageInner() {
                           {extraPreparedItem.label}
                         </SelectItem>
                       )}
+                      {staffSignoffUsers.map((user) => (
+                        <SelectItem key={user.uid} value={`user:${user.uid}`}>
+                          {staffOptionLabel(user)}
+                        </SelectItem>
+                      ))}
                       {signoffEmployees.map((e) => (
                         <SelectItem key={e.id} value={`emp:${e.id}`}>
                           {employeeFullName(e)} · {e.employeeCode}
@@ -1210,12 +1275,12 @@ function TniPageInner() {
                           {extraApprovedItem.label}
                         </SelectItem>
                       )}
-                      {qaPickerUsers.map((u) => (
-                        <SelectItem key={u.uid} value={`user:${u.uid}`}>
-                          {u.displayName} · {ROLE_LABELS[u.role] || u.role}
+                      {staffSignoffUsers.map((user) => (
+                        <SelectItem key={user.uid} value={`user:${user.uid}`}>
+                          {staffOptionLabel(user)}
                         </SelectItem>
                       ))}
-                      {approvedByEmployees.map((e) => (
+                      {signoffEmployees.map((e) => (
                         <SelectItem key={e.id} value={`emp:${e.id}`}>
                           {employeeFullName(e)} · {e.employeeCode}
                           {e.designation ? ` · ${e.designation}` : ""}
@@ -1227,9 +1292,10 @@ function TniPageInner() {
                     Head-Quality Assurance/Designee can approve only after Department
                     Training Coordinator/HOD has approved.
                   </p>
-                  {qaUsers.length === 0 && (
+                  {!staffUsers.some((user) => user.role === "qa") && (
                     <p className="text-xs text-amber-700">
-                      No QA login accounts found. You can still pick an employee as designee.
+                      No QA login accounts found. You can still pick another staff account or an
+                      employee as designee.
                     </p>
                   )}
                 </div>

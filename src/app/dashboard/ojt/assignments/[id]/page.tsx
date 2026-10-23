@@ -125,14 +125,16 @@ export default function OjtAssignmentDetailPage({
         setScores(
           crit.filter((c) => c.isActive).map((c) => {
             const existing = asg.evaluation?.criteria?.find((s) => s.criterionId === c.id);
-            return (
-              existing || {
-                criterionId: c.id,
-                label: c.label,
-                result: "pass" as const,
-                rating: criterionScaleForModel(c.ratingScale, model) === "1-5" ? 3 : undefined,
-              }
-            );
+            return {
+              criterionId: c.id,
+              label: c.label,
+              isRequired: c.isRequired,
+              result: existing?.result || ("pass" as const),
+              rating:
+                existing?.rating ??
+                (criterionScaleForModel(c.ratingScale, model) === "1-5" ? 3 : undefined),
+              comments: existing?.comments,
+            };
           })
         );
       }

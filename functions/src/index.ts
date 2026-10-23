@@ -358,6 +358,28 @@ export const submitAssessment = onCall(async (request) => {
     throw new HttpsError("failed-precondition", "Attempt has no questions");
   }
 
+  const missingIds = [
+    ...new Set(
+      attemptQuestions
+        .map((q) => q.questionId)
+        .filter((id) => typeof id === "string" && id.length > 0 && !keyById.has(id))
+    ),
+  ];
+  for (let offset = 0; offset < missingIds.length; offset += 10) {
+    const chunk = missingIds.slice(offset, offset + 10);
+    const extra = await db
+      .collection("questions")
+      .where(admin.firestore.FieldPath.documentId(), "in", chunk)
+      .get();
+    for (const d of extra.docs) {
+      const q = d.data();
+      const correct = ((q.options as Array<{ id: string; isCorrect?: boolean }>) || [])
+        .filter((o) => o.isCorrect)
+        .map((o) => o.id);
+      keyById.set(d.id, correct);
+    }
+  }
+
   const questions = attemptQuestions.map((q) => {
     const selected = mergedAnswers[q.questionId] || q.selectedOptionIds || [];
     const correctIds = keyById.get(q.questionId) || q.correctOptionIds || [];
@@ -387,8 +409,8 @@ export const submitAssessment = onCall(async (request) => {
     };
   });
 
-  const percentage =
-    totalMarks === 0 ? 0 : Math.round((earnedMarks / totalMarks) * 10000) / 100;
+  const rawPercentage = totalMarks === 0 ? 0 : (earnedMarks / totalMarks) * 100;
+  const percentage = Math.round(Math.max(0, rawPercentage) * 100) / 100;
   const passed = !expired && percentage >= (exam.passPercentage as number);
   const certThreshold =
     (exam.certificatePassPercentage as number) ?? (exam.passPercentage as number);
@@ -576,13 +598,18 @@ export const overdueTrainingReminders = onSchedule("every day 09:00", async () =
     ])
     .get();
 
+  const settingsSnap = await db.collection("ojt_settings").doc("global").get();
+  const graceRaw = Number(settingsSnap.data()?.overdueGraceDays ?? 0);
+  const graceDays = Number.isFinite(graceRaw) && graceRaw > 0 ? Math.min(Math.floor(graceRaw), 60) : 0;
+
   const today = new Date();
   for (const docSnap of ojtSnap.docs) {
     const a = docSnap.data();
     const year = Number(a.year);
     const month = Number(a.plannedExecutionMonth);
     if (!year || !month) continue;
-    const deadline = new Date(year, month, 0, 23, 59, 59, 999);
+    const deadline = new Date(Date.UTC(year, month, 0, 23, 59, 59, 999));
+    if (graceDays > 0) deadline.setUTCDate(deadline.getUTCDate() + graceDays);
     if (today.getTime() <= deadline.getTime()) continue;
     const emp = await db.collection("employees").doc(a.employeeId).get();
     const userId = emp.data()?.userId as string | undefined;

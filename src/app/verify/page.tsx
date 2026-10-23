@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatDate } from "@/lib/utils";
+import { BrandLogo } from "@/components/shared/brand-logo";
 import { DeveloperCredit } from "@/components/shared/developer-credit";
 import type { Certificate, CertificateVerification } from "@/types";
 import QRCode from "qrcode";
@@ -84,8 +85,7 @@ function VerifyInner() {
       <div className="mx-auto max-w-4xl space-y-6">
         <div className="text-center">
           <Link href="/" className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/brand/skymap-logo.png" alt="SKYMAP" className="h-8 w-auto object-contain" />
+            <BrandLogo className="h-8 w-auto object-contain" />
           </Link>
           <div className="mt-4 flex items-center justify-center gap-2">
             <ShieldCheck className="h-7 w-7" style={{ color: "#0b3d4a" }} />

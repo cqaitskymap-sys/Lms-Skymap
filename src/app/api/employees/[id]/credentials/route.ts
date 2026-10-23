@@ -75,6 +75,7 @@ export async function POST(
       provisioned = true;
     } else {
       await adminAuth.updateUser(employee.userId, { password: temporaryPassword });
+      await adminAuth.revokeRefreshTokens(employee.userId);
       await adminDb.collection(COLLECTIONS.users).doc(employee.userId).update({
         mustChangePassword: true,
         mustUpdateProfile: true,

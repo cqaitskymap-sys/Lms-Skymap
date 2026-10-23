@@ -10,8 +10,11 @@ const bodySchema = z.object({
   newPassword: z.string().min(1).max(200),
 });
 
-function wrongPasswordMessage(): string {
-  return "Temporary password is incorrect. Use the password from the credentials card — re-issuing login credentials replaces the previous one.";
+function wrongPasswordMessage(mustChangePassword: boolean): string {
+  if (mustChangePassword) {
+    return "Temporary password is incorrect. Use the password from the credentials card — re-issuing login credentials replaces the previous one.";
+  }
+  return "Current password is incorrect.";
 }
 
 export async function POST(request: NextRequest) {
@@ -35,6 +38,9 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
+
+    const profileSnap = await adminDb.collection(COLLECTIONS.users).doc(decoded.uid).get();
+    const mustChangePassword = profileSnap.data()?.mustChangePassword === true;
 
     const { currentPassword, newPassword } = bodySchema.parse(await request.json());
     if (currentPassword === newPassword) {
@@ -79,10 +85,14 @@ export async function POST(request: NextRequest) {
           { status: 429 }
         );
       }
-      return NextResponse.json({ success: false, error: wrongPasswordMessage() }, { status: 400 });
+      return NextResponse.json(
+        { success: false, error: wrongPasswordMessage(mustChangePassword) },
+        { status: 400 }
+      );
     }
 
     await adminAuth.updateUser(decoded.uid, { password: newPassword });
+    await adminAuth.revokeRefreshTokens(decoded.uid);
     const now = new Date().toISOString();
     await adminDb.collection(COLLECTIONS.users).doc(decoded.uid).set(
       {

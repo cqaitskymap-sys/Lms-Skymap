@@ -353,6 +353,21 @@ function JdPageInner() {
         return;
       }
 
+      if (profile?.role === "trainer" || profile?.role === "qa") {
+        const ids = [
+          ...new Set(assigned.map((row) => row.employeeId).filter((id) => Boolean(id))),
+        ];
+        const [depts, people] = await Promise.all([
+          listDepartments().catch(() => [] as Department[]),
+          Promise.all(ids.map((id) => getEmployee(id).catch(() => null))),
+        ]);
+        setDepartments(depts.filter((d) => d.isActive));
+        setEmployees(people.filter((row): row is Employee => Boolean(row)));
+        setStaffUsers([]);
+        setRecords(assigned);
+        return;
+      }
+
       if (profile?.role === "department_head" && !profile.departmentId) {
         const depts = await listDepartments().catch(() => [] as Department[]);
         setDepartments(depts.filter((d) => d.isActive));

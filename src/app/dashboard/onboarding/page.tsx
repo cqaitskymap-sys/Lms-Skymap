@@ -127,7 +127,9 @@ export default function FirstLoginOnboardingPage() {
           onboardingCompletedAt: new Date().toISOString(),
         });
         toast.success("Onboarding complete (demo)");
-        router.replace("/dashboard/employee");
+        router.replace(
+          (profile?.role && ROLE_DASHBOARD_ROUTES[profile.role]) || "/dashboard"
+        );
         return;
       }
       const res = await fetch("/api/onboarding", {
@@ -373,6 +375,7 @@ function PasswordStep({
                 <button
                   type="button"
                   className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-muted-foreground"
+                  aria-label={show[key] ? `Hide ${label}` : `Show ${label}`}
                   onClick={() => setShow((s) => ({ ...s, [key]: !s[key] }))}
                 >
                   {show[key] ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}

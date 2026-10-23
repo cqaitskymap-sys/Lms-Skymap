@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { verifyAuthDetailed, unauthorized, writeAuditLog } from "@/lib/rbac/middleware";
+import { ROLE_DASHBOARD_ROUTES } from "@/lib/rbac/permissions";
 import { adminDb } from "@/lib/firebase/admin";
 import { COLLECTIONS } from "@/lib/firebase/client";
 import { generateId } from "@/lib/utils";
@@ -259,7 +260,8 @@ export async function POST(request: NextRequest) {
       userAgent: request.headers.get("user-agent") || undefined,
     });
 
-    return NextResponse.json({ success: true, data: { step: "finish", redirect: "/dashboard/employee" } });
+    const home = ROLE_DASHBOARD_ROUTES[auth.role] || "/dashboard";
+    return NextResponse.json({ success: true, data: { step: "finish", redirect: home } });
   }
 
   return NextResponse.json({ success: false, error: "Unknown step" }, { status: 400 });

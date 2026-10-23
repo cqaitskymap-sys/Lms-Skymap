@@ -761,6 +761,8 @@ export interface AssessmentAttempt extends Timestamps {
   employeeName?: string;
   assignmentId?: string;
   inductionAssignmentId?: string;
+  /** Staff practice run. Scored for the sitter, excluded from training and certificates. */
+  preview?: boolean;
   status: AssessmentStatus;
   startedAt: string;
   submittedAt?: string;

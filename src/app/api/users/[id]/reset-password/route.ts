@@ -57,6 +57,7 @@ export async function POST(
 
   try {
     await adminAuth.updateUser(id, { password: temporaryPassword });
+    await adminAuth.revokeRefreshTokens(id);
   } catch (err) {
     return NextResponse.json(
       {
