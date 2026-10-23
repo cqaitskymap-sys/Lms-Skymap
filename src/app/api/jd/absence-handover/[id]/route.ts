@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
-import { unauthorized, verifyAuthDetailed, writeAuditLog } from "@/lib/rbac/middleware";
+import { unauthorized, verifyAuthDetailed, writeAuditLog, authHttpStatus } from "@/lib/rbac/middleware";
 import { acknowledgeJdSignoffForUser } from "@/lib/jd/absence-handover-server";
 import { JD_SIGNOFF_SLOTS, parseJdSignoffSlot } from "@/lib/jd/absence-handover";
 
@@ -10,7 +10,7 @@ export async function POST(
 ) {
   const verified = await verifyAuthDetailed(request);
   if (!verified.ok) {
-    const status = verified.reason === "admin_not_configured" ? 503 : 401;
+    const status = authHttpStatus(verified.reason);
     return unauthorized(verified.message, status);
   }
 

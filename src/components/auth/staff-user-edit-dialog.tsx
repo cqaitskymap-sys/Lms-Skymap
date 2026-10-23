@@ -121,7 +121,7 @@ export function StaffUserEditDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90vh] max-w-lg overflow-y-auto">
+      <DialogContent className="max-h-[90vh] max-w-lg">
         <DialogHeader>
           <DialogTitle>Edit staff account</DialogTitle>
           <DialogDescription>

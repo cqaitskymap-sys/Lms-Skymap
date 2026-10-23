@@ -1,13 +1,13 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
-import { requirePermission, unauthorized, verifyAuthDetailed } from "@/lib/rbac/middleware";
+import { requirePermission, unauthorized, verifyAuthDetailed, authHttpStatus } from "@/lib/rbac/middleware";
 import { adminDb } from "@/lib/firebase/admin";
 import { COLLECTIONS } from "@/lib/firebase/client";
 
 export async function GET(request: NextRequest) {
   const verified = await verifyAuthDetailed(request);
   if (!verified.ok) {
-    const status = verified.reason === "admin_not_configured" ? 503 : 401;
+    const status = authHttpStatus(verified.reason);
     return unauthorized(verified.message, status);
   }
   const denied = requirePermission(verified.auth, "employees:read");
@@ -23,7 +23,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const verified = await verifyAuthDetailed(request);
   if (!verified.ok) {
-    const status = verified.reason === "admin_not_configured" ? 503 : 401;
+    const status = authHttpStatus(verified.reason);
     return unauthorized(verified.message, status);
   }
   const denied = requirePermission(verified.auth, "employees:write");

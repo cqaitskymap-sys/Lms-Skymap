@@ -115,7 +115,7 @@ export default function NewSopPage() {
 
   return (
     <RequirePermission permission="sops:write">
-      <div className="mx-auto max-w-3xl space-y-6">
+      <div className="w-full space-y-6">
         <div className="space-y-1">
           <Button variant="ghost" size="sm" className="-ml-2" asChild>
             <Link href="/dashboard/sops">

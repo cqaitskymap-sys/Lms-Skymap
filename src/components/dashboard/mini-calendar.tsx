@@ -54,7 +54,21 @@ export function MiniCalendar({ month }: { month?: Date }) {
     return eachDayOfInterval({ start, end });
   }, [now]);
 
-  const eventMap = new Map(events.map((e) => [e.date, e]));
+  const eventMap = new Map<string, { tone: string; count: number }>();
+  for (const event of events) {
+    const prev = eventMap.get(event.date);
+    if (!prev) {
+      eventMap.set(event.date, { tone: event.tone, count: 1 });
+      continue;
+    }
+    const tone =
+      prev.tone === "danger" || event.tone === "danger"
+        ? "danger"
+        : prev.tone === "primary" || event.tone === "primary"
+          ? "primary"
+          : "accent";
+    eventMap.set(event.date, { tone, count: prev.count + 1 });
+  }
 
   const toneClass: Record<string, string> = {
     primary: "bg-primary text-primary-foreground",
@@ -84,6 +98,7 @@ export function MiniCalendar({ month }: { month?: Date }) {
             return (
               <div
                 key={key}
+                title={event ? `${event.count} session${event.count === 1 ? "" : "s"}` : undefined}
                 className={cn(
                   "relative flex h-8 items-center justify-center rounded-md text-xs",
                   !inMonth && "text-muted-foreground/40",
@@ -92,6 +107,11 @@ export function MiniCalendar({ month }: { month?: Date }) {
                 )}
               >
                 {format(day, "d")}
+                {event && event.count > 1 && (
+                  <span className="absolute right-0.5 top-0.5 text-[9px] font-semibold leading-none">
+                    {event.count}
+                  </span>
+                )}
               </div>
             );
           })}

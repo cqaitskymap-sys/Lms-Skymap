@@ -18,7 +18,7 @@ import {
   browserSessionPersistence,
   type User,
 } from "firebase/auth";
-import { doc, getDoc, setDoc, updateDoc } from "firebase/firestore/lite";
+import { doc, getDoc, updateDoc } from "firebase/firestore/lite";
 import { auth, db, COLLECTIONS, connectEmulators } from "@/lib/firebase/client";
 import type { UserProfile, UserRole } from "@/types";
 import { hasPermission, type Permission } from "@/lib/rbac/permissions";
@@ -79,20 +79,13 @@ function writeProfileCache(profile: UserProfile) {
   }
 }
 
-function buildBootstrapProfile(firebaseUser: User): UserProfile {
-  const now = new Date().toISOString();
-  const email = firebaseUser.email || "";
-  return {
-    id: firebaseUser.uid,
-    uid: firebaseUser.uid,
-    email,
-    displayName: firebaseUser.displayName || email.split("@")[0] || "User",
-    role: "employee",
-    isActive: true,
-    createdAt: now,
-    updatedAt: now,
-    createdBy: "bootstrap",
-  };
+function clearProfileCache() {
+  if (typeof sessionStorage === "undefined") return;
+  try {
+    sessionStorage.removeItem(PROFILE_CACHE_KEY);
+  } catch {
+    /* private mode */
+  }
 }
 
 function getDemoLockouts(): Record<string, { failedAttempts: number; lockedUntil: string | null }> {
@@ -119,18 +112,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const fetchProfile = useCallback(async (firebaseUser: User) => {
     const cached = readProfileCache(firebaseUser.uid);
-    if (cached) setProfile(cached.profile);
+    const usableCache = cached?.profile.role ? cached : null;
+    if (cached && !usableCache) clearProfileCache();
+    if (usableCache) setProfile(usableCache.profile);
     // Paint from cache immediately, but only skip Firestore when reads are blocked.
     // A time-based skip kept demoted or deactivated roles active until the cache expired.
-    if (cached && firestoreReadsBlocked()) {
-      return cached.profile;
+    if (usableCache && firestoreReadsBlocked()) {
+      return usableCache.profile;
     }
 
     try {
       const snap = await getDoc(doc(db, COLLECTIONS.users, firebaseUser.uid));
       if (snap.exists()) {
         const data = { id: snap.id, ...snap.data() } as UserProfile;
-        if (!data.role) data.role = "employee";
+        if (!data.role) {
+          clearProfileCache();
+          await firebaseSignOut(auth);
+          setUser(null);
+          setProfile(null);
+          return null;
+        }
         if (!data.displayName) {
           data.displayName =
             firebaseUser.displayName || data.email?.split("@")[0] || "User";
@@ -140,24 +141,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return data;
       }
 
-      const provisional = buildBootstrapProfile(firebaseUser);
-      try {
-        await setDoc(doc(db, COLLECTIONS.users, firebaseUser.uid), provisional);
-      } catch {
-        /* rules may block */
-      }
-      setProfile(provisional);
-      return provisional;
+      clearProfileCache();
+      await firebaseSignOut(auth);
+      setUser(null);
+      setProfile(null);
+      return null;
     } catch (err) {
       noteFirestoreExhausted(err);
-      if (cached) return cached.profile;
-      const fallback = buildBootstrapProfile(firebaseUser);
-      setProfile(fallback);
-      return fallback;
+      if (usableCache) return usableCache.profile;
+      setProfile(null);
+      return null;
     }
   }, []);
 
   const signOut = useCallback(async () => {
+    clearProfileCache();
     if (demo) {
       localStorage.removeItem(DEMO_SESSION_KEY);
       sessionStorage.removeItem(DEMO_SESSION_KEY);
@@ -219,15 +217,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (!auth.currentUser) return;
       try {
         await auth.currentUser.getIdToken(true);
-      } catch {
-        /* ignore */
+      } catch (err) {
+        const code = (err as { code?: string }).code;
+        if (
+          code === "auth/user-disabled" ||
+          code === "auth/user-token-expired" ||
+          code === "auth/invalid-user-token"
+        ) {
+          void signOut();
+        }
       }
     }, SESSION_REFRESH_INTERVAL_MS);
 
     return () => {
       clearInterval(refresh);
     };
-  }, [demo]);
+  }, [demo, signOut]);
 
   useEffect(() => {
     if (demo) {
@@ -322,8 +327,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const cred = await signInWithEmailAndPassword(auth, normalized, password);
       const loaded = await fetchProfile(cred.user);
+      if (!loaded) {
+        throw new Error("No user profile is linked to this account. Contact HR.");
+      }
 
-      if (loaded && loaded.isActive === false) {
+      if (loaded.isActive === false) {
         await firebaseSignOut(auth);
         throw new Error("Account is deactivated. Contact HR or your administrator.");
       }
@@ -338,7 +346,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       const now = new Date().toISOString();
       const nextProfile: UserProfile = {
-        ...(loaded || buildBootstrapProfile(cred.user)),
+        ...loaded,
         lastLoginAt: now,
         updatedAt: now,
       };
@@ -354,16 +362,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       return nextProfile;
     } catch (err) {
-      try {
-        await firebaseSignOut(auth);
-        await clearSession();
-      } catch {
-        /* already signed out */
-      }
       const code =
         err && typeof err === "object" && "code" in err
           ? String((err as { code?: string }).code)
           : "";
+      const rejectedCredentials =
+        code === "auth/wrong-password" ||
+        code === "auth/invalid-credential" ||
+        code === "auth/invalid-login-credentials" ||
+        code === "auth/user-not-found" ||
+        code === "auth/invalid-email" ||
+        code === "auth/too-many-requests";
+      // A rejected password leaves the previous Firebase user in place.
+      // Signing out here would clear a session that this attempt never replaced.
+      if (!rejectedCredentials) {
+        try {
+          await firebaseSignOut(auth);
+          await clearSession();
+        } catch {
+          /* already signed out */
+        }
+      }
       let message = err instanceof Error ? err.message : "Sign in failed";
 
       if (code === "auth/user-not-found" || code === "auth/invalid-email") {
@@ -381,7 +400,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         code === "auth/user-not-found" ||
         code === "auth/invalid-email";
       if (credentialFailure) {
-        const failure = await reportLoginFailure(normalized);
+        const failure = await reportLoginFailure(normalized, password);
         throw new Error(failure.message || message);
       }
       throw err instanceof Error ? new Error(message) : new Error(message);

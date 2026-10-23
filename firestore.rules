@@ -297,6 +297,13 @@ service cloud.firestore {
       allow delete: if isSuperAdmin();
     }
 
+    // JD master lists (sub department, designation, responsibilities). Readable
+    // by anyone creating a JD; only Admin can change them.
+    match /jd_catalog/{id} {
+      allow read: if isActive();
+      allow create, update, delete: if isSuperAdmin();
+    }
+
     match /training_need_identifications/{id} {
       allow read: if isActive() && (
         hasRole(['super_admin', 'hr', 'qa', 'department_head', 'trainer']) ||
@@ -476,6 +483,10 @@ service cloud.firestore {
       allow delete: if isSuperAdmin();
     }
 
+    match /assessment_attempt_keys/{id} {
+      allow read, write: if false;
+    }
+
     match /assessment_attempts/{id} {
       allow read: if isActive() && (
         hasRole(['super_admin', 'hr', 'qa', 'department_head', 'trainer']) ||
@@ -495,6 +506,7 @@ service cloud.firestore {
             resource.data.employeeId == userDoc().employeeId)
         )
         && resource.data.status == 'in_progress'
+        && resource.data.get('answersLocked', false) != true
         && request.resource.data.status == 'in_progress'
         && request.resource.data.diff(resource.data).affectedKeys()
             .hasOnly(['answersDraft', 'lastSavedAt', 'updatedAt', 'updatedBy']);

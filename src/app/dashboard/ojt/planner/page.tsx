@@ -69,7 +69,10 @@ export default function OjtPlannerPage() {
   const [busy, setBusy] = useState(false);
   const plansRef = useRef<OjtPlan[]>([]);
   const saveTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const pendingPlans = useRef<Map<string, OjtPlan>>(new Map());
   const dirtyRef = useRef(false);
+  const profileRef = useRef(profile);
+  profileRef.current = profile;
 
   const canWrite = profile?.role ? hasPermission(profile.role, "ojt:write") : false;
   const isSuperAdmin = profile?.role === "super_admin";
@@ -154,8 +157,25 @@ export default function OjtPlannerPage() {
 
   useEffect(() => {
     const timers = saveTimers.current;
+    const pending = pendingPlans.current;
     return () => {
       for (const timer of timers.values()) clearTimeout(timer);
+      timers.clear();
+      const current = profileRef.current;
+      if (!current) return;
+      const actor = toOjtActor(current);
+      for (const plan of pending.values()) {
+        void upsertOjtPlan(
+          {
+            ...plan,
+            year: plan.year,
+            departmentId: plan.departmentId,
+            topicId: plan.topicId,
+          },
+          actor
+        ).catch(() => undefined);
+      }
+      pending.clear();
     };
   }, []);
 
@@ -170,12 +190,14 @@ export default function OjtPlannerPage() {
     plansRef.current = plansRef.current.map((p) => (p.id === plan.id ? next : p));
     setPlans(plansRef.current);
     dirtyRef.current = true;
+    pendingPlans.current.set(plan.id, next);
     const pending = saveTimers.current.get(plan.id);
     if (pending) clearTimeout(pending);
     saveTimers.current.set(
       plan.id,
       setTimeout(() => {
         saveTimers.current.delete(plan.id);
+        pendingPlans.current.delete(plan.id);
         void upsertOjtPlan(
           {
             ...next,

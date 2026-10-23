@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
-import { unauthorized, verifyAuthDetailed } from "@/lib/rbac/middleware";
+import { unauthorized, verifyAuthDetailed, authHttpStatus } from "@/lib/rbac/middleware";
 import { hasPermission } from "@/lib/rbac/permissions";
 import { adminDb, isAdminConfigured } from "@/lib/firebase/admin";
 import { COLLECTIONS } from "@/lib/firebase/client";
@@ -32,7 +32,7 @@ export async function POST(request: NextRequest) {
   if (!verified.ok) {
     return unauthorized(
       verified.message,
-      verified.reason === "admin_not_configured" ? 503 : 401
+      authHttpStatus(verified.reason)
     );
   }
   if (

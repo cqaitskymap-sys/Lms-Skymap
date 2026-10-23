@@ -1239,11 +1239,26 @@ export async function updateSopVersionNumber(
     store.versions = store.versions.map((v) =>
       v.id === versionId ? { ...v, ...parsed, updatedAt: now } : v
     );
-    store.sops = store.sops.map((s) =>
-      s.id === sopId && s.currentVersionId === versionId
-        ? { ...s, currentVersionNumber: parsed.versionNumber, updatedAt: now, updatedBy: actor.uid }
-        : s
-    );
+    store.sops = store.sops.map((s) => {
+      if (s.id !== sopId) return s;
+      if (s.currentVersionId === versionId) {
+        return {
+          ...s,
+          currentVersionNumber: parsed.versionNumber,
+          updatedAt: now,
+          updatedBy: actor.uid,
+        };
+      }
+      if (s.pendingVersionId === versionId) {
+        return {
+          ...s,
+          pendingVersionNumber: parsed.versionNumber,
+          updatedAt: now,
+          updatedBy: actor.uid,
+        };
+      }
+      return s;
+    });
     writeSopStore(store);
   } else {
     const snap = await getDoc(doc(db, COLLECTIONS.sopVersions, versionId));
@@ -1268,12 +1283,21 @@ export async function updateSopVersionNumber(
       updatedBy: actor.uid,
     });
     const sopSnap = await getDoc(doc(db, COLLECTIONS.sops, sopId));
-    if (sopSnap.exists() && sopSnap.data().currentVersionId === versionId) {
-      await updateDoc(doc(db, COLLECTIONS.sops, sopId), {
-        currentVersionNumber: parsed.versionNumber,
-        updatedAt: now,
-        updatedBy: actor.uid,
-      });
+    if (sopSnap.exists()) {
+      const sop = sopSnap.data();
+      const patch =
+        sop.currentVersionId === versionId
+          ? { currentVersionNumber: parsed.versionNumber }
+          : sop.pendingVersionId === versionId
+            ? { pendingVersionNumber: parsed.versionNumber }
+            : null;
+      if (patch) {
+        await updateDoc(doc(db, COLLECTIONS.sops, sopId), {
+          ...patch,
+          updatedAt: now,
+          updatedBy: actor.uid,
+        });
+      }
     }
   }
 
@@ -1548,7 +1572,10 @@ export async function approveSopVersionFull(
       parent?.status === "approved" &&
       parent.currentVersionId === versionId
     ) {
-      return { retrainCount: 0 };
+      if (options?.triggerRetrain !== false && version.supersedesVersionId) {
+        retrainCount = await reassignTrainingOnRevision(sopId, versionId, actor.uid);
+      }
+      return { retrainCount };
     }
     assertAssignedApprover(
       {
@@ -1636,13 +1663,11 @@ const SOP_REVISION_OPEN_STATUSES = new Set<TrainingAssignment["status"]>([
   "training_scheduled",
   "retraining",
   "assessment_pending",
+  "training_completed",
   "failed",
 ]);
 
-const SOP_REVISION_COMPLETED_STATUSES = new Set<TrainingAssignment["status"]>([
-  "passed",
-  "training_completed",
-]);
+const SOP_REVISION_COMPLETED_STATUSES = new Set<TrainingAssignment["status"]>(["passed"]);
 
 function planSopRevisionRetrain(
   rows: TrainingAssignment[],
@@ -1670,15 +1695,34 @@ function planSopRevisionRetrain(
       (a) => SOP_REVISION_OPEN_STATUSES.has(a.status) && a.sopVersionId !== newVersionId
     );
     if (openOld.length) {
+      const primary = [...openOld].sort((a, b) =>
+        (b.updatedAt || "").localeCompare(a.updatedAt || "")
+      )[0];
       for (const prev of openOld) {
         toUpdate.push({
           ...prev,
-          sopVersionId: newVersionId,
-          status: prev.status === "failed" ? "retraining" : prev.status,
-          isRetraining: true,
-          triggeredBySopRevision: true,
+          status: "expired",
           updatedAt: now,
           updatedBy: actorId,
+        });
+      }
+      if (!alreadyOnNew) {
+        toCreate.push({
+          id: `ta_${primary.employeeId}_${newVersionId}`,
+          employeeId: primary.employeeId,
+          sopId,
+          sopVersionId: newVersionId,
+          trainerId: primary.trainerId,
+          assignedBy: actorId,
+          departmentId: primary.departmentId,
+          status: "retraining",
+          attemptCount: 0,
+          isRetraining: true,
+          previousAssignmentId: primary.id,
+          triggeredBySopRevision: true,
+          createdAt: now,
+          updatedAt: now,
+          createdBy: actorId,
         });
       }
       continue;
@@ -1760,10 +1804,7 @@ export async function reassignTrainingOnRevision(
 
   for (const row of toUpdate) {
     await updateDoc(doc(db, COLLECTIONS.trainingAssignments, row.id), {
-      sopVersionId: newVersionId,
       status: row.status,
-      isRetraining: true,
-      triggeredBySopRevision: true,
       updatedAt: now,
       updatedBy: actorId,
     });
@@ -1910,17 +1951,15 @@ export async function acknowledgeSop(params: {
     pagesViewed?: number;
     pageCount?: number;
   } = {};
-  if (params.actor.role === "employee") {
-    const progress = await assertEmployeeReadingComplete({
-      userId: params.actor.uid,
-      versionId: params.versionId,
-    });
-    readingProof = {
-      readingSeconds: progress.elapsedSeconds,
-      pagesViewed: progress.pagesSeen.length,
-      pageCount: progress.pageCount,
-    };
-  }
+  const progress = await assertEmployeeReadingComplete({
+    userId: params.actor.uid,
+    versionId: params.versionId,
+  });
+  readingProof = {
+    readingSeconds: progress.elapsedSeconds,
+    pagesViewed: progress.pagesSeen.length,
+    pageCount: progress.pageCount,
+  };
 
   const bundle = await getSopBundle(params.sopId, {
     role: params.actor.role,
@@ -1940,7 +1979,7 @@ export async function acknowledgeSop(params: {
   }
 
   const ack: SopAcknowledgement = {
-    id: generateId("ack"),
+    id: `ack_${params.versionId}_${params.actor.uid}`.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 700),
     sopId: params.sopId,
     versionId: params.versionId,
     versionNumber: params.versionNumber,
@@ -1986,7 +2025,15 @@ export async function acknowledgeSop(params: {
       throw new Error("You have already acknowledged this version");
     }
 
-    await setDoc(doc(db, COLLECTIONS.sopAcknowledgements, ack.id), stripUndefined(ack));
+    try {
+      await setDoc(doc(db, COLLECTIONS.sopAcknowledgements, ack.id), stripUndefined(ack));
+    } catch (err) {
+      const existing = await getDoc(doc(db, COLLECTIONS.sopAcknowledgements, ack.id));
+      if (existing.exists()) {
+        throw new Error("You have already acknowledged this version");
+      }
+      throw err;
+    }
     try {
       await updateDoc(doc(db, COLLECTIONS.sopVersions, params.versionId), {
         acknowledgementCount: increment(1),

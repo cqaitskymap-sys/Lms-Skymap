@@ -43,7 +43,7 @@ function ackMatchesVersion(
 ): boolean {
   return acks.some((a) => {
     if (a.sopId !== sopId) return false;
-    if (!currentVersionId) return true;
+    if (!currentVersionId) return false;
     return a.versionId === currentVersionId;
   });
 }
@@ -129,6 +129,29 @@ async function questionsWithAnswerKeys(
   exam: Exam,
   attempt: AssessmentAttempt
 ): Promise<AssessmentAttempt["questions"]> {
+  const stored = new Map<string, string[]>();
+  const keySnap = await adminDb.collection(COLLECTIONS.assessmentAttemptKeys).doc(attempt.id).get();
+  if (keySnap.exists) {
+    const rows = (keySnap.data()?.questions || []) as {
+      questionId?: string;
+      correctOptionIds?: string[];
+    }[];
+    for (const row of rows) {
+      if (row.questionId && row.correctOptionIds?.length) {
+        stored.set(row.questionId, row.correctOptionIds);
+      }
+    }
+  }
+  if (
+    stored.size > 0 &&
+    attempt.questions.every((q) => stored.has(q.questionId))
+  ) {
+    return attempt.questions.map((q) => ({
+      ...q,
+      correctOptionIds: stored.get(q.questionId) || [],
+    }));
+  }
+
   const bankQuestions = await loadBankQuestions(exam);
   const keyById = new Map(
     bankQuestions.map((q) => [
@@ -152,9 +175,11 @@ async function questionsWithAnswerKeys(
   }
   return attempt.questions.map((q) => ({
     ...q,
-    correctOptionIds: keyById.get(q.questionId)?.length
-      ? keyById.get(q.questionId)!
-      : q.correctOptionIds || [],
+    correctOptionIds: stored.get(q.questionId)?.length
+      ? stored.get(q.questionId)!
+      : keyById.get(q.questionId)?.length
+        ? keyById.get(q.questionId)!
+        : q.correctOptionIds || [],
   }));
 }
 
@@ -257,6 +282,7 @@ export async function startAssessmentServer(
     if (tniBlock) return tniBlock;
   }
 
+  let assignmentVersionId: string | undefined;
   if (input.assignmentId) {
     const assignSnap = await adminDb
       .collection(COLLECTIONS.trainingAssignments)
@@ -272,6 +298,7 @@ export async function startAssessmentServer(
     if (exam.sopId && assignment.sopId && exam.sopId !== assignment.sopId) {
       return { ok: false, status: 400, error: "Exam is not linked to this SOP assignment" };
     }
+    assignmentVersionId = assignment.sopVersionId;
     if (!["assessment_pending", "retraining"].includes(assignment.status)) {
       return {
         ok: false,
@@ -470,6 +497,7 @@ export async function startAssessmentServer(
     createdBy: input.actorId,
     ...(input.employeeName ? { employeeName: input.employeeName } : {}),
     ...(input.assignmentId ? { assignmentId: input.assignmentId } : {}),
+    ...(assignmentVersionId ? { sopVersionId: assignmentVersionId } : {}),
     ...(input.inductionAssignmentId
       ? { inductionAssignmentId: input.inductionAssignmentId }
       : {}),
@@ -511,6 +539,15 @@ export async function startAssessmentServer(
         throw new Error("MAX_ATTEMPTS");
       }
       tx.set(attemptRef, stripUndefined(attemptForPersistence(attempt)));
+      tx.set(adminDb.collection(COLLECTIONS.assessmentAttemptKeys).doc(id), {
+        attemptId: id,
+        examId: attempt.examId,
+        questions: attempt.questions.map((q) => ({
+          questionId: q.questionId,
+          correctOptionIds: q.correctOptionIds || [],
+        })),
+        createdAt: new Date().toISOString(),
+      });
     });
   } catch (err) {
     if (err instanceof Error && err.message === "MAX_ATTEMPTS") {
@@ -927,6 +964,16 @@ async function handleTrainingResultServer(
   const assignSnap = await assignRef.get();
   if (!assignSnap.exists) return;
   const prev = { id: assignSnap.id, ...assignSnap.data() } as TrainingAssignment;
+
+  const revisedAfterStart =
+    Boolean(attempt.sopVersionId && attempt.sopVersionId !== prev.sopVersionId) ||
+    (prev.triggeredBySopRevision === true &&
+      Boolean(prev.updatedAt) &&
+      Boolean(attempt.startedAt) &&
+      prev.updatedAt > attempt.startedAt);
+  const readyForResult =
+    prev.status === "assessment_pending" || prev.status === "retraining";
+  if (revisedAfterStart || !readyForResult) return;
 
   if (attempt.passed) {
     await assignRef.set(

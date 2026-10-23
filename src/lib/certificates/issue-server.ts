@@ -18,7 +18,7 @@ import {
   requiredExamsForEmployee,
 } from "@/lib/certificates/eligibility";
 import { hasOutstandingTraining } from "@/lib/assessments/training-cycle";
-import { getStageIndex } from "@/lib/lifecycle/stages";
+import { getProgressForStage, getStageIndex } from "@/lib/lifecycle/stages";
 import type {
   AssessmentAttempt,
   Certificate,
@@ -53,19 +53,14 @@ async function findProgrammeCertificate(employeeId: string): Promise<Certificate
     if (!cert.isRevoked) return cert;
   }
 
-  try {
-    const snap = await adminDb
-      .collection(COLLECTIONS.certificates)
-      .where("employeeId", "==", employeeId)
-      .limit(20)
-      .get();
-    const active = snap.docs
-      .map((d) => ({ id: d.id, ...d.data() } as Certificate))
-      .find((c) => !c.isRevoked && (c.kind === "programme" || c.sopNumber === PROGRAMME_SOP_NUMBER));
-    return active || null;
-  } catch {
-    return null;
-  }
+  const snap = await adminDb
+    .collection(COLLECTIONS.certificates)
+    .where("employeeId", "==", employeeId)
+    .get();
+  const active = snap.docs
+    .map((d) => ({ id: d.id, ...d.data() } as Certificate))
+    .find((c) => !c.isRevoked && (c.kind === "programme" || c.sopNumber === PROGRAMME_SOP_NUMBER));
+  return active || null;
 }
 
 async function loadEmployee(employeeId: string): Promise<Employee | null> {
@@ -223,6 +218,12 @@ export async function issueCertificateForAttemptServer(
       if (existingSnap.exists) {
         const current = existingSnap.data() as Certificate;
         if (!current.isRevoked) throw new Error("ALREADY_EXISTS");
+        const archiveId = `revoked_${String(current.certificateNumber || existingSnap.id).replace(/[^\w-]/g, "_")}`;
+        const archiveRef = adminDb.collection(COLLECTIONS.certificates).doc(archiveId);
+        const archiveSnap = await tx.get(archiveRef);
+        if (!archiveSnap.exists) {
+          tx.set(archiveRef, stripUndefined({ ...current, id: archiveId }));
+        }
       }
 
       const certificateNumber = generateCertificateNumber();
@@ -428,6 +429,26 @@ export async function revokeCertificateServer(
     },
     { merge: true }
   );
+  if (
+    cert.employeeId &&
+    (cert.kind === "programme" || cert.sopNumber === PROGRAMME_SOP_NUMBER)
+  ) {
+    const employeeRef = adminDb.collection(COLLECTIONS.employees).doc(cert.employeeId);
+    const employeeSnap = await employeeRef.get();
+    const stage = employeeSnap.data()?.lifecycleStage as string | undefined;
+    const employeeStatus = employeeSnap.data()?.status as string | undefined;
+    if (stage === "certified" && employeeStatus !== "qualified") {
+      await employeeRef.set(
+        {
+          lifecycleStage: "passed",
+          lifecycleProgress: getProgressForStage("passed"),
+          updatedAt: now,
+          updatedBy: actorId,
+        },
+        { merge: true }
+      );
+    }
+  }
   return {
     ok: true,
     certificate: {

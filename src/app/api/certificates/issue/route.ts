@@ -3,7 +3,7 @@ import type { NextRequest } from "next/server";
 import { z } from "zod";
 import { issueCertificateForAttemptServer } from "@/lib/certificates/issue-server";
 import { hasPermission } from "@/lib/rbac/permissions";
-import { unauthorized, verifyAuthDetailed } from "@/lib/rbac/middleware";
+import { unauthorized, verifyAuthDetailed, authHttpStatus } from "@/lib/rbac/middleware";
 import { adminDb } from "@/lib/firebase/admin";
 import { COLLECTIONS } from "@/lib/firebase/client";
 
@@ -14,7 +14,7 @@ const bodySchema = z.object({
 export async function POST(request: NextRequest) {
   const verified = await verifyAuthDetailed(request);
   if (!verified.ok) {
-    const status = verified.reason === "admin_not_configured" ? 503 : 401;
+    const status = authHttpStatus(verified.reason);
     return unauthorized(verified.message, status);
   }
 

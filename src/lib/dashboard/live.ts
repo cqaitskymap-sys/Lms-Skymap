@@ -337,7 +337,8 @@ function complianceTone(rate: number): "success" | "warning" | "danger" {
 
 /**
  * Real last-6-month pass rate: for each month-end, assignments that existed
- * by then, counting only those marked passed by that date.
+ * by then, counting only those already passed. Uses the assignment update
+ * time (set when the exam is marked passed), not the earlier classroom date.
  */
 function buildComplianceTrend(
   asg: TrainingAssignment[]
@@ -364,7 +365,7 @@ function buildComplianceTrend(
     }
     const passed = existed.filter((a) => {
       if (a.status !== "passed") return false;
-      const doneAt = a.trainingCompletedAt || a.updatedAt || a.createdAt;
+      const doneAt = a.updatedAt || a.createdAt;
       return new Date(doneAt).getTime() <= monthEnd.getTime();
     }).length;
     points.push({
@@ -555,8 +556,11 @@ export function buildDashboardView(snap: DashboardSnapshot, role: string) {
   const sopAlerts: DashAlert[] = snap.sops
     .filter((s) => s.reviewDate)
     .filter((s) => {
-      const days = (new Date(s.reviewDate!).getTime() - now) / 86400000;
-      return days >= 0 && days <= 60;
+      const start = localDayBound(s.reviewDate!, false);
+      const end = localDayBound(s.reviewDate!, true);
+      if (!Number.isFinite(start) || !Number.isFinite(end)) return false;
+      const daysUntilStart = (start - now) / 86400000;
+      return now <= end && daysUntilStart <= 60;
     })
     .slice(0, 5)
     .map((s) => ({
@@ -571,7 +575,10 @@ export function buildDashboardView(snap: DashboardSnapshot, role: string) {
   const activities: DashActivity[] = snap.audit.slice(0, 12).map((e) => ({
     id: e.id,
     description: e.description,
-    actor: e.actorName || e.actorEmployeeCode || e.actorId,
+    actor: e.actorName || e.actorEmployeeCode || e.actorEmail || e.actorId,
+    actorName: e.actorName,
+    actorEmail: e.actorEmail,
+    actorEmployeeCode: e.actorEmployeeCode,
     action: e.action,
     timestamp: e.timestamp,
   }));

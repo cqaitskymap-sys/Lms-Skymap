@@ -13,6 +13,8 @@ import { toast } from "sonner";
 
 type ExamLockState = {
   isLocked: boolean;
+  /** False until sessionStorage has been read. Exam routes should keep nav hidden until then. */
+  lockReady: boolean;
   attemptId: string | null;
   examTitle: string | null;
   lockExam: (args: { attemptId: string; examTitle: string }) => void;
@@ -52,6 +54,7 @@ function writeStoredLock(value: { attemptId: string; examTitle: string } | null)
 export function ExamLockProvider({ children }: { children: React.ReactNode }) {
   const [attemptId, setAttemptId] = useState<string | null>(null);
   const [examTitle, setExamTitle] = useState<string | null>(null);
+  const [lockReady, setLockReady] = useState(false);
 
   useEffect(() => {
     const stored = readStoredLock();
@@ -59,6 +62,7 @@ export function ExamLockProvider({ children }: { children: React.ReactNode }) {
       setAttemptId(stored.attemptId);
       setExamTitle(stored.examTitle);
     }
+    setLockReady(true);
   }, []);
 
   const lockExam = useCallback((args: { attemptId: string; examTitle: string }) => {
@@ -76,12 +80,13 @@ export function ExamLockProvider({ children }: { children: React.ReactNode }) {
   const value = useMemo(
     () => ({
       isLocked: !!attemptId,
+      lockReady,
       attemptId,
       examTitle,
       lockExam,
       unlockExam,
     }),
-    [attemptId, examTitle, lockExam, unlockExam]
+    [attemptId, examTitle, lockExam, lockReady, unlockExam]
   );
 
   return (
@@ -103,6 +108,7 @@ export function useExamLockOptional(): ExamLockState {
   return (
     ctx ?? {
       isLocked: false,
+      lockReady: true,
       attemptId: null,
       examTitle: null,
       lockExam: () => undefined,

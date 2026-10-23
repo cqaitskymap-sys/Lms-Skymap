@@ -25,7 +25,11 @@ export function CertificateActions({
   allowUpload = false,
 }: CertificateActionsProps) {
   const sheetRef = useRef<HTMLDivElement>(null);
-  const [qr, setQr] = useState<string | undefined>(certificate.qrCodeImageUrl);
+  const [qrByCert, setQrByCert] = useState<{ id: string; url?: string }>({
+    id: certificate.id,
+    url: certificate.qrCodeImageUrl,
+  });
+  const qr = qrByCert.id === certificate.id ? qrByCert.url : certificate.qrCodeImageUrl;
   const [busy, setBusy] = useState<"pdf" | "print" | "upload" | null>(null);
 
   const ensureQr = useCallback(async () => {
@@ -35,9 +39,9 @@ export function CertificateActions({
       margin: 1,
       color: { dark: "#0B3D4A", light: "#FFFFFFF0" },
     });
-    setQr(data);
+    setQrByCert({ id: certificate.id, url: data });
     return data;
-  }, [certificate.qrCodeData, qr]);
+  }, [certificate.id, certificate.qrCodeData, qr]);
 
   const handlePrint = async () => {
     setBusy("print");

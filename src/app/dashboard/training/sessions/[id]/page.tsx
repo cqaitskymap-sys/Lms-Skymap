@@ -38,10 +38,12 @@ export default function TrainingSessionPage({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const refreshGen = useRef(0);
+  const formDirty = useRef(false);
+  const loadedId = useRef<string | null>(null);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (opts?: { silent?: boolean }) => {
     const gen = ++refreshGen.current;
-    setLoading(true);
+    if (!opts?.silent) setLoading(true);
     setError(null);
     try {
       const canListAssignments =
@@ -81,7 +83,12 @@ export default function TrainingSessionPage({
       if (gen !== refreshGen.current) return;
       setEmployees(emps);
 
-      if (s) {
+      const idChanged = loadedId.current !== id;
+      if (idChanged) {
+        formDirty.current = false;
+        loadedId.current = id;
+      }
+      if (s && !formDirty.current) {
         const roster =
           s.attendance?.length > 0
             ? s.attendance
@@ -105,7 +112,7 @@ export default function TrainingSessionPage({
 
   useEffect(() => {
     void refresh();
-    const onUpdate = () => void refresh();
+    const onUpdate = () => void refresh({ silent: true });
     window.addEventListener(TRAINING_UPDATED_EVENT, onUpdate);
     return () => window.removeEventListener(TRAINING_UPDATED_EVENT, onUpdate);
   }, [refresh]);
@@ -116,6 +123,7 @@ export default function TrainingSessionPage({
   };
 
   const togglePresent = (employeeId: string) => {
+    formDirty.current = true;
     setAttendance((prev) =>
       prev.map((a) => {
         if (a.employeeId !== employeeId) return a;
@@ -139,7 +147,8 @@ export default function TrainingSessionPage({
     if (!profile || !canManageSessionFor(session)) return;
     setBusy(true);
     try {
-      await markAttendance(id, attendance, profile.uid);
+      await markAttendance(id, attendance, profile.uid, notes);
+      formDirty.current = false;
       toast.success("Attendance saved");
       await refresh();
     } catch (err) {
@@ -157,7 +166,8 @@ export default function TrainingSessionPage({
     }
     setBusy(true);
     try {
-      await markAttendance(id, attendance, profile.uid);
+      await markAttendance(id, attendance, profile.uid, notes);
+      formDirty.current = false;
       await completeTrainingSession(id, notes, profile.uid);
       const actor = {
         uid: profile.uid,
@@ -221,7 +231,7 @@ export default function TrainingSessionPage({
   const canManageSession = canManageSessionFor(session);
 
   return (
-    <div className="mx-auto max-w-2xl space-y-6">
+    <div className="w-full space-y-6">
       <div>
         <div className="flex flex-wrap items-center gap-2">
           <h1 className="text-2xl font-bold tracking-tight">{session.title}</h1>
@@ -265,7 +275,10 @@ export default function TrainingSessionPage({
             <Textarea
               value={notes}
               disabled={done || !canManageSession}
-              onChange={(e) => setNotes(e.target.value)}
+              onChange={(e) => {
+                formDirty.current = true;
+                setNotes(e.target.value);
+              }}
               placeholder="Topics covered, Q&A summary…"
             />
           </div>

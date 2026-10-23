@@ -48,6 +48,7 @@ export function ImportPaperPanel({ banks, defaultBankId, onImported }: Props) {
     setDrafts([]);
     setSelected({});
     setScanned(false);
+    if (inputRef.current) inputRef.current.value = "";
   };
 
   const handleExtract = async () => {

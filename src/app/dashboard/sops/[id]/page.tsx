@@ -139,7 +139,6 @@ export default function SopDetailPage({ params }: { params: Promise<{ id: string
     setShowEdit(true);
   }, [searchParams, sop, currentVersion, versions, can]);
 
-  const isEmployee = profile?.role === "employee";
   const alreadyAcked = Boolean(
     profile &&
       activeVersion &&
@@ -151,7 +150,10 @@ export default function SopDetailPage({ params }: { params: Promise<{ id: string
         Boolean(activeVersion?.downloadUrl))
   );
   const enforceReading = Boolean(
-    isEmployee && !alreadyAcked && activeVersion?.status === "approved"
+    profile &&
+      !alreadyAcked &&
+      activeVersion?.status === "approved" &&
+      activeVersion.id === sop?.currentVersionId
   );
   const reading = useSopReadingSession({
     enabled: enforceReading && Boolean(sop && activeVersion && actor),
@@ -748,7 +750,7 @@ export default function SopDetailPage({ params }: { params: Promise<{ id: string
                 <CardDescription>
                   {enforceReading
                     ? "Finish the reading timer and scroll every page, then confirm you have understood this SOP"
-                    : "Employees confirm they have read and understood the approved SOP"}
+                    : "Confirm you have read and understood the approved SOP"}
                 </CardDescription>
               </CardHeader>
               <CardContent>

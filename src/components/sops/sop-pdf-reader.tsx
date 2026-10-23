@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
-import { FileText, Loader2 } from "lucide-react";
+import { FileText, Loader2, RotateCcw } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { Document, Page, pdfjs } from "react-pdf";
 import { getBlob, ref as storageRef } from "firebase/storage";
 import { storage } from "@/lib/firebase/client";
@@ -35,6 +36,7 @@ export function SopPdfReader({
   const [aspect, setAspect] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
+  const [reloadToken, setReloadToken] = useState(0);
   const [renderedCount, setRenderedCount] = useState(0);
   const scrollRef = useRef<HTMLDivElement>(null);
   const renderedRef = useRef<Set<number>>(new Set());
@@ -121,7 +123,7 @@ export function SopPdfReader({
     return () => {
       loadIdRef.current += 1;
     };
-  }, [url, storagePath, trackPages]);
+  }, [url, storagePath, trackPages, reloadToken]);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -201,11 +203,17 @@ export function SopPdfReader({
           <FileText className="h-4 w-4 text-primary" />
           {title || "Document Viewer"}
         </div>
-        {trackPages && (
-          <p className="border-b bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-200">
-            This preview cannot track pages, so acknowledgement stays locked until the document loads in the reader.
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b bg-amber-500/10 px-3 py-2">
+          <p className="text-xs text-amber-800 dark:text-amber-200">
+            {trackPages
+              ? "This preview cannot track pages, so acknowledgement stays locked until the document loads in the reader."
+              : "The document viewer could not open this file."}
           </p>
-        )}
+          <Button type="button" size="sm" variant="outline" onClick={() => setReloadToken((n) => n + 1)}>
+            <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
+            Retry
+          </Button>
+        </div>
         <iframe src={`${url}#toolbar=1`} title={title || "PDF"} className="h-full w-full min-h-[480px]" />
       </div>
     );

@@ -19,10 +19,6 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const signingOut = useRef(false);
-  const acknowledgeSignoff =
-    Boolean(searchParams.get("acknowledge")) &&
-    ((pathname === "/dashboard/tni" && role === "trainer") ||
-      (pathname === "/dashboard/jd" && (role === "trainer" || role === "qa")));
 
   const onOnboardingPath = pathname.startsWith("/dashboard/onboarding");
 
@@ -31,10 +27,6 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
     if (profile.isActive === false) return { ok: false as const, reason: "inactive" };
 
     if (onOnboardingPath) return { ok: true as const };
-
-    if (acknowledgeSignoff && hasPermission(role, "notifications:read")) {
-      return { ok: true as const };
-    }
 
     if (!canAccessPath(role, profile.allowedModules, pathname)) {
       return { ok: false as const, reason: "forbidden" };
@@ -58,12 +50,14 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
     }
 
     return { ok: false as const, reason: "forbidden" };
-  }, [acknowledgeSignoff, pathname, profile, role, onOnboardingPath]);
+  }, [pathname, profile, role, onOnboardingPath]);
 
   useEffect(() => {
     if (loading) return;
     if (!user) {
-      router.replace(`/login?redirect=${encodeURIComponent(pathname)}`);
+      const search = searchParams.toString();
+      const nextPath = search ? `${pathname}?${search}` : pathname;
+      router.replace(`/login?redirect=${encodeURIComponent(nextPath)}`);
       return;
     }
     if (profile && profile.isActive === false) {
@@ -90,7 +84,7 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
     if (access.reason === "forbidden") {
       router.replace(`/dashboard/unauthorized?from=${encodeURIComponent(pathname)}`);
     }
-  }, [user, profile, loading, router, pathname, access.reason, onOnboardingPath, signOut]);
+  }, [user, profile, loading, router, pathname, searchParams, access.reason, onOnboardingPath, signOut]);
 
   if (loading) {
     return (
@@ -101,7 +95,44 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
   }
 
   if (!user) return null;
-  if (access.reason === "forbidden" || access.reason === "inactive") return null;
+  if (!profile) {
+    return (
+      <div className="flex h-screen flex-col items-center justify-center gap-3 px-6 text-center">
+        <p className="font-medium">Could not load your account</p>
+        <p className="max-w-sm text-sm text-muted-foreground">
+          Your profile did not load. Sign out and try again.
+        </p>
+        <button
+          type="button"
+          className="text-sm font-medium text-primary underline-offset-4 hover:underline"
+          onClick={() => void signOut()}
+        >
+          Sign out
+        </button>
+      </div>
+    );
+  }
+  const needsOnboarding = Boolean(
+    profile && needsFirstLoginOnboarding(profile) && !onOnboardingPath
+  );
+  const needsPassword =
+    Boolean(profile?.mustChangePassword) &&
+    !needsFirstLoginOnboarding(profile) &&
+    !pathname.startsWith("/dashboard/settings") &&
+    !onOnboardingPath;
+
+  if (
+    needsOnboarding ||
+    needsPassword ||
+    access.reason === "forbidden" ||
+    access.reason === "inactive"
+  ) {
+    return (
+      <div className="flex h-screen items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    );
+  }
 
   return <>{children}</>;
 }

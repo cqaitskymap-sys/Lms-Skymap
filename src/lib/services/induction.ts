@@ -270,20 +270,9 @@ export async function uploadSignedInductionPaper(params: {
       updatedAt: nowISO(),
       updatedBy: actorId,
     });
-  } catch {
-    // Keep offline cache so UI can still show the upload
-    const store = readLifecycleStore();
-    const emp = store.employees.find((e) => e.id === employeeId);
-    if (emp) {
-      upsertDemoEmployee({
-        ...emp,
-        inductionSignedPaper: paper,
-        updatedAt: nowISO(),
-        updatedBy: actorId,
-      });
-    } else {
-      throw new Error("Failed to save signed induction paper on employee record");
-    }
+  } catch (err) {
+    console.error("[induction] signed paper save failed:", err);
+    throw new Error("Failed to save signed induction paper on employee record");
   }
 
   notifyInductionUpdated();
@@ -396,7 +385,11 @@ export async function assignInductionModules(
     if (local) {
       const store = readInductionStore();
       const exists = store.assignments.some(
-        (a) => a.employeeId === employeeId && a.moduleId === moduleId && a.status !== "passed"
+        (a) =>
+          a.employeeId === employeeId &&
+          a.moduleId === moduleId &&
+          a.status !== "passed" &&
+          a.status !== "failed"
       );
       if (exists) continue;
     } else {
@@ -409,7 +402,7 @@ export async function assignInductionModules(
       );
       const hasActive = dupSnap.docs.some((d) => {
         const status = (d.data() as InductionAssignment).status;
-        return status !== "passed";
+        return status !== "passed" && status !== "failed";
       });
       if (hasActive) continue;
     }

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
-import { unauthorized, verifyAuthDetailed, writeAuditLog } from "@/lib/rbac/middleware";
+import { unauthorized, verifyAuthDetailed, writeAuditLog, authHttpStatus } from "@/lib/rbac/middleware";
 import { acknowledgeTniSignoffForUser } from "@/lib/tni/signoff-server";
 import { parseTniSignoffSlot, TNI_SIGNOFF_SLOTS } from "@/lib/tni/signoff";
 
@@ -10,7 +10,7 @@ export async function POST(
 ) {
   const verified = await verifyAuthDetailed(request);
   if (!verified.ok) {
-    const status = verified.reason === "admin_not_configured" ? 503 : 401;
+    const status = authHttpStatus(verified.reason);
     return unauthorized(verified.message, status);
   }
 

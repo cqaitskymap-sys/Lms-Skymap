@@ -195,13 +195,14 @@ export default function OjtMatrixPage() {
   };
 
   const handleCell = (plan: OjtPlan, employee: Employee) => {
-    if (!profile || !canAssign) return;
+    if (!profile) return;
     const asg = latestAssignmentForCell(assignments, employee.id, plan.topicId, Number(year));
     if (matrixCellIsLocked(asg)) {
       if (asg) router.push(`/dashboard/ojt/assignments/${asg.id}`);
       else toast.error("This cell already has an OJT record — open the assignment to change it");
       return;
     }
+    if (!canAssign) return;
     if (locked) {
       toast.error("Approved matrix is controlled. Create a revision before changing cells.");
       return;

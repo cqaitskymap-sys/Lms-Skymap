@@ -38,31 +38,18 @@ export function normalizeQuestion(
     }));
 
   if (type === "true_false") {
-    const hasTrue = options.some((o) => /^true$/i.test(o.text));
-    const hasFalse = options.some((o) => /^false$/i.test(o.text));
-    if (!hasTrue || !hasFalse || options.length !== 2) {
-      const correctIsTrue = options.some((o) => o.isCorrect && /^true$/i.test(o.text));
-      options = [
-        {
-          id: generateId("opt"),
-          text: "True",
-          isCorrect: correctIsTrue || !options.some((o) => o.isCorrect),
-        },
-        {
-          id: generateId("opt"),
-          text: "False",
-          isCorrect: !correctIsTrue && options.some((o) => o.isCorrect),
-        },
-      ];
-      if (!options.some((o) => o.isCorrect)) options[0].isCorrect = true;
-    }
+    options = options.map((option) => {
+      if (/^(true|yes|t)$/i.test(option.text)) return { ...option, text: "True" };
+      if (/^(false|no|f)$/i.test(option.text)) return { ...option, text: "False" };
+      return option;
+    });
+    const hasTrue = options.some((o) => o.text === "True");
+    const hasFalse = options.some((o) => o.text === "False");
+    const correctCount = options.filter((o) => o.isCorrect).length;
+    if (!hasTrue || !hasFalse || options.length !== 2 || correctCount !== 1) return null;
   }
 
-  if (!options.some((o) => o.isCorrect) && options.length > 0) {
-    options[0].isCorrect = true;
-  }
-
-  if (options.length < 2) return null;
+  if (!q.text?.trim() || options.length < 2 || !options.some((o) => o.isCorrect)) return null;
 
   const marks =
     typeof q.marks === "number" && q.marks > 0

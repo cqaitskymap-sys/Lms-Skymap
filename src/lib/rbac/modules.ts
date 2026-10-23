@@ -234,21 +234,37 @@ export function canAccessModule(
   return effective.includes(moduleId);
 }
 
+/** True for the path itself or a child route. `/dashboard/department` does not match `/dashboard/departments`. */
+export function isPathWithin(pathname: string, href: string): boolean {
+  const normalized = pathname.replace(/\/$/, "") || "/";
+  return normalized === href || normalized.startsWith(`${href}/`);
+}
+
+const DASHBOARD_HOME_PATHS = [
+  "/dashboard/hr",
+  "/dashboard/qa",
+  "/dashboard/department",
+  "/dashboard/trainer",
+  "/dashboard/employee",
+  "/dashboard/onboarding",
+  "/dashboard/unauthorized",
+] as const;
+
+/** Role home pages that belong to the Dashboard module, not a similarly named module. */
+export function isDashboardHomePath(pathname: string): boolean {
+  const normalized = pathname.replace(/\/$/, "") || "/dashboard";
+  if (normalized === "/dashboard") return true;
+  return DASHBOARD_HOME_PATHS.some((href) => isPathWithin(normalized, href));
+}
+
 /** Longest href match wins (so /employees/new beats /employees). */
 export function moduleIdForPath(pathname: string): AppModule | null {
   const normalized = pathname.replace(/\/$/, "") || "/dashboard";
 
-  // Role home dashboards count as Dashboard
-  if (
-    normalized === "/dashboard" ||
-    normalized.startsWith("/dashboard/hr") ||
-    normalized.startsWith("/dashboard/qa") ||
-    normalized.startsWith("/dashboard/department") ||
-    normalized.startsWith("/dashboard/trainer") ||
-    normalized.startsWith("/dashboard/employee") ||
-    normalized.startsWith("/dashboard/onboarding") ||
-    normalized.startsWith("/dashboard/unauthorized")
-  ) {
+  // Role home dashboards count as Dashboard. Match on a path boundary so
+  // /dashboard/departments, /dashboard/employees and /dashboard/trainers stay
+  // on their own modules.
+  if (isDashboardHomePath(normalized)) {
     return "dashboard";
   }
 

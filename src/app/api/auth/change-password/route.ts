@@ -4,6 +4,7 @@ import { adminAuth, adminDb, isAdminConfigured } from "@/lib/firebase/admin";
 import { COLLECTIONS } from "@/lib/firebase/client";
 import { firebaseConfig } from "@/lib/firebase/config";
 import { validatePassword } from "@/lib/auth/password-policy";
+import { invalidateAuthCache } from "@/lib/rbac/middleware";
 
 const bodySchema = z.object({
   currentPassword: z.string().min(1).max(200),
@@ -93,6 +94,7 @@ export async function POST(request: NextRequest) {
 
     await adminAuth.updateUser(decoded.uid, { password: newPassword });
     await adminAuth.revokeRefreshTokens(decoded.uid);
+    invalidateAuthCache(decoded.uid);
     const now = new Date().toISOString();
     await adminDb.collection(COLLECTIONS.users).doc(decoded.uid).set(
       {

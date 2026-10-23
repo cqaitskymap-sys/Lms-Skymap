@@ -5,6 +5,7 @@
  */
 
 import {
+  arrayUnion,
   collection,
   deleteDoc,
   doc,
@@ -12,6 +13,7 @@ import {
   getDocs,
   query,
   setDoc,
+  updateDoc,
   where,
 } from "firebase/firestore/lite";
 import { deleteObject, getDownloadURL, ref, uploadBytes } from "firebase/storage";
@@ -54,6 +56,7 @@ import {
   evaluationDidFail,
   evaluationOverallRating,
   isOjtOverdue,
+  plannedExecutionMonthsOf,
   statusAfterEmployeeAck,
   statusAfterHodDecision,
   statusAfterQaDecision,
@@ -344,6 +347,49 @@ async function saveAssignment(assignment: OjtAssignment): Promise<void> {
   }
   await ojtSetDoc(doc(db, COLLECTIONS.ojtAssignments, assignment.id), sanitize(assignment));
   notifyOjtUpdated();
+}
+
+/** Append one file without replacing the assignment document. */
+async function appendAssignmentAttachment(
+  assignment: OjtAssignment,
+  attachment: OjtAttachment,
+  actorId: string
+): Promise<OjtAssignment> {
+  const now = nowISO();
+  if (preferOjtLocal()) {
+    const store = readOjtStore();
+    const idx = store.assignments.findIndex((a) => a.id === assignment.id);
+    if (idx < 0) throw new Error("OJT assignment not found");
+    const current = store.assignments[idx];
+    const next: OjtAssignment = {
+      ...current,
+      attachments: [...(current.attachments || []), attachment],
+      updatedAt: now,
+      updatedBy: actorId,
+    };
+    store.assignments[idx] = next;
+    writeOjtStore(store);
+    return next;
+  }
+  try {
+    await updateDoc(doc(db, COLLECTIONS.ojtAssignments, assignment.id), {
+      attachments: arrayUnion(sanitize(attachment)),
+      updatedAt: now,
+      updatedBy: actorId,
+    });
+  } catch (err) {
+    return rethrowOjtPermission(err, COLLECTIONS.ojtAssignments);
+  }
+  notifyOjtUpdated();
+  const fresh = await getOjtAssignment(assignment.id);
+  return (
+    fresh || {
+      ...assignment,
+      attachments: [...(assignment.attachments || []), attachment],
+      updatedAt: now,
+      updatedBy: actorId,
+    }
+  );
 }
 
 async function saveFormDocument(docRow: OjtFormDocument): Promise<void> {
@@ -943,10 +989,29 @@ export async function getOjtAssignment(id: string): Promise<OjtAssignment | null
   return snap.exists() ? ({ id: snap.id, ...firestoreFields(snap) } as OjtAssignment) : null;
 }
 
-function defaultMonths(plan: OjtPlan): { selectionMonth: number; plannedExecutionMonth: number } {
+function defaultMonths(
+  plan: OjtPlan,
+  explicitMonth?: number
+): { selectionMonth: number; plannedExecutionMonth: number; plannedExecutionMonths: number[] } {
   const selectionMonth = plan.selectionMonths[0] || currentCalendarMonth();
-  const plannedExecutionMonth = plan.executionMonths[0] || selectionMonth;
-  return { selectionMonth, plannedExecutionMonth };
+  const raw = plan.executionMonths.length ? plan.executionMonths : [selectionMonth];
+  const plannedExecutionMonths = [
+    ...new Set(raw.filter((month) => month >= 1 && month <= 12)),
+  ].sort((a, b) => a - b);
+  const list = plannedExecutionMonths.length ? plannedExecutionMonths : [selectionMonth];
+  if (explicitMonth && explicitMonth >= 1 && explicitMonth <= 12 && !list.includes(explicitMonth)) {
+    list.push(explicitMonth);
+    list.sort((a, b) => a - b);
+  }
+  let plannedExecutionMonth = list[0];
+  if (explicitMonth && list.includes(explicitMonth)) {
+    plannedExecutionMonth = explicitMonth;
+  } else if (plan.year < currentCalendarYear()) {
+    plannedExecutionMonth = list[list.length - 1];
+  } else if (plan.year === currentCalendarYear()) {
+    plannedExecutionMonth = list.find((month) => month >= currentCalendarMonth()) || list[list.length - 1];
+  }
+  return { selectionMonth, plannedExecutionMonth, plannedExecutionMonths: list };
 }
 
 export async function createOjtAssignmentForEmployee(params: {
@@ -959,12 +1024,18 @@ export async function createOjtAssignmentForEmployee(params: {
   plannedExecutionMonth?: number;
   remarks?: string;
 }): Promise<OjtAssignment> {
-  const existing = (await listOjtAssignments({
+  const rows = await listOjtAssignments({
     employeeId: params.employee.id,
     topicId: params.plan.topicId,
     year: params.plan.year,
-  })).find((a) => a.status !== "cancelled");
+  });
+  const existing = rows.find((a) => a.status !== "cancelled");
   if (existing) return existing;
+
+  const stableId = `ojt_asg_${params.plan.year}_${params.plan.topicId}_${params.employee.id}`
+    .replace(/[^A-Za-z0-9_-]/g, "_")
+    .slice(0, 700);
+  const assignmentId = rows.some((a) => a.id === stableId) ? generateId("ojt_asg") : stableId;
 
   const topic = await getOjtTopic(params.plan.topicId);
   if (!topic) throw new Error("OJT topic not found");
@@ -977,13 +1048,13 @@ export async function createOjtAssignmentForEmployee(params: {
     sopSnap = await resolveCurrentSopSnapshot(topic.sopId);
   }
 
-  const months = defaultMonths(params.plan);
+  const months = defaultMonths(params.plan, params.plannedExecutionMonth);
   const now = nowISO();
   const hodUserId = await departmentHeadUserId(
     params.employee.departmentId || params.plan.departmentId
   );
   const assignment: OjtAssignment = {
-    id: generateId("ojt_asg"),
+    id: assignmentId,
     planId: params.plan.id,
     topicId: params.plan.topicId,
     trainingTopic: params.plan.trainingTopic,
@@ -1005,7 +1076,8 @@ export async function createOjtAssignmentForEmployee(params: {
       params.plan.referenceDocumentNumber || sopSnap.sopNumber || topic.referenceDocumentNumber || "NA",
     year: params.plan.year,
     selectionMonth: params.selectionMonth || months.selectionMonth,
-    plannedExecutionMonth: params.plannedExecutionMonth || months.plannedExecutionMonth,
+    plannedExecutionMonth: months.plannedExecutionMonth,
+    plannedExecutionMonths: months.plannedExecutionMonths,
     selectionDate: now,
     trainerId: params.trainerId || params.plan.trainerId,
     trainerName: params.trainerName || params.plan.trainerName,
@@ -1164,13 +1236,18 @@ export async function scheduleOjtAssignment(
   if (!assignment) throw new Error("OJT assignment not found");
   if (!data.trainerId) throw new Error("Trainer is required before scheduling");
   const executionDate = calendarDateToIso(data.executionDate);
-  const inPlannedMonth = dateFallsInPlannedMonth(executionDate, assignment.year, assignment.plannedExecutionMonth);
+  const plannedMonths = plannedExecutionMonthsOf(assignment);
+  const inPlannedMonth = plannedMonths.some((month) =>
+    dateFallsInMonth(executionDate, assignment.year, month)
+  );
   const settings = await getOjtSettings();
   let executionDeviation = assignment.executionDeviation;
   if (!inPlannedMonth) {
+    const reason = data.deviation?.reason?.trim() || "";
+    const authorizer = actor.role === "qa" || actor.role === "super_admin";
     if (!settings.requireExecutionDeviationApproval && actor.role === "super_admin") {
       executionDeviation = {
-        reason: data.deviation?.reason || "Authorized exception (settings allow dates outside planned month)",
+        reason: reason || "Authorized exception (settings allow dates outside planned month)",
         approvedBy: actor.uid,
         approvedByName: actor.name,
         approvalDate: nowISO(),
@@ -1178,19 +1255,23 @@ export async function scheduleOjtAssignment(
         originalYear: assignment.year,
         revisedExecutionDate: executionDate,
       };
-    } else if (data.deviation?.reason && data.deviation.approvedBy) {
+    } else if (authorizer && reason) {
       executionDeviation = {
-        reason: data.deviation.reason,
-        approvedBy: data.deviation.approvedBy,
-        approvedByName: data.deviation.approvedByName,
-        approvalDate: data.deviation.approvalDate || nowISO(),
+        reason,
+        approvedBy: actor.uid,
+        approvedByName: actor.name,
+        approvalDate: nowISO(),
         originalPlannedMonth: assignment.plannedExecutionMonth,
         originalYear: assignment.year,
         revisedExecutionDate: executionDate,
       };
+    } else if (!authorizer) {
+      throw new Error(
+        "A QA officer or admin must authorize an execution date outside the planned month."
+      );
     } else {
       throw new Error(
-        `Execution date must fall in the planned execution month (${assignment.plannedExecutionMonth}/${assignment.year}) unless an authorized deviation is recorded.`
+        `Execution date must fall in a planned execution month (${plannedMonths.join(", ")}/${assignment.year}) unless an authorized deviation is recorded.`
       );
     }
   }
@@ -1245,10 +1326,6 @@ export async function scheduleOjtAssignment(
     after: { status: next.status, actualExecutionDate: next.actualExecutionDate },
   });
   return next;
-}
-
-function dateFallsInPlannedMonth(isoDate: string, year: number, month: number): boolean {
-  return dateFallsInMonth(isoDate, year, month);
 }
 
 export async function startOjtExecution(id: string, actor: OjtActor): Promise<OjtAssignment> {
@@ -1514,6 +1591,12 @@ export async function verifyOjtByHod(
   if (actor.role !== "department_head" && actor.role !== "super_admin" && actor.role !== "qa") {
     throw new Error("HOD / designee verification is required");
   }
+  if (
+    actor.role === "department_head" &&
+    (!actor.departmentId || actor.departmentId !== assignment.departmentId)
+  ) {
+    throw new Error("Only the head of this department can verify this OJT");
+  }
   if (assignment.status !== "verification_pending") {
     throw new Error("OJT is not pending HOD verification");
   }
@@ -1579,6 +1662,14 @@ export async function approveOjtByQa(
   }
   if (assignment.status !== "qa_pending") {
     throw new Error("OJT is not pending QA approval");
+  }
+  if (
+    decision === "approved" &&
+    actor.role !== "super_admin" &&
+    assignment.hodVerification?.userId &&
+    assignment.hodVerification.userId === actor.uid
+  ) {
+    throw new Error("The person who verified this OJT as HOD cannot also give QA approval");
   }
   if (decision === "rejected" && !comments.trim()) {
     throw new Error("Comments are required when rejecting QA approval");
@@ -1718,6 +1809,9 @@ export async function rescheduleRetraining(
     retrainingDate,
     actualExecutionDate: retrainingDate,
     plannedExecutionMonth: dateParts?.month || working.plannedExecutionMonth,
+    plannedExecutionMonths: dateParts?.month
+      ? [dateParts.month]
+      : working.plannedExecutionMonths,
     year: dateParts?.year || working.year,
     trainerId: data.trainerId || working.trainerId,
     trainerName: data.trainerName || working.trainerName,
@@ -1963,13 +2057,7 @@ export async function uploadOjtAttachment(params: {
     uploadedAt: nowISO(),
     kind: params.kind,
   };
-  const next: OjtAssignment = {
-    ...assignment,
-    attachments: [...(assignment.attachments || []), attachment],
-    updatedAt: nowISO(),
-    updatedBy: params.actor.uid,
-  };
-  await saveAssignment(next);
+  const next = await appendAssignmentAttachment(assignment, attachment, params.actor.uid);
   await audit({
     action: "upload",
     resourceType: "ojt_assignment",
@@ -1985,9 +2073,9 @@ export async function deleteOjtAttachment(
   attachmentId: string,
   actor: OjtActor
 ): Promise<OjtAssignment> {
-  const assignment = await getOjtAssignment(assignmentId);
-  if (!assignment) throw new Error("OJT assignment not found");
-  const attachments = assignment.attachments || [];
+  const fresh = await getOjtAssignment(assignmentId);
+  if (!fresh) throw new Error("OJT assignment not found");
+  const attachments = fresh.attachments || [];
   const att = attachments.find((a) => a.id === attachmentId);
   if (!att) throw new Error("Attachment not found");
   if (!preferOjtLocal() && !isDemoMode() && att.storagePath && !att.storagePath.startsWith("demo/")) {
@@ -1997,13 +2085,35 @@ export async function deleteOjtAttachment(
       /* ignore missing storage object */
     }
   }
-  const next: OjtAssignment = {
-    ...assignment,
-    attachments: attachments.filter((a) => a.id !== attachmentId),
-    updatedAt: nowISO(),
-    updatedBy: actor.uid,
-  };
-  await saveAssignment(next);
+  const now = nowISO();
+  const remaining = (fresh.attachments || []).filter((a) => a.id !== attachmentId);
+  let next: OjtAssignment;
+  if (preferOjtLocal()) {
+    const store = readOjtStore();
+    const idx = store.assignments.findIndex((a) => a.id === assignmentId);
+    if (idx < 0) throw new Error("OJT assignment not found");
+    const current = store.assignments[idx];
+    next = {
+      ...current,
+      attachments: (current.attachments || []).filter((a) => a.id !== attachmentId),
+      updatedAt: now,
+      updatedBy: actor.uid,
+    };
+    store.assignments[idx] = next;
+    writeOjtStore(store);
+  } else {
+    try {
+      await updateDoc(doc(db, COLLECTIONS.ojtAssignments, assignmentId), {
+        attachments: remaining,
+        updatedAt: now,
+        updatedBy: actor.uid,
+      });
+    } catch (err) {
+      return rethrowOjtPermission(err, COLLECTIONS.ojtAssignments);
+    }
+    notifyOjtUpdated();
+    next = { ...fresh, attachments: remaining, updatedAt: now, updatedBy: actor.uid };
+  }
   await audit({
     action: "delete",
     resourceType: "ojt_assignment",

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { Download, Eye, FileText, Film, Presentation, Loader2 } from "lucide-react";
 import type { SopAttachment, SopVersion } from "@/types";
@@ -185,10 +185,12 @@ export function SopFileDropzone({
   accept?: string;
 }) {
   const [dragging, setDragging] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   const addFiles = (list: FileList | null) => {
     if (!list?.length) return;
     onChange([...files, ...Array.from(list)]);
+    if (inputRef.current) inputRef.current.value = "";
   };
 
   return (
@@ -212,6 +214,7 @@ export function SopFileDropzone({
         <p className="text-sm font-medium">Drop PDF, PPT, or Video files</p>
         <p className="mt-1 text-xs text-muted-foreground">or click to browse</p>
         <input
+          ref={inputRef}
           type="file"
           multiple
           accept={accept}

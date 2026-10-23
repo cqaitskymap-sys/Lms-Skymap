@@ -1,13 +1,13 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
-import { unauthorized, verifyAuthDetailed } from "@/lib/rbac/middleware";
+import { unauthorized, verifyAuthDetailed, authHttpStatus } from "@/lib/rbac/middleware";
 import { listAbsenceHandoverJdsForUser } from "@/lib/jd/absence-handover-server";
 import { actorPendingSlots, JD_SIGNOFF_SLOTS } from "@/lib/jd/absence-handover";
 
 export async function GET(request: NextRequest) {
   const verified = await verifyAuthDetailed(request);
   if (!verified.ok) {
-    const status = verified.reason === "admin_not_configured" ? 503 : 401;
+    const status = authHttpStatus(verified.reason);
     return unauthorized(verified.message, status);
   }
 

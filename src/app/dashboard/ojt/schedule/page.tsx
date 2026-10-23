@@ -9,7 +9,8 @@ import { hasPermission } from "@/lib/rbac/permissions";
 import { listOjtAssignments, listOjtStaffOptions, scheduleOjtAssignment } from "@/lib/services/ojt";
 import { toOjtActor } from "@/lib/ojt/actor";
 import { OJT_UPDATED_EVENT } from "@/lib/ojt/demo-store";
-import { calendarDateToIso, dateFallsInMonth, monthName } from "@/lib/ojt/constants";
+import { calendarDateToIso, monthName } from "@/lib/ojt/constants";
+import { executionDateInPlan } from "@/lib/ojt/workflow";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -31,6 +32,7 @@ import type { OjtAssignment } from "@/types/ojt";
 export default function OjtSchedulePage() {
   const { profile } = useAuth();
   const canSchedule = profile?.role ? hasPermission(profile.role, "ojt:schedule") : false;
+  const canAuthorizeDeviation = profile?.role === "qa" || profile?.role === "super_admin";
   const [rows, setRows] = useState<OjtAssignment[]>([]);
   const [trainers, setTrainers] = useState<{ uid: string; displayName: string }[]>([]);
   const [loading, setLoading] = useState(true);
@@ -55,7 +57,12 @@ export default function OjtSchedulePage() {
       const all = await listOjtAssignments(filters);
       setRows(all.filter((a) => ["selected", "assigned", "rescheduled"].includes(a.status)));
       const staff = await listOjtStaffOptions();
-      setTrainers(staff.filter((u) => u.role === "trainer" || u.role === "department_head"));
+      setTrainers(
+        staff.filter(
+          (u) =>
+            u.role === "trainer" || u.role === "department_head" || u.role === "super_admin"
+        )
+      );
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to load schedule queue");
     } finally {
@@ -72,22 +79,34 @@ export default function OjtSchedulePage() {
 
   const selected = rows.find((r) => r.id === selectedId);
 
-  useEffect(() => {
-    if (selected?.trainerId) setTrainerId(selected.trainerId);
-  }, [selected?.trainerId]);
+  const selectRow = (row: OjtAssignment) => {
+    setSelectedId(row.id);
+    setTrainerId(row.trainerId || "");
+    setDate("");
+    setStartTime("09:00");
+    setEndTime("11:00");
+    setLocation("");
+    setDeviationReason("");
+  };
 
   const handleSave = async () => {
     if (!profile || !selected || !date || !trainerId) {
       toast.error("Select OJT, trainer, and execution date");
       return;
     }
+    if (endTime <= startTime) {
+      toast.error("End time must be after the start time");
+      return;
+    }
     setBusy(true);
     try {
       const trainer = trainers.find((t) => t.uid === trainerId);
-      const outside =
-        selected && date
-          ? !dateFallsInMonth(calendarDateToIso(date), selected.year, selected.plannedExecutionMonth)
-          : false;
+      const outside = selected && date ? !executionDateInPlan(calendarDateToIso(date), selected) : false;
+      if (outside && !canAuthorizeDeviation) {
+        toast.error("A QA officer or admin must authorize a date outside the planned month.");
+        setBusy(false);
+        return;
+      }
       if (outside && !deviationReason.trim()) {
         toast.error("Date is outside the planned execution month. Record an authorized deviation reason.");
         setBusy(false);
@@ -161,7 +180,7 @@ export default function OjtSchedulePage() {
                   <li key={a.id}>
                     <button
                       type="button"
-                      onClick={() => setSelectedId(a.id)}
+                      onClick={() => selectRow(a)}
                       className={`w-full rounded-lg border p-3 text-left ${selectedId === a.id ? "border-primary bg-primary/5" : ""}`}
                     >
                       <div className="flex items-center justify-between gap-2">
@@ -221,17 +240,25 @@ export default function OjtSchedulePage() {
               <Label>Room / location</Label>
               <Input value={location} onChange={(e) => setLocation(e.target.value)} placeholder="e.g. Dispensing room / Line 2" />
             </div>
-            {selected && date && !dateFallsInMonth(calendarDateToIso(date), selected.year, selected.plannedExecutionMonth) && (
+            {selected && date && !executionDateInPlan(calendarDateToIso(date), selected) && (
               <div className="space-y-1 rounded-lg border border-amber-300/60 p-3">
-                <Label>Authorized deviation reason</Label>
-                <Textarea
-                  value={deviationReason}
-                  onChange={(e) => setDeviationReason(e.target.value)}
-                  placeholder="Why is training outside the planned execution month? Original planned month is kept."
-                />
-                <p className="text-xs text-muted-foreground">
-                  Original planned month ({monthName(selected.plannedExecutionMonth)} {selected.year}) is not overwritten.
-                </p>
+                {canAuthorizeDeviation ? (
+                  <>
+                    <Label>Authorized deviation reason</Label>
+                    <Textarea
+                      value={deviationReason}
+                      onChange={(e) => setDeviationReason(e.target.value)}
+                      placeholder="Why is training outside the planned execution month? Original planned month is kept."
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Original planned month ({monthName(selected.plannedExecutionMonth)} {selected.year}) is not overwritten.
+                    </p>
+                  </>
+                ) : (
+                  <p className="text-sm text-amber-800 dark:text-amber-200">
+                    This date is outside the planned execution month. Ask QA or an admin to schedule it.
+                  </p>
+                )}
               </div>
             )}
             <Button disabled={!canSchedule || busy || !selected} onClick={() => void handleSave()}>

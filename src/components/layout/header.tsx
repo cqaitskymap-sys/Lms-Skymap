@@ -110,9 +110,13 @@ export function Header({ onMenuClick, examLocked = false }: HeaderProps) {
 
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button variant="ghost" className="relative h-10 gap-2 rounded-full px-1.5 pr-3">
+          <Button
+            variant="ghost"
+            className="relative h-10 gap-2 rounded-full px-1.5 pr-3"
+            aria-label={`Account menu, ${profile?.displayName || "signed-in user"}`}
+          >
             <Avatar className="h-8 w-8 ring-2 ring-border/70 dark:ring-primary/50">
-              <AvatarImage src={profile?.photoURL} />
+              <AvatarImage src={profile?.photoURL} alt="" />
               <AvatarFallback className="text-xs font-semibold">
                 {getInitials(profile?.displayName || "U")}
               </AvatarFallback>

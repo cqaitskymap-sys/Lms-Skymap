@@ -23,7 +23,8 @@ function cookieOptions(rememberMe = true) {
     secure: process.env.NODE_ENV === "production",
     sameSite: "lax" as const,
     path: "/",
-    maxAge: expiresIn / 1000,
+    // No maxAge means a browser-session cookie. A 12h maxAge would survive a restart.
+    ...(rememberMe ? { maxAge: expiresIn / 1000 } : {}),
   };
 }
 
@@ -78,8 +79,49 @@ export async function POST(request: NextRequest) {
         }
       } catch (lockErr) {
         console.error("[auth/session] lockout check failed:", lockErr);
+        return NextResponse.json(
+          { success: false, error: "Could not verify account lock status. Try again." },
+          { status: 503 }
+        );
       }
     }
+
+    let role = "";
+    let email = decoded.email || "";
+    try {
+      const snap = await adminDb.collection(COLLECTIONS.users).doc(decoded.uid).get();
+      if (!snap.exists) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: "No user profile is linked to this account. Contact an administrator.",
+          },
+          { status: 403 }
+        );
+      }
+      const data = snap.data()!;
+      role = typeof data.role === "string" ? data.role : "";
+      email = (data.email as string) || email;
+      if (!role) {
+        return NextResponse.json(
+          { success: false, error: "Your account is missing a role. Contact an administrator." },
+          { status: 403 }
+        );
+      }
+      if (data.isActive === false) {
+        return NextResponse.json(
+          { success: false, error: "Account is deactivated. Contact HR." },
+          { status: 403 }
+        );
+      }
+    } catch (profileErr) {
+      console.error("[auth/session] profile read failed:", profileErr);
+      return NextResponse.json(
+        { success: false, error: "Could not load your account. Try again." },
+        { status: 503 }
+      );
+    }
+
     let sessionCookie: string;
     try {
       sessionCookie = await adminAuth.createSessionCookie(idToken, {
@@ -97,25 +139,6 @@ export async function POST(request: NextRequest) {
         },
         { status: 401 }
       );
-    }
-
-    let role = "employee";
-    let email = decoded.email || "";
-    try {
-      const snap = await adminDb.collection(COLLECTIONS.users).doc(decoded.uid).get();
-      if (snap.exists) {
-        const data = snap.data()!;
-        role = (data.role as string) || role;
-        email = (data.email as string) || email;
-        if (data.isActive === false) {
-          return NextResponse.json(
-            { success: false, error: "Account is deactivated. Contact HR." },
-            { status: 403 }
-          );
-        }
-      }
-    } catch {
-      /* profile optional for cookie */
     }
 
     await Promise.all([

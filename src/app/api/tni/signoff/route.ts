@@ -1,13 +1,13 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
-import { unauthorized, verifyAuthDetailed } from "@/lib/rbac/middleware";
+import { unauthorized, verifyAuthDetailed, authHttpStatus } from "@/lib/rbac/middleware";
 import { listTniSignoffsForUser } from "@/lib/tni/signoff-server";
 import { actorPendingTniSlots, TNI_SIGNOFF_SLOTS } from "@/lib/tni/signoff";
 
 export async function GET(request: NextRequest) {
   const verified = await verifyAuthDetailed(request);
   if (!verified.ok) {
-    const status = verified.reason === "admin_not_configured" ? 503 : 401;
+    const status = authHttpStatus(verified.reason);
     return unauthorized(verified.message, status);
   }
 

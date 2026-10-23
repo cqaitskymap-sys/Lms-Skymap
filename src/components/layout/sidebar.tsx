@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -32,6 +33,7 @@ import type { UserRole } from "@/types";
 import {
   APP_MODULE_DEFS,
   canAccessModule,
+  isDashboardHomePath,
   type AppModule,
 } from "@/lib/rbac/modules";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -70,6 +72,26 @@ interface SidebarProps {
 export function Sidebar({ open, onClose }: SidebarProps) {
   const pathname = usePathname();
   const { role, user, profile } = useAuth();
+  const closeRef = useRef<HTMLButtonElement>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
+  useEffect(() => {
+    if (!open) return;
+    const previousOverflow = document.body.style.overflow;
+    const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    document.body.style.overflow = "hidden";
+    closeRef.current?.focus();
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onCloseRef.current?.();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", onKey);
+      previouslyFocused?.focus();
+    };
+  }, [open]);
 
   const effectiveRole: UserRole | null = role ?? null;
   const items = effectiveRole
@@ -84,14 +106,14 @@ export function Sidebar({ open, onClose }: SidebarProps) {
         )
       : [];
 
-  const content = (
+  const panel = (showClose: boolean) => (
     <div className="flex h-full min-h-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground dark:border-white/10">
       <div className="flex h-16 items-center justify-between border-b border-sidebar-border/80 px-4 dark:border-white/10">
         <Link href="/dashboard" className="flex items-center gap-2 font-semibold tracking-tight">
           <BrandLogo className="h-8 w-auto max-w-[148px] object-contain" />
         </Link>
-        {onClose && (
-          <Button variant="ghost" size="icon" className="lg:hidden text-sidebar-foreground" onClick={onClose} aria-label="Close menu">
+        {showClose && onClose && (
+          <Button ref={closeRef} variant="ghost" size="icon" className="lg:hidden text-sidebar-foreground" onClick={onClose} aria-label="Close menu">
             <X className="h-4 w-4" />
           </Button>
         )}
@@ -101,17 +123,12 @@ export function Sidebar({ open, onClose }: SidebarProps) {
           {items.map((item) => {
             const active =
               item.href === "/dashboard"
-                ? pathname === "/dashboard" ||
-                  pathname.startsWith("/dashboard/hr") ||
-                  pathname.startsWith("/dashboard/qa") ||
-                  pathname.startsWith("/dashboard/department") ||
-                  pathname.startsWith("/dashboard/trainer") ||
-                  pathname.startsWith("/dashboard/employee")
-                : pathname === item.href ||
-                  (item.id === "employees"
-                    ? pathname.startsWith(`${item.href}/`) &&
-                      !pathname.startsWith("/dashboard/employees/new")
-                    : pathname.startsWith(`${item.href}/`));
+                ? isDashboardHomePath(pathname)
+                : item.id === "employees"
+                  ? pathname === item.href ||
+                    (pathname.startsWith(`${item.href}/`) &&
+                      !pathname.startsWith("/dashboard/employees/new"))
+                  : pathname === item.href || pathname.startsWith(`${item.href}/`);
             const Icon = MODULE_ICONS[item.id];
             return (
               <Link
@@ -152,13 +169,24 @@ export function Sidebar({ open, onClose }: SidebarProps) {
 
   return (
     <>
-      {/* Desktop */}
-      <aside className="relative z-10 hidden h-full min-h-0 w-64 shrink-0 lg:block">{content}</aside>
-      {/* Mobile overlay */}
+      {/* Desktop — its own tree so the mobile drawer cannot steal this node */}
+      <aside className="relative z-10 hidden h-full min-h-0 w-64 shrink-0 lg:block">{panel(false)}</aside>
       {open && (
-        <div className="fixed inset-0 z-50 lg:hidden">
-          <div className="absolute inset-0 bg-slate-950/50 backdrop-blur-sm" onClick={onClose} />
-          <aside className="absolute left-0 top-0 h-full w-64 shadow-2xl">{content}</aside>
+        <div className="fixed inset-0 z-50 lg:hidden" role="presentation">
+          <button
+            type="button"
+            className="absolute inset-0 bg-slate-950/50 backdrop-blur-sm overscroll-contain"
+            aria-label="Close menu"
+            onClick={onClose}
+          />
+          <aside
+            role="dialog"
+            aria-modal="true"
+            aria-label="Navigation"
+            className="absolute left-0 top-0 h-full w-64 shadow-2xl"
+          >
+            {panel(true)}
+          </aside>
         </div>
       )}
     </>

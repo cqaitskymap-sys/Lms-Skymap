@@ -87,7 +87,7 @@ export function EditQuestionDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
+      <DialogContent className="max-h-[90vh] sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Edit question</DialogTitle>
           <DialogDescription>Update the question, options, and correct answer</DialogDescription>

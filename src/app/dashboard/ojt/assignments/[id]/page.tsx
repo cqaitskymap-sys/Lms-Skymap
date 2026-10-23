@@ -30,8 +30,14 @@ import {
 } from "@/lib/services/ojt";
 import { toOjtActor } from "@/lib/ojt/actor";
 import { OJT_UPDATED_EVENT } from "@/lib/ojt/demo-store";
-import { calendarDateToIso, dateFallsInMonth, OJT_ACK_STATEMENT, monthName } from "@/lib/ojt/constants";
-import { canTransition, criterionScaleForModel, displayOjtStatus, evaluationDidFail } from "@/lib/ojt/workflow";
+import { calendarDateToIso, OJT_ACK_STATEMENT, monthName } from "@/lib/ojt/constants";
+import {
+  canTransition,
+  criterionScaleForModel,
+  displayOjtStatus,
+  evaluationDidFail,
+  executionDateInPlan,
+} from "@/lib/ojt/workflow";
 import { formatDate, formatDateTime } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -90,6 +96,16 @@ export default function OjtAssignmentDetailPage({
   });
 
   const refreshGen = useRef(0);
+  const formDirty = useRef(false);
+  const loadedId = useRef<string | null>(null);
+  const setExecFromUser: typeof setExec = (value) => {
+    formDirty.current = true;
+    setExec(value);
+  };
+  const setScoresFromUser: typeof setScores = (value) => {
+    formDirty.current = true;
+    setScores(value);
+  };
 
   const refresh = useCallback(async (opts?: { silent?: boolean }) => {
     const gen = ++refreshGen.current;
@@ -108,7 +124,12 @@ export default function OjtAssignmentDetailPage({
       setUsers(staff);
       const model = settings.competencyScoringModel || "both";
       setScoringModel(model);
-      if (asg) {
+      const idChanged = loadedId.current !== id;
+      if (idChanged) {
+        formDirty.current = false;
+        loadedId.current = id;
+      }
+      if (asg && !formDirty.current) {
         setExec({
           actualExecutionDate: asg.actualExecutionDate?.slice(0, 10) || "",
           startTime: asg.startTime || "",
@@ -168,7 +189,20 @@ export default function OjtAssignmentDetailPage({
     hasPermission(role, "ojt:acknowledge") &&
     (profile?.employeeId === row?.employeeId || role === "super_admin");
   const canVerify = !!role && hasPermission(role, "ojt:verify");
+  const canVerifyThis =
+    canVerify &&
+    !!row &&
+    (role === "super_admin" ||
+      role === "qa" ||
+      (role === "department_head" &&
+        !!profile?.departmentId &&
+        profile.departmentId === row.departmentId));
   const canApprove = !!role && hasPermission(role, "ojt:approve");
+  const blockedOwnQaApproval =
+    role !== "super_admin" &&
+    !!row?.hodVerification?.userId &&
+    row.hodVerification.userId === profile?.uid;
+  const canAuthorizeDeviation = role === "qa" || role === "super_admin";
   const canRetrain = !!role && hasPermission(role, "ojt:retrain");
   const canAssign = !!role && hasPermission(role, "ojt:assign");
 
@@ -326,7 +360,7 @@ export default function OjtAssignmentDetailPage({
                   <Input
                     type="date"
                     value={exec.actualExecutionDate}
-                    onChange={(e) => setExec({ ...exec, actualExecutionDate: e.target.value })}
+                    onChange={(e) => setExecFromUser({ ...exec, actualExecutionDate: e.target.value })}
                   />
                 </div>
                 <div className="space-y-1">
@@ -334,7 +368,7 @@ export default function OjtAssignmentDetailPage({
                   <Input
                     type="time"
                     value={exec.startTime}
-                    onChange={(e) => setExec({ ...exec, startTime: e.target.value })}
+                    onChange={(e) => setExecFromUser({ ...exec, startTime: e.target.value })}
                   />
                 </div>
                 <div className="space-y-1">
@@ -342,37 +376,48 @@ export default function OjtAssignmentDetailPage({
                   <Input
                     type="time"
                     value={exec.endTime}
-                    onChange={(e) => setExec({ ...exec, endTime: e.target.value })}
+                    onChange={(e) => setExecFromUser({ ...exec, endTime: e.target.value })}
                   />
                 </div>
                 <div className="space-y-1 md:col-span-2">
                   <Label>Location</Label>
                   <Input
                     value={exec.location}
-                    onChange={(e) => setExec({ ...exec, location: e.target.value })}
+                    onChange={(e) => setExecFromUser({ ...exec, location: e.target.value })}
                     placeholder="e.g. Dispensing room"
                   />
                 </div>
                 {exec.actualExecutionDate &&
-                  !dateFallsInMonth(calendarDateToIso(exec.actualExecutionDate), row.year, row.plannedExecutionMonth) && (
+                  !executionDateInPlan(calendarDateToIso(exec.actualExecutionDate), row) && (
                     <div className="space-y-1 md:col-span-2">
-                      <Label>Authorized deviation reason</Label>
-                      <Textarea
-                        value={exec.deviationReason}
-                        onChange={(e) => setExec({ ...exec, deviationReason: e.target.value })}
-                        placeholder="Required when the date is outside the planned execution month"
-                      />
+                      {canAuthorizeDeviation ? (
+                        <>
+                          <Label>Authorized deviation reason</Label>
+                          <Textarea
+                            value={exec.deviationReason}
+                            onChange={(e) => setExecFromUser({ ...exec, deviationReason: e.target.value })}
+                            placeholder="Required when the date is outside the planned execution month"
+                          />
+                        </>
+                      ) : (
+                        <p className="text-sm text-amber-800 dark:text-amber-200">
+                          This date is outside the planned execution month. Ask QA or an admin to schedule it.
+                        </p>
+                      )}
                     </div>
                   )}
                 <Button
                   disabled={busy || !row.trainerId || !exec.actualExecutionDate}
                   onClick={() => {
                     if (!actor || !row.trainerId || !exec.actualExecutionDate) return;
-                    const outside = !dateFallsInMonth(
+                    const outside = !executionDateInPlan(
                       calendarDateToIso(exec.actualExecutionDate),
-                      row.year,
-                      row.plannedExecutionMonth
+                      row
                     );
+                    if (outside && !canAuthorizeDeviation) {
+                      toast.error("A QA officer or admin must authorize a date outside the planned month.");
+                      return;
+                    }
                     if (outside && !exec.deviationReason.trim()) {
                       toast.error("Date is outside the planned execution month. Record an authorized deviation reason.");
                       return;
@@ -432,18 +477,18 @@ export default function OjtAssignmentDetailPage({
               <Input
                 type="date"
                 value={exec.actualExecutionDate}
-                onChange={(e) => setExec({ ...exec, actualExecutionDate: e.target.value })}
+                onChange={(e) => setExecFromUser({ ...exec, actualExecutionDate: e.target.value })}
               />
             </div>
             <div className="space-y-1">
               <Label>Location</Label>
-              <Input value={exec.location} onChange={(e) => setExec({ ...exec, location: e.target.value })} placeholder="Shop-floor location" />
+              <Input value={exec.location} onChange={(e) => setExecFromUser({ ...exec, location: e.target.value })} placeholder="Shop-floor location" />
             </div>
             <div className="space-y-1 md:col-span-2">
               <Label>Practical activity</Label>
               <Textarea
                 value={exec.practicalActivity}
-                onChange={(e) => setExec({ ...exec, practicalActivity: e.target.value })}
+                onChange={(e) => setExecFromUser({ ...exec, practicalActivity: e.target.value })}
                 placeholder="What activity did you demonstrate?"
               />
             </div>
@@ -451,14 +496,14 @@ export default function OjtAssignmentDetailPage({
               <Label>Training details / observations</Label>
               <Textarea
                 value={`${exec.trainingDetails}`}
-                onChange={(e) => setExec({ ...exec, trainingDetails: e.target.value })}
+                onChange={(e) => setExecFromUser({ ...exec, trainingDetails: e.target.value })}
               />
             </div>
             <div className="space-y-1 md:col-span-2">
               <Label>Employee performance</Label>
               <Textarea
                 value={exec.employeePerformance}
-                onChange={(e) => setExec({ ...exec, employeePerformance: e.target.value })}
+                onChange={(e) => setExecFromUser({ ...exec, employeePerformance: e.target.value })}
               />
             </div>
             <Button
@@ -513,7 +558,7 @@ export default function OjtAssignmentDetailPage({
                       <Select
                         value={String(score?.rating ?? 3)}
                         onValueChange={(v) =>
-                          setScores((prev) =>
+                          setScoresFromUser((prev) =>
                             prev.map((s) =>
                               s.criterionId === c.id
                                 ? {
@@ -541,7 +586,7 @@ export default function OjtAssignmentDetailPage({
                       <Select
                         value={score?.result || "pass"}
                         onValueChange={(v) =>
-                          setScores((prev) =>
+                          setScoresFromUser((prev) =>
                             prev.map((s) =>
                               s.criterionId === c.id
                                 ? { ...s, result: v as "pass" | "fail" | "na" }
@@ -565,7 +610,7 @@ export default function OjtAssignmentDetailPage({
                       placeholder="Comments"
                       value={score?.comments || ""}
                       onChange={(e) =>
-                        setScores((prev) =>
+                        setScoresFromUser((prev) =>
                           prev.map((s) =>
                             s.criterionId === c.id ? { ...s, comments: e.target.value } : s
                           )
@@ -685,7 +730,18 @@ export default function OjtAssignmentDetailPage({
         </Card>
       )}
 
-      {canVerify && row.status === "verification_pending" && (
+      {canVerify && !canVerifyThis && row.status === "verification_pending" && (
+        <Card>
+          <CardHeader>
+            <CardTitle>HOD check</CardTitle>
+            <CardDescription>
+              Only the head of this department, QA, or an admin can verify this record.
+            </CardDescription>
+          </CardHeader>
+        </Card>
+      )}
+
+      {canVerifyThis && row.status === "verification_pending" && (
         <Card id="ojt-hod" className="scroll-mt-24">
           <CardHeader>
             <CardTitle>HOD check</CardTitle>
@@ -728,13 +784,17 @@ export default function OjtAssignmentDetailPage({
         <Card id="ojt-qa" className="scroll-mt-24">
           <CardHeader>
             <CardTitle>QA approval</CardTitle>
-            <CardDescription>Last sign-off. Approve closes this record. Reject sends it back to HOD.</CardDescription>
+            <CardDescription>
+              {blockedOwnQaApproval
+                ? "You already verified this record as HOD, so someone else must give QA approval."
+                : "Last sign-off. Approve closes this record. Reject sends it back to HOD."}
+            </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
             <Textarea value={qaComments} onChange={(e) => setQaComments(e.target.value)} placeholder="Comments" />
             <div className="flex gap-2">
               <Button
-                disabled={busy}
+                disabled={busy || blockedOwnQaApproval}
                 onClick={() =>
                   actor && run(() => approveOjtByQa(row.id, "approved", qaComments, actor), "QA approved")
                 }
@@ -809,13 +869,13 @@ export default function OjtAssignmentDetailPage({
               <Input
                 type="date"
                 value={exec.actualExecutionDate}
-                onChange={(e) => setExec({ ...exec, actualExecutionDate: e.target.value })}
+                onChange={(e) => setExecFromUser({ ...exec, actualExecutionDate: e.target.value })}
               />
               <Input
                 className="min-w-[240px] flex-1"
                 placeholder="SOP version change justification (if current SOP changed)"
                 value={exec.sopVersionChangeJustification}
-                onChange={(e) => setExec({ ...exec, sopVersionChangeJustification: e.target.value })}
+                onChange={(e) => setExecFromUser({ ...exec, sopVersionChangeJustification: e.target.value })}
               />
               <Button
                 disabled={busy || !exec.actualExecutionDate}
@@ -870,6 +930,7 @@ export default function OjtAssignmentDetailPage({
               type="file"
               onChange={(e) => {
                 const file = e.target.files?.[0];
+                e.target.value = "";
                 if (!file || !actor) return;
                 void run(
                   () => uploadOjtAttachment({ assignmentId: row.id, file, kind: "other", actor }),

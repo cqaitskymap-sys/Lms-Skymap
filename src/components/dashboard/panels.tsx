@@ -5,9 +5,19 @@ import { Bell, CheckCircle2, Circle } from "lucide-react";
 import { GlassCard, GlassCardHeader } from "@/components/dashboard/glass-card";
 import { MotionItem } from "@/components/dashboard/motion";
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
+import { cn, formatDate, formatDateTime } from "@/lib/utils";
 import type { DashNotification, DashTask, DashQuickAction, DashActivity, DashAlert } from "@/lib/dashboard/data";
 import { ActivityTimeline } from "@/components/shared/activity-timeline";
+
+function displayTime(value: string) {
+  if (!value?.trim()) return "—";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return formatDate(value);
+  if (value.includes("T")) {
+    const formatted = formatDateTime(value);
+    return formatted === "—" ? value : formatted;
+  }
+  return value;
+}
 
 export function NotificationsPanel({ items }: { items: DashNotification[] }) {
   return (
@@ -42,7 +52,7 @@ export function NotificationsPanel({ items }: { items: DashNotification[] }) {
                 <div className="min-w-0">
                   <p className="text-sm font-medium">{n.title}</p>
                   <p className="text-xs text-muted-foreground line-clamp-2">{n.message}</p>
-                  <p className="mt-1 text-[10px] text-muted-foreground">{n.time}</p>
+                  <p className="mt-1 text-[10px] text-muted-foreground">{displayTime(n.time)}</p>
                 </div>
               </div>
             </Link>
@@ -133,7 +143,12 @@ export function RecentActivities({ items }: { items: DashActivity[] }) {
             id: a.id,
             timestamp: a.timestamp,
             description: a.description,
-            actorEmail: a.actor,
+            actorName: a.actorName,
+            actorEmployeeCode: a.actorEmployeeCode,
+            actorEmail:
+              a.actorEmail ||
+              (!a.actorName && !a.actorEmployeeCode ? a.actor : "") ||
+              "",
             action: a.action as never,
           }))}
           maxHeight="320px"
@@ -174,7 +189,7 @@ export function AlertsPanel({
             >
               <p className="text-sm font-medium">{a.title}</p>
               <p className="text-xs text-muted-foreground">{a.message}</p>
-              <p className="mt-1 text-[10px] text-muted-foreground">{a.time}</p>
+              <p className="mt-1 text-[10px] text-muted-foreground">{displayTime(a.time)}</p>
             </Link>
           ))}
         </div>

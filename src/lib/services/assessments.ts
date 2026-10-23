@@ -276,15 +276,6 @@ export async function startAssessment(params: {
 
   const prior = await listAttemptsForEmployee(params.examId, params.employeeId);
   const now = new Date();
-  const open = prior.filter((a) => a.status === "in_progress");
-  const resumable = open.find((a) => new Date(a.expiresAt) > now);
-  if (resumable) {
-    return {
-      ...resumable,
-      questions: sanitizeAttemptForClient(resumable.questions, false),
-    };
-  }
-
   const inCycle = (a: AssessmentAttempt) => {
     if (params.assignmentId) return a.assignmentId === params.assignmentId;
     if (params.inductionAssignmentId) {
@@ -292,6 +283,14 @@ export async function startAssessment(params: {
     }
     return true;
   };
+  const open = prior.filter((a) => a.status === "in_progress");
+  const resumable = open.find((a) => inCycle(a) && new Date(a.expiresAt) > now);
+  if (resumable) {
+    return {
+      ...resumable,
+      questions: sanitizeAttemptForClient(resumable.questions, false),
+    };
+  }
   const finished = prior.filter(
     (a) => inCycle(a) && ["passed", "failed", "expired"].includes(a.status)
   );

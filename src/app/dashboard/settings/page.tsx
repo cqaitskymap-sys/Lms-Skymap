@@ -87,8 +87,8 @@ function ProfileTab({ locked }: { locked?: boolean }) {
             Change your password first, then you can update your profile.
           </p>
         ) : (
-          <form onSubmit={handleSubmit(onSubmit)} className="space-y-4" noValidate>
-            <div className="space-y-2">
+          <form onSubmit={handleSubmit(onSubmit)} className="grid gap-4 sm:grid-cols-2" noValidate>
+            <div className={profile?.username ? "space-y-2" : "space-y-2 sm:col-span-2"}>
               <Label htmlFor="displayName">Display name</Label>
               <Input id="displayName" {...register("displayName")} />
               {errors.displayName && (
@@ -112,17 +112,19 @@ function ProfileTab({ locked }: { locked?: boolean }) {
                 <p className="text-xs text-destructive">{errors.phone.message}</p>
               )}
             </div>
-            <div className="flex flex-wrap gap-2 text-sm text-muted-foreground">
+            <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground sm:col-span-2">
               <span>Last login: {formatDateTime(profile?.lastLoginAt)}</span>
               {profile?.passwordChangedAt && (
                 <span>· Password changed: {formatDateTime(profile.passwordChangedAt)}</span>
               )}
               {profile?.isActive === false && <Badge variant="destructive">Inactive</Badge>}
             </div>
-            <Button type="submit" disabled={isSubmitting}>
-              {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Save profile
-            </Button>
+            <div className="sm:col-span-2">
+              <Button type="submit" disabled={isSubmitting}>
+                {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                Save profile
+              </Button>
+            </div>
           </form>
         )}
       </CardContent>
@@ -185,7 +187,7 @@ function PasswordTab({
         <CardDescription>{PASSWORD_POLICY_HINT}</CardDescription>
       </CardHeader>
       <CardContent>
-        <form onSubmit={handleSubmit(onSubmit)} className="space-y-4" noValidate>
+        <form onSubmit={handleSubmit(onSubmit)} className="grid gap-4 sm:grid-cols-2" noValidate>
           {(
             [
               ["currentPassword", "Current / temporary password", "current", false],
@@ -193,7 +195,12 @@ function PasswordTab({
               ["confirmPassword", "Confirm new password", "confirm", true],
             ] as const
           ).map(([name, label, key, blockClipboard]) => (
-            <div key={name} className="space-y-2">
+            <div
+              key={name}
+              className={
+                name === "currentPassword" ? "space-y-2 sm:col-span-2" : "space-y-2"
+              }
+            >
               <Label htmlFor={name}>{label}</Label>
               <div className="relative">
                 <Input
@@ -236,7 +243,7 @@ function PasswordTab({
           ))}
 
           {newPassword.length > 0 && (
-            <div className="flex items-center gap-2 text-xs">
+            <div className="flex items-center gap-2 text-xs sm:col-span-2">
               <Shield className="h-3.5 w-3.5" />
               Strength:{" "}
               <Badge
@@ -250,15 +257,17 @@ function PasswordTab({
           )}
 
           {isDemo && (
-            <p className="text-xs text-muted-foreground">
+            <p className="text-xs text-muted-foreground sm:col-span-2">
               Demo mode: password is stored in this browser only.
             </p>
           )}
 
-          <Button type="submit" disabled={isSubmitting}>
-            {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            {required ? "Set new password" : "Update password"}
-          </Button>
+          <div className="sm:col-span-2">
+            <Button type="submit" disabled={isSubmitting}>
+              {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              {required ? "Set new password" : "Update password"}
+            </Button>
+          </div>
         </form>
       </CardContent>
     </Card>
@@ -343,7 +352,7 @@ function SettingsTabs() {
   };
 
   return (
-    <div className="mx-auto max-w-xl space-y-6">
+    <div className="w-full space-y-6">
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Settings</h1>
         <p className="text-muted-foreground">Profile, password & session</p>
@@ -371,7 +380,7 @@ function SettingsTabs() {
           router.replace(next);
         }}
       >
-        <TabsList className="grid w-full grid-cols-3">
+        <TabsList className="grid w-full grid-cols-3 sm:inline-flex sm:w-auto">
           <TabsTrigger value="profile" disabled={required}>
             Profile
           </TabsTrigger>

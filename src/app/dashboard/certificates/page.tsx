@@ -94,9 +94,10 @@ export default function CertificatesPage() {
 
       setCerts(rows);
       const visible = showRevoked ? rows : rows.filter((c) => !c.isRevoked);
-      if (!selected || !visible.some((c) => c.id === selected)) {
-        setSelected(visible[0]?.id);
-      }
+      setSelected((current) => {
+        if (current && visible.some((c) => c.id === current)) return current;
+        return visible[0]?.id;
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load certificates");
       setCerts([]);

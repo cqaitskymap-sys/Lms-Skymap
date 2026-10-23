@@ -24,7 +24,7 @@ import type { UserRole } from "@/types";
 
 export default function HrDashboardPage() {
   const { profile } = useAuth();
-  const { employees, approvals, loading, refresh } = useLifecycleDirectory({
+  const { employees, approvals, loading, error, refresh } = useLifecycleDirectory({
     includeApprovals: true,
   });
 
@@ -32,6 +32,18 @@ export default function HrDashboardPage() {
     return (
       <div className="flex justify-center py-20">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-8 text-center">
+        <p className="font-medium text-destructive">Could not load the HR dashboard</p>
+        <p className="mt-1 text-sm text-muted-foreground">{error}</p>
+        <Button className="mt-4" variant="outline" onClick={() => void refresh()}>
+          Retry
+        </Button>
       </div>
     );
   }

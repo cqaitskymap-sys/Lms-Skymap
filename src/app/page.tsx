@@ -17,7 +17,7 @@ export default function HomePage() {
       <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-white/30 via-transparent to-white/70 dark:from-[hsl(217_91%_40%/0.18)] dark:to-[hsl(224_70%_5%/0.85)]" />
 
       <header className="relative mx-auto flex max-w-6xl items-center justify-between px-6 py-5">
-        <div className="flex items-center gap-2 font-semibold tracking-tight">
+        <div className="rounded-xl bg-white/95 px-2.5 py-1.5 shadow-sm">
           <BrandLogo className="h-10 w-auto max-w-[180px] object-contain" />
         </div>
         <Button asChild className="rounded-full shadow-soft">
@@ -27,8 +27,8 @@ export default function HomePage() {
         </Button>
       </header>
 
-      <main className="relative mx-auto max-w-6xl px-6 pb-20 pt-16 md:pt-24">
-        <div className="max-w-2xl space-y-6 animate-fade-in">
+      <main className="relative mx-auto grid max-w-6xl items-start gap-10 px-6 pb-16 pt-8 md:pt-12 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,1fr)] lg:items-center lg:gap-12">
+        <div className="max-w-2xl space-y-5 animate-fade-in">
           <p className="inline-flex items-center rounded-full border border-primary/15 bg-white/70 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-primary shadow-sm backdrop-blur-md dark:border-white/15 dark:bg-white/10">
             Pharmaceutical Training Platform
           </p>
@@ -54,7 +54,7 @@ export default function HomePage() {
           </div>
         </div>
 
-        <div className="mt-20 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid gap-4 sm:grid-cols-2">
           {[
             {
               icon: Shield,
@@ -79,7 +79,7 @@ export default function HomePage() {
           ].map((f) => (
             <div
               key={f.title}
-              className="group glass-panel rounded-2xl p-5 transition-all duration-300 hover:-translate-y-1 hover:shadow-lift"
+              className="group rounded-2xl border border-white/70 bg-white/90 p-5 shadow-soft backdrop-blur-md transition-all duration-300 hover:-translate-y-1 hover:shadow-lift dark:border-white/15 dark:bg-[rgb(10_22_48)] dark:shadow-none"
             >
               <div className="mb-4 inline-flex rounded-xl bg-primary/10 p-2.5 text-primary transition-colors group-hover:bg-primary group-hover:text-primary-foreground">
                 <f.icon className="h-5 w-5" />

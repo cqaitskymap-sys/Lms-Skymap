@@ -7,6 +7,7 @@ import {
 } from "@/lib/services/sop-reading";
 import {
   isReadingComplete,
+  reconcileViewedPages,
   requiredReadingSeconds,
 } from "@/lib/sops/reading";
 
@@ -89,17 +90,35 @@ export function useSopReadingSession(params: {
     void loadSopReadingProgress(userId, versionId).then((saved) => {
       if (cancelled) return;
       if (saved) {
-        setElapsedSeconds((prev) => Math.max(prev, saved.elapsedSeconds || 0));
-        setRequiredSeconds((prev) =>
-          Math.max(prev, saved.requiredSeconds || requiredReadingSeconds(saved.pageCount, hasPdf))
-        );
-        setPagesSeen((prev) =>
-          Array.from(new Set([...prev, ...(saved.pagesSeen || [])])).sort((a, b) => a - b)
-        );
-        setPageCount((prev) => Math.max(prev, saved.pageCount || 0));
-        setReachedLastPage((prev) => prev || Boolean(saved.reachedLastPage));
-        setAllPagesViewed((prev) => prev || Boolean(saved.allPagesViewed) || !hasPdf);
-        completedRef.current = Boolean(saved.completedAt);
+        const liveCount = pageCountRef.current;
+        const savedCount = saved.pageCount || 0;
+        const liveDocumentDiffers =
+          liveCount > 0 && savedCount > 0 && liveCount !== savedCount;
+        if (!liveDocumentDiffers) {
+          setElapsedSeconds((prev) => Math.max(prev, saved.elapsedSeconds || 0));
+          setRequiredSeconds((prev) =>
+            Math.max(prev, saved.requiredSeconds || requiredReadingSeconds(saved.pageCount, hasPdf))
+          );
+          const savedViewed =
+            !hasPdf ||
+            (savedCount > 0 &&
+              (saved.pagesSeen || []).filter((page) => page >= 1 && page <= savedCount).length >=
+                savedCount &&
+              Boolean(saved.reachedLastPage));
+          setPagesSeen((prev) =>
+            Array.from(
+              new Set(
+                [...prev, ...(saved.pagesSeen || [])].filter(
+                  (page) => savedCount <= 0 || page <= savedCount
+                )
+              )
+            ).sort((a, b) => a - b)
+          );
+          setPageCount((prev) => Math.max(prev, savedCount));
+          setReachedLastPage((prev) => prev || Boolean(saved.reachedLastPage));
+          setAllPagesViewed((prev) => prev || savedViewed);
+          completedRef.current = Boolean(saved.completedAt) && savedViewed;
+        }
       }
       setReady(true);
     });
@@ -145,32 +164,47 @@ export function useSopReadingSession(params: {
   const reportPages = useCallback(
     (progress: SopPageProgress) => {
       if (!enabled) return;
+      // A failed PDF load reports 0 pages. Ignore it so a short timer or a
+      // frozen clock does not unlock or block acknowledgement by accident.
+      if (hasPdf && progress.pageCount <= 0) return;
+
       const nextRequired = requiredReadingSeconds(progress.pageCount, hasPdf);
-      setPageCount(progress.pageCount);
-      pageCountRef.current = progress.pageCount;
-      setRequiredSeconds(nextRequired);
-      requiredRef.current = nextRequired;
-      setPagesSeen((prev) => {
-        const merged = Array.from(new Set([...prev, ...progress.pagesSeen])).sort(
-          (a, b) => a - b
-        );
-        pagesRef.current = merged;
-        return merged;
+      const previousCount = pageCountRef.current;
+      const documentChanged =
+        previousCount > 0 &&
+        progress.pageCount > 0 &&
+        progress.pageCount !== previousCount;
+      const grew = !documentChanged && previousCount > 0 && progress.pageCount > previousCount;
+      const reached = documentChanged
+        ? progress.reachedLastPage
+        : grew
+          ? progress.reachedLastPage
+          : progress.reachedLastPage || reachedLastRef.current;
+      const merged = documentChanged
+        ? [...progress.pagesSeen]
+        : Array.from(new Set([...pagesRef.current, ...progress.pagesSeen])).sort((a, b) => a - b);
+      const reconciled = reconcileViewedPages({
+        pageCount: progress.pageCount,
+        pagesSeen: merged,
+        reachedLastPage: reached,
+        flaggedViewed: !hasPdf && !documentChanged,
       });
-      if (progress.reachedLastPage) {
-        setReachedLastPage(true);
-        reachedLastRef.current = true;
+      if (documentChanged) {
+        elapsedRef.current = 0;
+        setElapsedSeconds(0);
+        completedRef.current = false;
       }
-      const viewed =
-        progress.allPagesViewed ||
-        (!hasPdf && progress.pageCount === 0) ||
-        (progress.pageCount > 0 &&
-          progress.pagesSeen.length >= progress.pageCount &&
-          progress.reachedLastPage);
-      if (viewed) {
-        setAllPagesViewed(true);
-        allPagesRef.current = true;
-      }
+
+      pageCountRef.current = progress.pageCount;
+      requiredRef.current = nextRequired;
+      pagesRef.current = reconciled.pagesSeen;
+      reachedLastRef.current = reached;
+      allPagesRef.current = reconciled.allPagesViewed;
+      setPageCount(progress.pageCount);
+      setRequiredSeconds(nextRequired);
+      setPagesSeen(reconciled.pagesSeen);
+      setReachedLastPage(reached);
+      setAllPagesViewed(reconciled.allPagesViewed);
     },
     [enabled, hasPdf]
   );

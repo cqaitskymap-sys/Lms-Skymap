@@ -1,13 +1,7 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { FieldValue } from "firebase-admin/firestore";
-import {
-  invalidateAuthCache,
-  unauthorized,
-  verifyAuthDetailed,
-  requirePermission,
-  writeAuditLog,
-} from "@/lib/rbac/middleware";
+import { invalidateAuthCache, unauthorized, verifyAuthDetailed, requirePermission, writeAuditLog, authHttpStatus } from "@/lib/rbac/middleware";
 import { adminAuth, adminDb, isAdminConfigured } from "@/lib/firebase/admin";
 import { COLLECTIONS } from "@/lib/firebase/client";
 import { staffContactEmail, updateAdminUserSchema } from "@/lib/auth/user-admin-schemas";
@@ -32,7 +26,7 @@ export async function PATCH(
 
   const verified = await verifyAuthDetailed(request);
   if (!verified.ok) {
-    const status = verified.reason === "admin_not_configured" ? 503 : 401;
+    const status = authHttpStatus(verified.reason);
     return unauthorized(verified.message, status);
   }
 
@@ -138,9 +132,9 @@ export async function PATCH(
     nextDept = undefined;
   }
 
-  if ((nextRole === "department_head" || nextRole === "trainer") && !nextDept) {
+  if (nextRole === "department_head" && !nextDept) {
     return NextResponse.json(
-      { success: false, error: "Department is required for this role" },
+      { success: false, error: "Department is required for a department head" },
       { status: 400 }
     );
   }
@@ -321,7 +315,7 @@ export async function DELETE(
 
   const verified = await verifyAuthDetailed(request);
   if (!verified.ok) {
-    const status = verified.reason === "admin_not_configured" ? 503 : 401;
+    const status = authHttpStatus(verified.reason);
     return unauthorized(verified.message, status);
   }
 

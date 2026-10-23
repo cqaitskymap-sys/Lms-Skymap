@@ -253,6 +253,8 @@ export interface OjtAssignment extends Timestamps, OjtApprovalConfig {
   year: number;
   selectionMonth: number;
   plannedExecutionMonth: number;
+  /** Every execution month from the yearly plan. Overdue uses the last one. */
+  plannedExecutionMonths?: number[];
   selectionDate?: string;
   actualExecutionDate?: string;
   executionDeviation?: OjtExecutionDeviation;

@@ -52,7 +52,9 @@ function InductionPageInner() {
 
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [employeesLoading, setEmployeesLoading] = useState(false);
+  const [employeesError, setEmployeesError] = useState<string | null>(null);
   const [selectedEmployeeId, setSelectedEmployeeId] = useState("");
+  const appliedAssignRef = useRef<string | null>(null);
   const [handoverDept, setHandoverDept] = useState("");
   const [busy, setBusy] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -64,8 +66,10 @@ function InductionPageInner() {
     setEmployeesLoading(true);
     try {
       setEmployees(await listEmployeesForLifecycle());
-    } catch {
+      setEmployeesError(null);
+    } catch (err) {
       setEmployees([]);
+      setEmployeesError(err instanceof Error ? err.message : "Could not load employees");
     } finally {
       setEmployeesLoading(false);
     }
@@ -79,7 +83,9 @@ function InductionPageInner() {
   }, [loadEmployees]);
 
   useEffect(() => {
-    if (!assignFromUrl) return;
+    if (!assignFromUrl || appliedAssignRef.current === assignFromUrl) return;
+    if (employees.length === 0) return;
+    appliedAssignRef.current = assignFromUrl;
     const emp = employees.find((e) => e.id === assignFromUrl);
     setSelectedEmployeeId(assignFromUrl);
     if (emp?.departmentId) setHandoverDept(emp.departmentId);
@@ -247,7 +253,19 @@ function InductionPageInner() {
                       ))}
                     </SelectContent>
                   </Select>
-                  {!employeesLoading && inductionQueue.length === 0 && (
+                  {!employeesLoading && employeesError && (
+                    <p className="text-xs text-destructive">
+                      {employeesError}.{" "}
+                      <button
+                        type="button"
+                        className="font-medium underline"
+                        onClick={() => void loadEmployees()}
+                      >
+                        Retry
+                      </button>
+                    </p>
+                  )}
+                  {!employeesLoading && !employeesError && inductionQueue.length === 0 && (
                     <p className="text-xs text-muted-foreground">
                       No verified employees waiting for induction. Complete HR verification first.
                     </p>
@@ -410,6 +428,19 @@ function InductionPageInner() {
                 {employeesLoading ? (
                   <div className="flex items-center gap-2 text-sm text-muted-foreground">
                     <Loader2 className="h-4 w-4 animate-spin" /> Loading…
+                  </div>
+                ) : employeesError ? (
+                  <div className="py-6 text-center text-sm">
+                    <p className="text-destructive">{employeesError}</p>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="mt-3"
+                      onClick={() => void loadEmployees()}
+                    >
+                      Retry
+                    </Button>
                   </div>
                 ) : inductionQueue.length === 0 ? (
                   <p className="py-6 text-center text-sm text-muted-foreground">

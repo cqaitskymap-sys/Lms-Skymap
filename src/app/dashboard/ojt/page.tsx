@@ -24,7 +24,7 @@ import {
 } from "@/lib/services/ojt";
 import { OJT_UPDATED_EVENT } from "@/lib/ojt/demo-store";
 import { currentCalendarMonth, currentCalendarYear, monthShort } from "@/lib/ojt/constants";
-import { isOjtOverdue } from "@/lib/ojt/workflow";
+import { isOjtOverdue, plannedExecutionMonthsOf } from "@/lib/ojt/workflow";
 import { actionableOjtQueue, ojtFormPendingActions, ojtStatusLabel, waitingOjtQueue } from "@/lib/ojt/next-action";
 import { GlassStatCard } from "@/components/dashboard/glass-stat-card";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -129,7 +129,10 @@ export default function OjtDashboardPage() {
     return Array.from({ length: 12 }, (_, i) => {
       const month = i + 1;
       const rows = assignments.filter(
-        (a) => a.year === year && a.plannedExecutionMonth === month && a.status !== "cancelled"
+        (a) =>
+          a.year === year &&
+          plannedExecutionMonthsOf(a).includes(month) &&
+          a.status !== "cancelled"
       );
       return {
         month: monthShort(month),

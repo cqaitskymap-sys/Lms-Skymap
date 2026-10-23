@@ -14,21 +14,20 @@ function id(prefix: string) {
   return `${prefix}_${crypto.randomBytes(8).toString("hex")}`;
 }
 
-/** Calendar dates (and noon/midnight UTC copies of them) are due at the end of that UTC day. */
+/** End of a calendar day in Asia/Kolkata (UTC+5:30, no daylight saving). */
+function istDayEndMs(year: number, month: number, day: number): number {
+  return Date.UTC(year, month - 1, day, 18, 29, 59, 999);
+}
+
+/** Calendar dates (and noon/midnight UTC copies of them) are due at the end of that day in India. */
 function isPastDue(dueDate: string, nowMs: number): boolean {
   const calendar =
     /^(\d{4})-(\d{2})-(\d{2})(?:T(?:00|12):00:00(?:\.\d+)?Z)?$/.exec(dueDate.trim());
   if (calendar) {
-    const end = Date.UTC(
-      Number(calendar[1]),
-      Number(calendar[2]) - 1,
-      Number(calendar[3]),
-      23,
-      59,
-      59,
-      999
+    return (
+      nowMs >
+      istDayEndMs(Number(calendar[1]), Number(calendar[2]), Number(calendar[3]))
     );
-    return nowMs > end;
   }
   const parsed = new Date(dueDate).getTime();
   return Number.isFinite(parsed) && nowMs > parsed;
@@ -98,9 +97,10 @@ export const onSopVersionApproved = onDocumentUpdated(
       "training_scheduled",
       "retraining",
       "assessment_pending",
+      "training_completed",
       "failed",
     ]);
-    const COMPLETED = new Set(["passed", "training_completed"]);
+    const COMPLETED = new Set(["passed"]);
 
     const prev = await db.collection("training_assignments").where("sopId", "==", sopId).get();
 
@@ -131,17 +131,41 @@ export const onSopVersionApproved = onDocumentUpdated(
       });
 
       if (openOld.length) {
+        const primary = [...openOld].sort((a, b) =>
+          String(b.data().updatedAt || "").localeCompare(String(a.data().updatedAt || ""))
+        )[0];
         for (const docSnap of openOld) {
           ops.push({
             type: "update",
             ref: docSnap.ref,
             data: {
-              sopVersionId: versionId,
-              ...(docSnap.data().status === "failed" ? { status: "retraining" } : {}),
-              isRetraining: true,
-              triggeredBySopRevision: true,
+              status: "expired",
               updatedAt: now,
               updatedBy: "system",
+            },
+          });
+        }
+        if (!alreadyOnNew) {
+          const newId = `ta_${employeeId}_${versionId}`;
+          ops.push({
+            type: "set",
+            ref: db.collection("training_assignments").doc(newId),
+            data: {
+              id: newId,
+              employeeId,
+              sopId,
+              sopVersionId: versionId,
+              trainerId: primary.data().trainerId || null,
+              assignedBy: "system",
+              departmentId: primary.data().departmentId ?? null,
+              status: "retraining",
+              attemptCount: 0,
+              isRetraining: true,
+              previousAssignmentId: primary.id,
+              triggeredBySopRevision: true,
+              createdAt: now,
+              updatedAt: now,
+              createdBy: "system",
             },
           });
         }
@@ -290,7 +314,9 @@ export const submitAssessment = onCall(async (request) => {
     const snap = await tx.get(attemptRef);
     if (!snap.exists) return "missing" as const;
     const current = snap.data()!;
-    if (current.status !== "in_progress") return "taken" as const;
+    const incompleteClaim =
+      current.status === "submitted" && current.submittedAt == null && current.score == null;
+    if (current.status !== "in_progress" && !incompleteClaim) return "taken" as const;
     tx.update(attemptRef, {
       status: "submitted",
       updatedAt: new Date().toISOString(),
@@ -392,7 +418,7 @@ export const submitAssessment = onCall(async (request) => {
     if ((selected.length || 0) > 0) {
       if (isCorrect) earned = q.marks;
       else if (negEnabled) {
-        const penalty = q.negativeMarks || exam.defaultNegativeMarks || 0;
+        const penalty = q.negativeMarks ?? exam.defaultNegativeMarks ?? 0;
         earned = -penalty;
         negativeApplied += penalty;
       }
@@ -433,13 +459,29 @@ export const submitAssessment = onCall(async (request) => {
 
   if (attempt.assignmentId && passed) {
     const assignRef = db.collection("training_assignments").doc(attempt.assignmentId);
-    await assignRef.update({
-      status: "passed",
-      score: percentage,
-      passed: true,
-      assessmentAttemptId: attemptId,
-      updatedAt: now.toISOString(),
-    });
+    const assignSnap = await assignRef.get();
+    const current = assignSnap.data() || {};
+    const versionMismatch =
+      typeof attempt.sopVersionId === "string" &&
+      typeof current.sopVersionId === "string" &&
+      attempt.sopVersionId !== current.sopVersionId;
+    const revisedAfterStart =
+      versionMismatch ||
+      (current.triggeredBySopRevision === true &&
+        typeof current.updatedAt === "string" &&
+        typeof attempt.startedAt === "string" &&
+        current.updatedAt > attempt.startedAt);
+    const ready =
+      current.status === "assessment_pending" || current.status === "retraining";
+    if (!revisedAfterStart && ready) {
+      await assignRef.update({
+        status: "passed",
+        score: percentage,
+        passed: true,
+        assessmentAttemptId: attemptId,
+        updatedAt: now.toISOString(),
+      });
+    }
   } else if (attempt.assignmentId && !passed) {
     const assignRef = db.collection("training_assignments").doc(attempt.assignmentId);
     const assignSnap = await assignRef.get();
@@ -606,11 +648,18 @@ export const overdueTrainingReminders = onSchedule("every day 09:00", async () =
   for (const docSnap of ojtSnap.docs) {
     const a = docSnap.data();
     const year = Number(a.year);
-    const month = Number(a.plannedExecutionMonth);
+    const listed = Array.isArray(a.plannedExecutionMonths)
+      ? a.plannedExecutionMonths
+          .map((month: unknown) => Number(month))
+          .filter((month: number) => month >= 1 && month <= 12)
+      : [];
+    const month = listed.length ? Math.max(...listed) : Number(a.plannedExecutionMonth);
     if (!year || !month) continue;
-    const deadline = new Date(Date.UTC(year, month, 0, 23, 59, 59, 999));
-    if (graceDays > 0) deadline.setUTCDate(deadline.getUTCDate() + graceDays);
-    if (today.getTime() <= deadline.getTime()) continue;
+    const lastUtc = new Date(Date.UTC(year, month, 0));
+    const deadlineMs =
+      istDayEndMs(lastUtc.getUTCFullYear(), lastUtc.getUTCMonth() + 1, lastUtc.getUTCDate()) +
+      graceDays * 86400000;
+    if (today.getTime() <= deadlineMs) continue;
     const emp = await db.collection("employees").doc(a.employeeId).get();
     const userId = emp.data()?.userId as string | undefined;
     const day = new Date().toISOString().slice(0, 10);

@@ -48,8 +48,16 @@ export function ComplianceTrendChart({
                 </linearGradient>
               </defs>
               <CartesianGrid strokeDasharray="3 3" className="stroke-border/60" />
-              <XAxis dataKey="month" tick={{ fontSize: 11 }} stroke="hsl(var(--muted-foreground))" />
-              <YAxis domain={[0, 100]} tick={{ fontSize: 11 }} stroke="hsl(var(--muted-foreground))" />
+              <XAxis
+                dataKey="month"
+                tick={{ fontSize: 11, fill: "hsl(var(--foreground))" }}
+                stroke="hsl(var(--border))"
+              />
+              <YAxis
+                domain={[0, 100]}
+                tick={{ fontSize: 11, fill: "hsl(var(--foreground))" }}
+                stroke="hsl(var(--border))"
+              />
               <Tooltip contentStyle={tooltipStyle} />
               <Area
                 type="monotone"
@@ -83,8 +91,15 @@ export function TrainingProgressChart({
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={data} margin={{ top: 8, right: 8, left: -18, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" className="stroke-border/60" />
-              <XAxis dataKey="name" tick={{ fontSize: 11 }} stroke="hsl(var(--muted-foreground))" />
-              <YAxis tick={{ fontSize: 11 }} stroke="hsl(var(--muted-foreground))" />
+              <XAxis
+                dataKey="name"
+                tick={{ fontSize: 11, fill: "hsl(var(--foreground))" }}
+                stroke="hsl(var(--border))"
+              />
+              <YAxis
+                tick={{ fontSize: 11, fill: "hsl(var(--foreground))" }}
+                stroke="hsl(var(--border))"
+              />
               <Tooltip contentStyle={tooltipStyle} />
               <Legend wrapperStyle={{ fontSize: 12 }} />
               <Bar dataKey="completed" name="Completed" fill="hsl(168, 72%, 48%)" radius={[4, 4, 0, 0]} />
@@ -115,8 +130,19 @@ export function DepartmentComplianceChart({
               margin={{ top: 8, right: 16, left: 8, bottom: 0 }}
             >
               <CartesianGrid strokeDasharray="3 3" className="stroke-border/60" horizontal={false} />
-              <XAxis type="number" domain={[0, 100]} tick={{ fontSize: 11 }} />
-              <YAxis type="category" dataKey="name" width={80} tick={{ fontSize: 11 }} />
+              <XAxis
+                type="number"
+                domain={[0, 100]}
+                tick={{ fontSize: 11, fill: "hsl(var(--foreground))" }}
+                stroke="hsl(var(--border))"
+              />
+              <YAxis
+                type="category"
+                dataKey="name"
+                width={80}
+                tick={{ fontSize: 11, fill: "hsl(var(--foreground))" }}
+                stroke="hsl(var(--border))"
+              />
               <Tooltip contentStyle={tooltipStyle} />
               <Bar dataKey="rate" name="Compliance %" fill="hsl(217, 91%, 62%)" radius={[0, 6, 6, 0]} />
             </BarChart>

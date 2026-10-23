@@ -70,7 +70,11 @@ export interface DashNotification {
 export interface DashActivity {
   id: string;
   description: string;
+  /** Fallback label when structured actor fields are absent. */
   actor: string;
+  actorName?: string;
+  actorEmail?: string;
+  actorEmployeeCode?: string;
   action: string;
   timestamp: string;
 }

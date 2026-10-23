@@ -99,7 +99,7 @@ export function CreateQuestionDialog({ banks, defaultBankId, onCreated }: Props)
         </DialogTrigger>
         <DialogContent
           className={cn(
-            "max-h-[90vh] overflow-y-auto",
+            "max-h-[90vh]",
             mode === "pdf" ? "sm:max-w-2xl" : "sm:max-w-lg"
           )}
         >

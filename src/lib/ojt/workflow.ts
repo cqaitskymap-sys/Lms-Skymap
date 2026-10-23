@@ -1,5 +1,10 @@
 import type { OjtApprovalConfig, OjtAssignment, OjtCriterionScore, OjtStatus } from "@/types/ojt";
-import { lastDayOfMonthIso, OPEN_OJT_STATUSES, TERMINAL_OJT_STATUSES } from "@/lib/ojt/constants";
+import {
+  dateFallsInMonth,
+  lastDayOfMonthIso,
+  OPEN_OJT_STATUSES,
+  TERMINAL_OJT_STATUSES,
+} from "@/lib/ojt/constants";
 
 const TRANSITIONS: Record<OjtStatus, readonly OjtStatus[]> = {
   draft: ["selected", "cancelled"],
@@ -141,10 +146,30 @@ export function statusAfterQaDecision(
   return "in_progress";
 }
 
+export function plannedExecutionMonthsOf(
+  assignment: Pick<OjtAssignment, "plannedExecutionMonth" | "plannedExecutionMonths">
+): number[] {
+  const listed = (assignment.plannedExecutionMonths || []).filter(
+    (month) => Number.isInteger(month) && month >= 1 && month <= 12
+  );
+  const months = listed.length > 0 ? listed : [assignment.plannedExecutionMonth];
+  return [...new Set(months)].sort((a, b) => a - b);
+}
+
+/** True when the calendar date falls in any planned execution month, not only the first. */
+export function executionDateInPlan(
+  isoDate: string,
+  assignment: Pick<OjtAssignment, "year" | "plannedExecutionMonth" | "plannedExecutionMonths">
+): boolean {
+  return plannedExecutionMonthsOf(assignment).some((month) =>
+    dateFallsInMonth(isoDate, assignment.year, month)
+  );
+}
+
 export function isOjtOverdue(
   assignment: Pick<
     OjtAssignment,
-    "status" | "year" | "plannedExecutionMonth" | "actualExecutionDate"
+    "status" | "year" | "plannedExecutionMonth" | "plannedExecutionMonths" | "actualExecutionDate"
   >,
   now = new Date(),
   graceDays = 0
@@ -153,7 +178,8 @@ export function isOjtOverdue(
   if (assignment.status === "failed" || assignment.status === "retraining_required") {
     return false;
   }
-  const deadline = new Date(lastDayOfMonthIso(assignment.year, assignment.plannedExecutionMonth));
+  const months = plannedExecutionMonthsOf(assignment);
+  const deadline = new Date(lastDayOfMonthIso(assignment.year, months[months.length - 1] || assignment.plannedExecutionMonth));
   if (graceDays > 0) {
     deadline.setDate(deadline.getDate() + graceDays);
   }
@@ -163,7 +189,7 @@ export function isOjtOverdue(
 export function displayOjtStatus(
   assignment: Pick<
     OjtAssignment,
-    "status" | "year" | "plannedExecutionMonth" | "actualExecutionDate"
+    "status" | "year" | "plannedExecutionMonth" | "plannedExecutionMonths" | "actualExecutionDate"
   >,
   now = new Date(),
   graceDays = 0

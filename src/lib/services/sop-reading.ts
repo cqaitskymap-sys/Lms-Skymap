@@ -3,7 +3,7 @@ import { db, COLLECTIONS } from "@/lib/firebase/client";
 import { nowISO, stripUndefined } from "@/lib/services/helpers";
 import { isDemoMode } from "@/lib/demo/data";
 import { readSopStore, writeSopStore } from "@/lib/sops/demo-store";
-import { isReadingComplete, readingProgressId } from "@/lib/sops/reading";
+import { isReadingComplete, readingProgressId, reconcileViewedPages } from "@/lib/sops/reading";
 import type { SopReadingProgress } from "@/types";
 
 const LS_PREFIX = "pharma_lms_sop_reading_";
@@ -37,16 +37,37 @@ function mergeProgress(
 ): SopReadingProgress | null {
   if (!a) return b;
   if (!b) return a;
-  const pagesSeen = Array.from(new Set([...(a.pagesSeen || []), ...(b.pagesSeen || [])])).sort(
-    (x, y) => x - y
-  );
-  const elapsedSeconds = Math.max(a.elapsedSeconds || 0, b.elapsedSeconds || 0);
-  const requiredSeconds = Math.max(a.requiredSeconds || 0, b.requiredSeconds || 0);
-  const pageCount = Math.max(a.pageCount || 0, b.pageCount || 0);
-  const reachedLastPage = Boolean(a.reachedLastPage || b.reachedLastPage);
-  const allPagesViewed = Boolean(a.allPagesViewed || b.allPagesViewed);
-  const completedAt = a.completedAt || b.completedAt;
   const newer = (a.updatedAt || "") >= (b.updatedAt || "") ? a : b;
+  const older = newer === a ? b : a;
+  const newerCount = newer.pageCount || 0;
+  const olderCount = older.pageCount || 0;
+  // A replaced PDF must not inherit the previous document's page count or "fully read" flag.
+  const documentChanged = newerCount > 0 && olderCount > 0 && newerCount !== olderCount;
+  const elapsedSeconds = documentChanged
+    ? newer.elapsedSeconds || 0
+    : Math.max(a.elapsedSeconds || 0, b.elapsedSeconds || 0);
+  const requiredSeconds = documentChanged
+    ? newer.requiredSeconds || 0
+    : Math.max(a.requiredSeconds || 0, b.requiredSeconds || 0);
+  const pageCount = documentChanged ? newerCount : Math.max(newerCount, olderCount);
+  const reachedLastPage = documentChanged
+    ? Boolean(newer.reachedLastPage)
+    : Boolean(a.reachedLastPage || b.reachedLastPage);
+  const viewed = reconcileViewedPages({
+    pageCount,
+    pagesSeen: documentChanged
+      ? [...(newer.pagesSeen || [])]
+      : [...(a.pagesSeen || []), ...(b.pagesSeen || [])],
+    reachedLastPage,
+    flaggedViewed: documentChanged
+      ? Boolean(newer.allPagesViewed)
+      : Boolean(a.allPagesViewed || b.allPagesViewed),
+  });
+  const pagesSeen = viewed.pagesSeen;
+  const allPagesViewed = viewed.allPagesViewed;
+  const completedAt = allPagesViewed
+    ? newer.completedAt || (documentChanged ? undefined : older.completedAt)
+    : undefined;
   return {
     ...newer,
     elapsedSeconds,
@@ -90,14 +111,11 @@ export async function saveSopReadingProgress(
     completedAt?: string;
   }
 ): Promise<SopReadingProgress> {
-  const complete = isReadingComplete({
-    elapsedSeconds: input.elapsedSeconds,
-    requiredSeconds: input.requiredSeconds,
-    allPagesViewed: input.allPagesViewed,
-  });
+  const id = readingProgressId(input.userId, input.versionId);
   const cached = readLocalCache(input.userId, input.versionId);
-  const progress: SopReadingProgress = {
-    id: readingProgressId(input.userId, input.versionId),
+  const now = nowISO();
+  const incoming: SopReadingProgress = {
+    id,
     sopId: input.sopId,
     versionId: input.versionId,
     versionNumber: input.versionNumber,
@@ -108,8 +126,36 @@ export async function saveSopReadingProgress(
     pagesSeen: Array.from(new Set(input.pagesSeen)).sort((a, b) => a - b),
     reachedLastPage: input.reachedLastPage,
     allPagesViewed: input.allPagesViewed,
-    completedAt: cached?.completedAt || input.completedAt || (complete ? nowISO() : undefined),
-    updatedAt: nowISO(),
+    completedAt: input.completedAt,
+    updatedAt: now,
+  };
+
+  let stored: SopReadingProgress | null = null;
+  if (isDemoMode()) {
+    stored =
+      readSopStore().readingProgress.find(
+        (p) => p.id === id || (p.userId === input.userId && p.versionId === input.versionId)
+      ) || null;
+  } else {
+    try {
+      const snap = await getDoc(doc(db, COLLECTIONS.sopReadingProgress, id));
+      stored = snap.exists() ? ({ id: snap.id, ...snap.data() } as SopReadingProgress) : null;
+    } catch (err) {
+      console.warn("[saveSopReadingProgress] remote read failed:", err);
+    }
+  }
+
+  const merged = mergeProgress(mergeProgress(stored, cached), incoming) || incoming;
+  const complete = isReadingComplete({
+    elapsedSeconds: merged.elapsedSeconds,
+    requiredSeconds: merged.requiredSeconds,
+    allPagesViewed: merged.allPagesViewed,
+  });
+  const progress: SopReadingProgress = {
+    ...merged,
+    id,
+    completedAt: merged.completedAt || (complete ? now : undefined),
+    updatedAt: now,
   };
 
   writeLocalCache(progress);

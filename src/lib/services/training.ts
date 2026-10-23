@@ -379,14 +379,16 @@ export async function getSessionAssignments(
 export async function markAttendance(
   sessionId: string,
   attendance: TrainingAttendance[],
-  actorId: string
+  actorId: string,
+  notes?: string
 ): Promise<void> {
   const now = nowISO();
+  const notesPatch = notes === undefined ? {} : { notes };
   if (preferTrainingLocal()) {
     const store = readTrainingStore();
     store.sessions = store.sessions.map((s) =>
       s.id === sessionId
-        ? { ...s, attendance, status: "in_progress", updatedAt: now, updatedBy: actorId }
+        ? { ...s, attendance, ...notesPatch, status: "in_progress", updatedAt: now, updatedBy: actorId }
         : s
     );
     writeTrainingStore(store);
@@ -395,6 +397,7 @@ export async function markAttendance(
 
   await updateDoc(doc(db, COLLECTIONS.trainingSessions, sessionId), {
     attendance: sanitizeForFirestore(attendance),
+    ...notesPatch,
     status: "in_progress",
     updatedAt: now,
     updatedBy: actorId,

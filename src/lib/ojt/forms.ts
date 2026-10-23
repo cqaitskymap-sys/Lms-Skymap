@@ -64,7 +64,7 @@ export function latestSignoff(
   doc: OjtFormDocument,
   role: OjtFormSignoffRole
 ): OjtFormSignoff | undefined {
-  return [...doc.signoffs].reverse().find((s) => s.role === role && s.action !== "rejected");
+  return [...doc.signoffs].reverse().find((s) => s.role === role);
 }
 
 export function hasAcceptedSignoff(doc: OjtFormDocument, role: OjtFormSignoffRole): boolean {

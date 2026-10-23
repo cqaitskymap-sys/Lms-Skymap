@@ -246,7 +246,7 @@ export async function precheckLogin(email: string): Promise<{
   }
 }
 
-export async function reportLoginFailure(email: string): Promise<{
+export async function reportLoginFailure(email: string, password: string): Promise<{
   message?: string;
   lockedUntil?: string | null;
   remainingAttempts?: number;
@@ -255,7 +255,7 @@ export async function reportLoginFailure(email: string): Promise<{
     const res = await fetch("/api/auth/failure", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email }),
+      body: JSON.stringify({ email, password }),
     });
     const data = (await res.json().catch(() => ({}))) as {
       message?: string;

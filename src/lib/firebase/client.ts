@@ -66,6 +66,7 @@ export const COLLECTIONS = {
   inductionModules: "induction_modules",
   inductionAssignments: "induction_assignments",
   jobDescriptions: "job_descriptions",
+  jdCatalog: "jd_catalog",
   tni: "training_need_identifications",
   sops: "sops",
   sopVersions: "sop_versions",
@@ -85,6 +86,8 @@ export const COLLECTIONS = {
   questions: "questions",
   exams: "exams",
   assessmentAttempts: "assessment_attempts",
+  /** Server-only answer keys for an in-progress attempt. Clients cannot read this. */
+  assessmentAttemptKeys: "assessment_attempt_keys",
   examResults: "exam_results",
   examLeaderboards: "exam_leaderboards",
   certificates: "certificates",

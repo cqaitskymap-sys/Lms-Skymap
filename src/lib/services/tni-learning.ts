@@ -62,8 +62,9 @@ export async function getEmployeeTniLearning(
   const items: TniLearningItem[] = sopIds.map((sopId) => {
     const sop = byId.get(sopId);
     const currentVersionId = sop?.currentVersionId || sop?.version?.id;
-    const acknowledged = acks.some(
-      (a) => a.sopId === sopId && (!currentVersionId || a.versionId === currentVersionId)
+    const acknowledged = Boolean(
+      currentVersionId &&
+        acks.some((a) => a.sopId === sopId && a.versionId === currentVersionId)
     );
     return {
       sopId,

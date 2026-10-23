@@ -11,6 +11,7 @@ interface ExamResultSummaryProps {
   attempt: AssessmentAttempt;
   exam: Exam;
   onReview?: () => void;
+  onBack?: () => void;
   leaderboardHref?: string;
 }
 
@@ -41,6 +42,7 @@ export function ExamResultSummary({
   attempt,
   exam,
   onReview,
+  onBack,
   leaderboardHref,
 }: ExamResultSummaryProps) {
   const passed = !!attempt.passed;
@@ -112,13 +114,34 @@ export function ExamResultSummary({
             </Button>
           )}
           {leaderboardHref && exam.leaderboardEnabled && (
-            <Button variant="outline" asChild>
-              <Link href={leaderboardHref}>Leaderboard</Link>
+            leaderboardHref.startsWith("#") ? (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  document.getElementById(leaderboardHref.slice(1))?.scrollIntoView({
+                    behavior: "smooth",
+                    block: "start",
+                  });
+                }}
+              >
+                Leaderboard
+              </Button>
+            ) : (
+              <Button variant="outline" asChild>
+                <Link href={leaderboardHref}>Leaderboard</Link>
+              </Button>
+            )
+          )}
+          {onBack ? (
+            <Button type="button" onClick={onBack}>
+              Back to exams
+            </Button>
+          ) : (
+            <Button asChild>
+              <Link href="/dashboard/exams">Back to exams</Link>
             </Button>
           )}
-          <Button asChild>
-            <Link href="/dashboard/exams">Back to exams</Link>
-          </Button>
         </div>
       </CardContent>
     </Card>

@@ -17,6 +17,7 @@ import {
 } from "@/lib/auth/onboarding-schemas";
 import { onboardEmployee, type OnboardResult } from "@/lib/services/onboarding";
 import { listDepartmentHeads } from "@/lib/services/users";
+import { localDateInputValue } from "@/lib/utils";
 import type { UserProfile, UserRole } from "@/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -56,7 +57,7 @@ export default function NewEmployeePage() {
       mobile: "",
       departmentId: "",
       designation: "",
-      dateOfJoining: new Date().toISOString().slice(0, 10),
+      dateOfJoining: "",
       reportingManagerId: "",
       reportingManagerName: "",
       employmentType: "permanent",
@@ -67,6 +68,10 @@ export default function NewEmployeePage() {
   const departmentId = watch("departmentId");
   const reportingManagerId = watch("reportingManagerId");
   const emailCredentials = watch("emailCredentials");
+
+  useEffect(() => {
+    setValue("dateOfJoining", localDateInputValue());
+  }, [setValue]);
 
   useEffect(() => {
     void listDepartmentHeads()
@@ -136,7 +141,7 @@ export default function NewEmployeePage() {
   if (result) {
     return (
       <RequirePermission permission={["employees:onboard", "employees:write"]} mode="any">
-        <div className="mx-auto max-w-2xl space-y-6">
+        <div className="w-full space-y-6">
           <div>
             <h1 className="text-2xl font-bold tracking-tight">Employee onboarded</h1>
             <p className="text-muted-foreground">
@@ -162,7 +167,7 @@ export default function NewEmployeePage() {
 
   return (
     <RequirePermission permission={["employees:onboard", "employees:write"]} mode="any">
-      <div className="mx-auto max-w-2xl space-y-6">
+      <div className="w-full space-y-6">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Employee onboarding</h1>
           <p className="text-muted-foreground">
@@ -203,8 +208,11 @@ export default function NewEmployeePage() {
           <CardContent>
             {!deptLoading && activeDepartments.length === 0 && (
               <p className="mb-4 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-900 dark:text-amber-100">
-                No departments found. Create departments first under Settings → Departments before
-                onboarding employees.
+                No departments found. Create them in{" "}
+                <Link href="/dashboard/departments" className="font-medium underline">
+                  Departments
+                </Link>{" "}
+                before onboarding employees.
               </p>
             )}
             <form onSubmit={handleSubmit(onSubmit)} className="grid gap-4 sm:grid-cols-2" noValidate>

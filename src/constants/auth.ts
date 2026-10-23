@@ -4,10 +4,10 @@
 
 export const AUTH_COOKIE_NAME = "__session";
 
-/** Session cookie lifetime when "Remember username" is checked (5 days). */
+/** Session cookie lifetime when "stay signed in" is checked (5 days). */
 export const SESSION_MAX_AGE_MS = 5 * 24 * 60 * 60 * 1000;
 
-/** Session cookie lifetime when "Remember password" is off (same browser session, max 12h). */
+/** Firebase session lifetime when stay-signed-in is off. The browser cookie itself ends with the session. */
 export const SESSION_TEMPORARY_MAX_AGE_MS = 12 * 60 * 60 * 1000;
 
 /** Idle timeout for client-side warning / soft logout (30 minutes). */

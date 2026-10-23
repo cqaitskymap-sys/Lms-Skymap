@@ -1,6 +1,7 @@
 "use client";
 
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { CheckCircle2, FileSignature, Loader2, Pencil, Printer, Sparkles } from "lucide-react";
@@ -40,7 +41,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { RequirePermission, Can } from "@/components/auth/require-permission";
 import { AdminDeleteButton } from "@/components/auth/admin-delete-button";
 import { escapeHtml, printHtml } from "@/lib/print";
-import { calendarDateToIso } from "@/lib/utils";
+import { calendarDateToIso, localDateInputValue } from "@/lib/utils";
 import {
   Select,
   SelectContent,
@@ -49,14 +50,21 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { ROLE_LABELS } from "@/lib/rbac/permissions";
+import { resolveJdCatalog, snapshotFromMaster, type JdMasterRecord } from "@/lib/jd/catalog-master";
 import {
   allResponsibilityLines,
-  designationsForDepartment,
-  findDesignation,
+  designationsFromSnapshot,
+  findDesignationInSnapshot,
   matchSavedResponsibilities,
-  sectionsForDepartment,
+  sectionsFromSnapshot,
   selectedResponsibilityTexts,
+  type JdCatalogSnapshot,
 } from "@/lib/jd/responsibility-catalog";
+import {
+  JD_CATALOG_UPDATED_EVENT,
+  listJdMasters,
+  saveJdMaster,
+} from "@/lib/services/jd-catalog";
 import type { Department, Employee, JobDescription, JdSignoff, UserProfile, UserRole } from "@/types";
 
 const SUB_DEPARTMENT_STORAGE_PREFIX = "jd-sub-departments:";
@@ -282,15 +290,19 @@ function JdPageInner() {
   const [supersedesNo, setSupersedesNo] = useState("");
   const [records, setRecords] = useState<JobDescription[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [effectiveFrom, setEffectiveFrom] = useState(
-    new Date().toISOString().slice(0, 10)
-  );
+  const [effectiveFrom, setEffectiveFrom] = useState("");
   const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    setEffectiveFrom(localDateInputValue());
+  }, []);
   const [aiBusy, setAiBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [assignedIds, setAssignedIds] = useState<Set<string>>(new Set());
   const [myPendingSignoffs, setMyPendingSignoffs] = useState<JdPendingSignoffRow[]>([]);
+  const [jdMasters, setJdMasters] = useState<JdMasterRecord[]>([]);
+  const [jdMastersReady, setJdMastersReady] = useState(false);
 
   const actor: LifecycleActor | null = useMemo(() => {
     if (!profile) return null;
@@ -475,6 +487,27 @@ function JdPageInner() {
     setSavedSubDepartments(readSavedSubDepartments(departmentId));
   }, [departmentId]);
 
+  useEffect(() => {
+    let cancelled = false;
+    const loadMasters = () => {
+      listJdMasters()
+        .then((rows) => {
+          if (cancelled) return;
+          setJdMasters(rows);
+          setJdMastersReady(true);
+        })
+        .catch(() => {
+          /* Keep the last good lists. Saving stays blocked until a load succeeds. */
+        });
+    };
+    loadMasters();
+    window.addEventListener(JD_CATALOG_UPDATED_EVENT, loadMasters);
+    return () => {
+      cancelled = true;
+      window.removeEventListener(JD_CATALOG_UPDATED_EVENT, loadMasters);
+    };
+  }, []);
+
   const scopedEmployees = useMemo(() => {
     if (employeeScopeId) {
       return employees.filter((e) => e.id === employeeScopeId);
@@ -553,17 +586,22 @@ function JdPageInner() {
     [departments, departmentId]
   );
 
+  const catalogSnapshot = useMemo((): JdCatalogSnapshot => {
+    if (!selectedDepartment) return { sections: [], designations: [] };
+    const saved = snapshotFromMaster(
+      jdMasters.find((row) => row.departmentId === selectedDepartment.id)
+    );
+    return resolveJdCatalog(selectedDepartment, saved);
+  }, [selectedDepartment, jdMasters]);
+
   const catalogSections = useMemo(
-    () => (selectedDepartment ? sectionsForDepartment(selectedDepartment) : []),
-    [selectedDepartment]
+    () => sectionsFromSnapshot(catalogSnapshot),
+    [catalogSnapshot]
   );
 
   const catalogDesignations = useMemo(
-    () =>
-      selectedDepartment
-        ? designationsForDepartment(selectedDepartment, subDepartment)
-        : [],
-    [selectedDepartment, subDepartment]
+    () => designationsFromSnapshot(catalogSnapshot, subDepartment),
+    [catalogSnapshot, subDepartment]
   );
 
   const selectedDesignation = useMemo(
@@ -640,7 +678,7 @@ function JdPageInner() {
     setQualifications("");
     setExperience("");
     setSupersedesNo("");
-    setEffectiveFrom(new Date().toISOString().slice(0, 10));
+    setEffectiveFrom(localDateInputValue());
     setEmployeeId("");
     setHandoverEmployeeId("");
     setAssignedByEmployeeId("");
@@ -695,9 +733,13 @@ function JdPageInner() {
       employees.find((x) => x.id === employeeId)?.departmentId ||
       "";
     const catalogDept = departments.find((d) => d.id === deptForCatalog);
-    const catalogRows = catalogDept
-      ? designationsForDepartment(catalogDept, subDepartment)
-      : [];
+    const saveSnapshot = catalogDept
+      ? resolveJdCatalog(
+          catalogDept,
+          snapshotFromMaster(jdMasters.find((row) => row.departmentId === catalogDept.id))
+        )
+      : { sections: [], designations: [] };
+    const catalogRows = designationsFromSnapshot(saveSnapshot, subDepartment);
     const chosenDesignation = catalogRows.find((row) => row.id === designationId) || null;
     const resolvedTitle = jobTitle.trim() || chosenDesignation?.designation || "";
     if (!resolvedTitle) {
@@ -705,7 +747,7 @@ function JdPageInner() {
       return;
     }
     let parsedResp = manualResp;
-    const sectionCatalog = catalogDept ? sectionsForDepartment(catalogDept).length > 0 : false;
+    const sectionCatalog = sectionsFromSnapshot(saveSnapshot).length > 0;
     if (catalogRows.length) {
       if (sectionCatalog && !subDepartment.trim()) {
         toast.error("Add a sub department");
@@ -951,7 +993,14 @@ function JdPageInner() {
     setSubDepartmentDraft("");
     const dept = departments.find((d) => d.id === record.departmentId);
     const matched = dept
-      ? findDesignation(dept, record.title, record.subDepartment)
+      ? findDesignationInSnapshot(
+          resolveJdCatalog(
+            dept,
+            snapshotFromMaster(jdMasters.find((row) => row.departmentId === dept.id))
+          ),
+          record.title,
+          record.subDepartment
+        )
       : undefined;
     if (matched) {
       const restored = matchSavedResponsibilities(matched, record.responsibilities || []);
@@ -1352,7 +1401,7 @@ function JdPageInner() {
     setSelectedResponsibilityIds([]);
   }
 
-  function addSubDepartment() {
+  async function addSubDepartment() {
     const name = subDepartmentDraft.trim();
     if (!departmentId) {
       toast.error("Select a department first");
@@ -1362,8 +1411,38 @@ function JdPageInner() {
       toast.error("Enter a sub department");
       return;
     }
-    rememberSubDepartment(departmentId, name);
-    setSavedSubDepartments(readSavedSubDepartments(departmentId));
+    const catalogMatch = catalogSnapshot.sections.find(
+      (row) => row.name.toLowerCase() === name.toLowerCase()
+    );
+    if (catalogMatch) {
+      setSubDepartment(catalogMatch.name);
+      setSubDepartmentDraft("");
+      setDesignationId("");
+      setSelectedResponsibilityIds([]);
+      return;
+    }
+    if (profile?.role === "super_admin" && selectedDepartment) {
+      if (!jdMastersReady) {
+        toast.error("Department lists are still loading. Wait a moment, then add again.");
+        return;
+      }
+      try {
+        await saveJdMaster({
+          departmentId: selectedDepartment.id,
+          sections: [...catalogSnapshot.sections, { name, designations: [] }],
+          designations: catalogSnapshot.designations,
+          updatedBy: profile.uid,
+        });
+        toast.success("Sub department saved. Add its designation from Manage lists.");
+      } catch (err) {
+        rememberSubDepartment(departmentId, name);
+        setSavedSubDepartments(readSavedSubDepartments(departmentId));
+        toast.error(err instanceof Error ? err.message : "Could not save sub department");
+      }
+    } else {
+      rememberSubDepartment(departmentId, name);
+      setSavedSubDepartments(readSavedSubDepartments(departmentId));
+    }
     setSubDepartment(name);
     setSubDepartmentDraft("");
     setDesignationId("");
@@ -1399,12 +1478,19 @@ function JdPageInner() {
   return (
     <RequirePermission permission="jd:read">
       <div className="w-full space-y-6">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">Job Description</h1>
-          <p className="text-muted-foreground">
-            Department Head creates JD after handover
-            {deptScopeId && ` · ${departmentLabel(departments, deptScopeId)}`}
-          </p>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight">Job Description</h1>
+            <p className="text-muted-foreground">
+              Department Head creates JD after handover
+              {deptScopeId && ` · ${departmentLabel(departments, deptScopeId)}`}
+            </p>
+          </div>
+          {profile?.role === "super_admin" && (
+            <Button variant="outline" asChild>
+              <Link href="/dashboard/jd/masters">Manage lists</Link>
+            </Button>
+          )}
         </div>
 
         <JdHandoverPendingCard />
@@ -1550,11 +1636,11 @@ function JdPageInner() {
                       onKeyDown={(e) => {
                         if (e.key === "Enter") {
                           e.preventDefault();
-                          addSubDepartment();
+                          void addSubDepartment();
                         }
                       }}
                     />
-                    <Button type="button" variant="secondary" onClick={addSubDepartment}>
+                    <Button type="button" variant="secondary" onClick={() => void addSubDepartment()}>
                       Add
                     </Button>
                   </div>
@@ -1634,14 +1720,14 @@ function JdPageInner() {
                       </div>
                     </div>
                     <div className="max-h-96 space-y-4 overflow-y-auto rounded-md border p-3">
-                      {selectedDesignation.groups.map((group) => (
-                        <div key={group.code} className="space-y-2">
+                      {selectedDesignation.groups.map((group, groupIndex) => (
+                        <div key={`${selectedDesignation.id}-${groupIndex}`} className="space-y-2">
                           <p className="text-sm font-medium">
-                            {group.code}. {group.title}
+                            {group.code ? `${group.code}. ${group.title}` : group.title}
                           </p>
-                          {group.lines.map((line) => (
+                          {group.lines.map((line, lineIndex) => (
                             <label
-                              key={line.id}
+                              key={`${line.id}-${lineIndex}`}
                               className="flex cursor-pointer items-start gap-2 text-sm leading-snug"
                             >
                               <Checkbox
@@ -1767,7 +1853,7 @@ function JdPageInner() {
                     with intimation to the assignee.
                   </p>
                   {handoverEmployeeId && !selectedHandover?.userId && (
-                    <p className="text-xs text-amber-700">
+                    <p className="text-xs text-amber-700 dark:text-amber-200">
                       This person has no login account, so they will not receive a
                       notification.
                     </p>
@@ -1819,7 +1905,7 @@ function JdPageInner() {
                       appears on the JD.
                     </p>
                     {selectedAssigned && !selectedAssigned.userId && (
-                      <p className="text-xs text-amber-700">
+                      <p className="text-xs text-amber-700 dark:text-amber-200">
                         This person has no login account, so they will not receive a
                         notification.
                       </p>
@@ -1867,7 +1953,7 @@ function JdPageInner() {
                       appears on the JD.
                     </p>
                     {selectedAccepted && !selectedAccepted.userId && (
-                      <p className="text-xs text-amber-700">
+                      <p className="text-xs text-amber-700 dark:text-amber-200">
                         This person has no login account, so they will not receive a
                         notification.
                       </p>

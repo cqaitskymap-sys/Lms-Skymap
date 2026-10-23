@@ -1,11 +1,7 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { z } from "zod";
-import {
-  unauthorized,
-  verifyAuthDetailed,
-  requirePermission,
-} from "@/lib/rbac/middleware";
+import { unauthorized, verifyAuthDetailed, requirePermission, authHttpStatus } from "@/lib/rbac/middleware";
 import {
   extractJsonObject,
   isOpenRouterConfigured,
@@ -29,7 +25,7 @@ const ALLOWED_TYPES = new Set(["mcq", "true_false", "multi_select", "scenario"])
 export async function POST(request: NextRequest) {
   const verified = await verifyAuthDetailed(request);
   if (!verified.ok) {
-    const status = verified.reason === "admin_not_configured" ? 503 : 401;
+    const status = authHttpStatus(verified.reason);
     return unauthorized(verified.message, status);
   }
 

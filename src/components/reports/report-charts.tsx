@@ -62,8 +62,15 @@ export function ReportCharts({ dataset }: ReportChartsProps) {
               ) : chart.kind === "line" ? (
                 <LineChart data={chart.data}>
                   <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
-                  <XAxis dataKey="name" tick={{ fontSize: 11 }} />
-                  <YAxis tick={{ fontSize: 11 }} />
+                  <XAxis
+                    dataKey="name"
+                    tick={{ fontSize: 11, fill: "hsl(var(--foreground))" }}
+                    stroke="hsl(var(--border))"
+                  />
+                  <YAxis
+                    tick={{ fontSize: 11, fill: "hsl(var(--foreground))" }}
+                    stroke="hsl(var(--border))"
+                  />
                   <Tooltip />
                   <Line
                     type="monotone"
@@ -75,8 +82,15 @@ export function ReportCharts({ dataset }: ReportChartsProps) {
               ) : (
                 <BarChart data={chart.data}>
                   <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
-                  <XAxis dataKey="name" tick={{ fontSize: 11 }} />
-                  <YAxis tick={{ fontSize: 11 }} />
+                  <XAxis
+                    dataKey="name"
+                    tick={{ fontSize: 11, fill: "hsl(var(--foreground))" }}
+                    stroke="hsl(var(--border))"
+                  />
+                  <YAxis
+                    tick={{ fontSize: 11, fill: "hsl(var(--foreground))" }}
+                    stroke="hsl(var(--border))"
+                  />
                   <Tooltip />
                   <Bar dataKey="value" fill={PALETTE[0]} radius={[4, 4, 0, 0]} />
                 </BarChart>

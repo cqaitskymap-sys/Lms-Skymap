@@ -116,11 +116,18 @@ export function OjtFormApprovalPanel({
             <Label>Effective Date</Label>
             <Input
               type="date"
-              value={effectiveDate || form?.effectiveDate?.slice(0, 10) || ""}
+              value={effectiveDate}
               disabled={!canWrite || form?.locked}
               onChange={(e) => setEffectiveDate(e.target.value)}
               onBlur={() => {
-                if (!profile || !departmentId || !effectiveDate || form?.locked) return;
+                if (!profile || !departmentId || form?.locked) return;
+                const saved = form?.effectiveDate?.slice(0, 10) || "";
+                if (!effectiveDate) {
+                  setEffectiveDate(saved);
+                  if (saved) toast.error("Effective date is required");
+                  return;
+                }
+                if (effectiveDate === saved) return;
                 void run(
                   () =>
                     updateOjtFormDocumentMeta(
@@ -147,7 +154,9 @@ export function OjtFormApprovalPanel({
 
         <div className="grid gap-2 md:grid-cols-2 lg:grid-cols-3">
           {SIGNOFF_ORDER.map((role) => {
-            const signed = form ? latestSignoff(form, role) : undefined;
+            const latest = form ? latestSignoff(form, role) : undefined;
+            const signed = latest && latest.action !== "rejected" ? latest : undefined;
+            const rejected = latest?.action === "rejected" ? latest : undefined;
             const labels = OJT_FORM_SIGNOFF_LABELS[role];
             const action =
               role === "prepared_by" ? "prepared" : role === "approved_by_qa" ? "approved" : "checked";
@@ -160,6 +169,10 @@ export function OjtFormApprovalPanel({
                 {signed ? (
                   <p className="mt-2 text-xs">
                     {signed.userName} · {formatOfficialDate(signed.timestamp)}
+                  </p>
+                ) : rejected ? (
+                  <p className="mt-2 text-xs text-destructive">
+                    Rejected by {rejected.userName} · {formatOfficialDate(rejected.timestamp)}
                   </p>
                 ) : (
                   <p className="mt-2 text-xs text-muted-foreground">Sign & Date pending</p>

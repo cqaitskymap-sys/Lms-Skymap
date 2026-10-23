@@ -71,7 +71,7 @@ function VerifyInner() {
 
   useEffect(() => {
     if (!result || loading) return;
-    resultAnchor.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    resultAnchor.current?.scrollIntoView({ behavior: "smooth", block: "center" });
   }, [result, loading]);
 
   return (
@@ -84,7 +84,7 @@ function VerifyInner() {
     >
       <div className="mx-auto max-w-4xl space-y-6">
         <div className="text-center">
-          <Link href="/" className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground">
+          <Link href="/" aria-label="SKYMAP home" className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground">
             <BrandLogo className="h-8 w-auto object-contain" />
           </Link>
           <div className="mt-4 flex items-center justify-center gap-2">
@@ -113,8 +113,9 @@ function VerifyInner() {
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-2">
-              <Label>Certificate number</Label>
+              <Label htmlFor="certificate-number">Certificate number</Label>
               <Input
+                id="certificate-number"
                 value={number}
                 onChange={(e) => setNumber(e.target.value)}
                 placeholder="CERT-2026-XXXXXX"

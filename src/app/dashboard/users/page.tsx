@@ -214,9 +214,10 @@ export default function UserManagementPage() {
 
     setActionUserId(user.uid);
     try {
-      await updateStaffUser(user.uid, { isActive: !user.isActive });
+      const active = user.isActive !== false;
+      await updateStaffUser(user.uid, { isActive: !active });
       await loadUsers();
-      toast.success(user.isActive !== false ? "Account deactivated" : "Account activated");
+      toast.success(active ? "Account deactivated" : "Account activated");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Update failed");
     } finally {
@@ -375,7 +376,11 @@ export default function UserManagementPage() {
                 <div className="space-y-2 md:col-span-2">
                   <Label>Department {role === "department_head" ? "" : "(optional)"}</Label>
                   <Select
-                    value={role === "trainer" ? departmentId || "__none" : departmentId || ""}
+                    value={
+                      role === "trainer"
+                        ? departmentId || "__none"
+                        : departmentId || undefined
+                    }
                     onValueChange={(v) =>
                       setValue("departmentId", v === "__none" ? "" : v, { shouldValidate: true })
                     }

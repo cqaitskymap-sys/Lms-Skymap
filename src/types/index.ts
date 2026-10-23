@@ -760,6 +760,8 @@ export interface AssessmentAttempt extends Timestamps {
   employeeId: string;
   employeeName?: string;
   assignmentId?: string;
+  /** SOP version this attempt was started against. A later revision must not inherit the score. */
+  sopVersionId?: string;
   inductionAssignmentId?: string;
   /** Staff practice run. Scored for the sitter, excluded from training and certificates. */
   preview?: boolean;

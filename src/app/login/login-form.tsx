@@ -57,7 +57,10 @@ function LoginForm() {
     if (!saved) return;
     setRememberPassword(true);
     setValue("email", saved.identifier);
-  }, [setValue]);
+    if (isDemo && saved.identifier.trim().toLowerCase() !== "admin@pharma.local") {
+      setValue("password", "");
+    }
+  }, [isDemo, setValue]);
 
   const deactivated = searchParams.get("error") === "deactivated";
 
@@ -220,16 +223,14 @@ function LoginForm() {
                     id="remember-password"
                     checked={rememberPassword}
                     onCheckedChange={(checked) => {
-                      const on = checked === true;
-                      setRememberPassword(on);
-                      if (!on) clearRememberedLogin();
+                      setRememberPassword(checked === true);
                     }}
                   />
                   <Label
                     htmlFor="remember-password"
                     className="cursor-pointer text-sm font-normal leading-none"
                   >
-                    Remember username
+                    Remember username and stay signed in
                   </Label>
                 </div>
                 <Button type="submit" className="mt-1 h-11 w-full rounded-xl" disabled={isSubmitting}>

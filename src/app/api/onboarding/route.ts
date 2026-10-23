@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
-import { verifyAuthDetailed, unauthorized, writeAuditLog } from "@/lib/rbac/middleware";
+import { verifyAuthDetailed, unauthorized, writeAuditLog, authHttpStatus } from "@/lib/rbac/middleware";
 import { ROLE_DASHBOARD_ROUTES } from "@/lib/rbac/permissions";
 import { adminDb } from "@/lib/firebase/admin";
 import { COLLECTIONS } from "@/lib/firebase/client";
@@ -18,7 +18,7 @@ import {
 export async function GET(request: NextRequest) {
   const verified = await verifyAuthDetailed(request);
   if (!verified.ok) {
-    const status = verified.reason === "admin_not_configured" ? 503 : 401;
+    const status = authHttpStatus(verified.reason);
     return unauthorized(verified.message, status);
   }
 
@@ -52,7 +52,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const verified = await verifyAuthDetailed(request);
   if (!verified.ok) {
-    const status = verified.reason === "admin_not_configured" ? 503 : 401;
+    const status = authHttpStatus(verified.reason);
     return unauthorized(verified.message, status);
   }
   const auth = verified.auth;
@@ -177,7 +177,7 @@ export async function POST(request: NextRequest) {
     await adminDb.collection(COLLECTIONS.activityLogs).doc(actId).set({
       id: actId,
       userId: auth.uid,
-      employeeId: profile.employeeId,
+      ...(profile.employeeId ? { employeeId: profile.employeeId } : {}),
       verb: "policies_accepted",
       summary: `Accepted company policies v${parsed.data.version}`,
       resourceType: "company_policies",
@@ -240,7 +240,7 @@ export async function POST(request: NextRequest) {
     await adminDb.collection(COLLECTIONS.activityLogs).doc(actId).set({
       id: actId,
       userId: auth.uid,
-      employeeId: fresh.employeeId,
+      ...(fresh.employeeId ? { employeeId: fresh.employeeId } : {}),
       verb: "onboarding_completed",
       summary: "First-login onboarding completed",
       resourceType: "user",

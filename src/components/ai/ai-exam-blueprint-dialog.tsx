@@ -107,17 +107,17 @@ export function AiExamBlueprintDialog({ banks, onSaved }: Props) {
     }
     setSaving(true);
     try {
+      const requested = Math.max(1, Math.round(Number(blueprint.questionCount)) || 5);
+      let generatedCount = 0;
       if (alsoGenerateQuestions) {
         const { questions } = await generateQuestionsWithAi({
           topic: topic.trim() || blueprint.title,
           context: context.trim() || blueprint.description,
-          count: Math.min(
-            10,
-            Math.max(1, Math.round(Number(blueprint.questionCount)) || 5)
-          ),
+          count: Math.min(10, requested),
           difficulty: "mixed",
           types: ["mcq", "true_false", "scenario"],
         });
+        generatedCount = questions.length;
         for (const q of questions) {
           await createQuestion(
             {
@@ -138,13 +138,21 @@ export function AiExamBlueprintDialog({ banks, onSaved }: Props) {
         }
       }
 
+      const bank = activeBanks.find((item) => item.id === bankId);
+      const available = Math.max(0, bank?.questionCount || 0) + generatedCount;
+      if (available < 1) {
+        toast.error("This bank has no questions yet. Generate questions or choose another bank.");
+        return;
+      }
+      const questionCount = Math.min(requested, available);
+
       await createExam(
         {
           title: blueprint.title,
           description: blueprint.description,
           bankId,
           sopId,
-          questionCount: blueprint.questionCount,
+          questionCount,
           durationMinutes: blueprint.durationMinutes,
           passPercentage: blueprint.passPercentage,
           shuffleQuestions: blueprint.shuffleQuestions,
@@ -187,7 +195,7 @@ export function AiExamBlueprintDialog({ banks, onSaved }: Props) {
             Exam blueprint (AI)
           </Button>
         </DialogTrigger>
-        <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
+        <DialogContent className="max-h-[90vh] max-w-2xl">
           <DialogHeader>
             <DialogTitle>AI exam blueprint</DialogTitle>
             <DialogDescription>

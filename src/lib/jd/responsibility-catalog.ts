@@ -849,6 +849,54 @@ export function matchSavedResponsibilities(
   return { ids, extra };
 }
 
+export interface JdCatalogSnapshot {
+  sections: JdCatalogSection[];
+  designations: JdDesignationResponsibilities[];
+}
+
+function cloneCatalog<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
+/** Built-in lists for a department. A copy, so edits do not change the original. */
+export function builtinCatalogSnapshot(dept: { name: string; code: string }): JdCatalogSnapshot {
+  const entry = catalogForDepartment(dept);
+  return {
+    sections: entry?.sections ? cloneCatalog(entry.sections) : [],
+    designations: entry?.designations ? cloneCatalog(entry.designations) : [],
+  };
+}
+
+export function sectionsFromSnapshot(snapshot: JdCatalogSnapshot): string[] {
+  return snapshot.sections.map((section) => section.name);
+}
+
+export function designationsFromSnapshot(
+  snapshot: JdCatalogSnapshot,
+  sectionName?: string
+): JdDesignationResponsibilities[] {
+  if (snapshot.sections.length) {
+    const wanted = norm(sectionName || "");
+    if (!wanted) return [];
+    return (
+      snapshot.sections.find((section) => norm(section.name) === wanted)?.designations ?? []
+    );
+  }
+  return snapshot.designations;
+}
+
+export function findDesignationInSnapshot(
+  snapshot: JdCatalogSnapshot,
+  title: string,
+  sectionName?: string
+): JdDesignationResponsibilities | undefined {
+  const wanted = norm(title);
+  if (!wanted) return undefined;
+  return designationsFromSnapshot(snapshot, sectionName).find(
+    (row) => norm(row.designation) === wanted
+  );
+}
+
 function catalogForDepartment(dept: { name: string; code: string }): CatalogDepartment | undefined {
   const name = norm(dept.name);
   const code = norm(dept.code);

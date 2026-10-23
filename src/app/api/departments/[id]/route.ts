@@ -1,11 +1,6 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
-import {
-  unauthorized,
-  verifyAuthDetailed,
-  requirePermission,
-  writeAuditLog,
-} from "@/lib/rbac/middleware";
+import { unauthorized, verifyAuthDetailed, requirePermission, writeAuditLog, authHttpStatus } from "@/lib/rbac/middleware";
 import { FieldValue } from "firebase-admin/firestore";
 import { adminDb, isAdminConfigured } from "@/lib/firebase/admin";
 import { COLLECTIONS } from "@/lib/firebase/client";
@@ -22,7 +17,7 @@ export async function PATCH(
 
   const verified = await verifyAuthDetailed(request);
   if (!verified.ok) {
-    const status = verified.reason === "admin_not_configured" ? 503 : 401;
+    const status = authHttpStatus(verified.reason);
     return unauthorized(verified.message, status);
   }
 
@@ -124,7 +119,7 @@ export async function DELETE(
 
   const verified = await verifyAuthDetailed(request);
   if (!verified.ok) {
-    const status = verified.reason === "admin_not_configured" ? 503 : 401;
+    const status = authHttpStatus(verified.reason);
     return unauthorized(verified.message, status);
   }
 

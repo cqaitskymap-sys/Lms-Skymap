@@ -1,11 +1,6 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
-import {
-  unauthorized,
-  verifyAuthDetailed,
-  requirePermission,
-  writeAuditLog,
-} from "@/lib/rbac/middleware";
+import { unauthorized, verifyAuthDetailed, requirePermission, writeAuditLog, invalidateAuthCache, authHttpStatus } from "@/lib/rbac/middleware";
 import { adminAuth, adminDb, isAdminConfigured } from "@/lib/firebase/admin";
 import { COLLECTIONS } from "@/lib/firebase/client";
 import { generateTemporaryPassword } from "@/lib/onboarding/temp-password";
@@ -21,7 +16,7 @@ export async function POST(
 
   const verified = await verifyAuthDetailed(request);
   if (!verified.ok) {
-    const status = verified.reason === "admin_not_configured" ? 503 : 401;
+    const status = authHttpStatus(verified.reason);
     return unauthorized(verified.message, status);
   }
 
@@ -58,6 +53,7 @@ export async function POST(
   try {
     await adminAuth.updateUser(id, { password: temporaryPassword });
     await adminAuth.revokeRefreshTokens(id);
+    invalidateAuthCache(id);
   } catch (err) {
     return NextResponse.json(
       {

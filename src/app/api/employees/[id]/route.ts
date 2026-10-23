@@ -1,11 +1,6 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
-import {
-  invalidateAuthCache,
-  unauthorized,
-  verifyAuthDetailed,
-  writeAuditLog,
-} from "@/lib/rbac/middleware";
+import { invalidateAuthCache, unauthorized, verifyAuthDetailed, writeAuditLog, authHttpStatus } from "@/lib/rbac/middleware";
 import { hasPermission } from "@/lib/rbac/permissions";
 import { adminAuth, adminDb, isAdminConfigured } from "@/lib/firebase/admin";
 import { COLLECTIONS } from "@/lib/firebase/client";
@@ -57,7 +52,7 @@ export async function PATCH(
   if (!verified.ok) {
     return unauthorized(
       verified.message,
-      verified.reason === "admin_not_configured" ? 503 : 401
+      authHttpStatus(verified.reason)
     );
   }
   const auth = verified.auth;
@@ -351,7 +346,7 @@ export async function DELETE(
   if (!verified.ok) {
     return unauthorized(
       verified.message,
-      verified.reason === "admin_not_configured" ? 503 : 401
+      authHttpStatus(verified.reason)
     );
   }
   const auth = verified.auth;
@@ -372,6 +367,26 @@ export async function DELETE(
 
   const employee = { id: empSnap.id, ...empSnap.data() } as Employee;
   const userId = employee.userId;
+
+  if (userId) {
+    try {
+      await adminAuth.deleteUser(userId);
+    } catch (err) {
+      const code =
+        err && typeof err === "object" && "code" in err
+          ? String((err as { code?: string }).code)
+          : "";
+      if (code !== "auth/user-not-found") {
+        return NextResponse.json(
+          {
+            success: false,
+            error: "Could not remove the sign-in account. The employee was not deleted.",
+          },
+          { status: 500 }
+        );
+      }
+    }
+  }
 
   await deleteQueryBatch(COLLECTIONS.lifecycleEvents, "employeeId", id);
   await deleteQueryBatch(COLLECTIONS.lifecycleApprovals, "employeeId", id);
@@ -394,21 +409,12 @@ export async function DELETE(
     await deleteQueryBatch(COLLECTIONS.policyAcceptances, "userId", userId);
   }
 
-  await empRef.delete();
-
   if (userId) {
     invalidateAuthCache(userId);
-    try {
-      await adminDb.collection(COLLECTIONS.users).doc(userId).delete();
-    } catch {
-      /* best-effort */
-    }
-    try {
-      await adminAuth.deleteUser(userId);
-    } catch {
-      /* user may already be removed from Auth */
-    }
+    await adminDb.collection(COLLECTIONS.users).doc(userId).delete();
   }
+
+  await empRef.delete();
 
   await writeAuditLog({
     actorId: auth.uid,

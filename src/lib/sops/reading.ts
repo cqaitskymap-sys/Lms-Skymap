@@ -22,6 +22,28 @@ export function formatReadingClock(totalSeconds: number): string {
   return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
 
+/** Drop page numbers from a replaced PDF and only keep a viewed flag the pages still support. */
+export function reconcileViewedPages(params: {
+  pageCount: number;
+  pagesSeen: number[];
+  reachedLastPage: boolean;
+  flaggedViewed?: boolean;
+}): { pagesSeen: number[]; allPagesViewed: boolean } {
+  const pageCount = Math.max(0, Math.floor(params.pageCount));
+  const pagesSeen = Array.from(
+    new Set(
+      params.pagesSeen.filter(
+        (page) => Number.isInteger(page) && page >= 1 && (pageCount <= 0 || page <= pageCount)
+      )
+    )
+  ).sort((a, b) => a - b);
+  const allPagesViewed =
+    pageCount > 0
+      ? pagesSeen.length >= pageCount && params.reachedLastPage
+      : Boolean(params.flaggedViewed);
+  return { pagesSeen, allPagesViewed };
+}
+
 export function isReadingComplete(params: {
   elapsedSeconds: number;
   requiredSeconds: number;

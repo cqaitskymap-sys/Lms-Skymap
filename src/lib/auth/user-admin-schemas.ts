@@ -93,7 +93,10 @@ export const updateAdminUserSchema = z
     allowedModules: z.array(appModuleSchema).optional(),
   })
   .refine(
-    (data) => data.role !== "department_head" || Boolean(data.departmentId),
+    (data) =>
+      data.role !== "department_head" ||
+      data.departmentId === undefined ||
+      Boolean(data.departmentId),
     { message: "Department is required for Department Head", path: ["departmentId"] }
   );
 

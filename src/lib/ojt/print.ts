@@ -12,7 +12,7 @@ import { escapeHtml, printHtml } from "@/lib/print";
 
 function signLine(doc: OjtFormDocument | null, role: Parameters<typeof latestSignoff>[1]) {
   const s = doc ? latestSignoff(doc, role) : undefined;
-  if (!s) return "Sign &amp; Date";
+  if (!s || s.action === "rejected") return "Sign &amp; Date";
   return `${escapeHtml(s.userName)} · ${formatOfficialDate(s.timestamp)}`;
 }
 

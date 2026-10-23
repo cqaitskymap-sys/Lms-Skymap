@@ -55,6 +55,22 @@ import type { AssessmentAttempt, Exam, SopDocument, TrainingAssignment } from "@
 
 type Phase = "list" | "exam" | "result" | "review";
 
+const OPEN_TRAINING = new Set([
+  "assigned",
+  "in_progress",
+  "training_scheduled",
+  "training_completed",
+]);
+
+function latestActiveSopExam(rows: Exam[], sopId?: string): Exam | undefined {
+  if (!sopId) return undefined;
+  return rows
+    .filter((exam) => exam.sopId === sopId && exam.isActive && !exam.inductionModuleId)
+    .sort((a, b) =>
+      (b.updatedAt || b.createdAt || "").localeCompare(a.updatedAt || a.createdAt || "")
+    )[0];
+}
+
 function ExamsPageInner() {
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -239,12 +255,17 @@ function ExamsPageInner() {
     if (e.inductionModuleId) return Boolean(inductionAssignmentByModule[e.inductionModuleId]);
     if (!e.sopId) return false;
     if (!intendedSopIds.has(e.sopId)) return false;
-    if (acknowledgedSopIds.has(e.sopId)) return true;
-    return myAssignments.some(
+    const ready = myAssignments.some(
       (a) =>
         a.sopId === e.sopId &&
         (a.status === "assessment_pending" || a.status === "retraining")
     );
+    const stillTraining = myAssignments.some(
+      (a) => a.sopId === e.sopId && OPEN_TRAINING.has(a.status)
+    );
+    if (stillTraining && !ready) return false;
+    if (acknowledgedSopIds.has(e.sopId)) return true;
+    return ready;
   };
 
   const assignmentForExam = (sopId?: string) =>
@@ -288,6 +309,7 @@ function ExamsPageInner() {
     if (phase !== "exam" || !attempt || !exam?.autoSaveEnabled || !profile) return;
     const interval = (exam.autoSaveIntervalSeconds || 15) * 1000;
     const id = setInterval(() => {
+      if (submittingRef.current) return;
       setSaving(true);
       void autoSaveAssessment(attempt.id, answersRef.current, profile.uid)
         .then(() => setLastSavedAt(new Date().toISOString()))
@@ -445,11 +467,12 @@ function ExamsPageInner() {
 
   if (phase === "result" && attempt && exam) {
     return (
-      <div className="mx-auto max-w-2xl space-y-6">
+      <div className="w-full space-y-6">
         <ExamResultSummary
           attempt={attempt}
           exam={exam}
           onReview={exam.allowReview ? () => setPhase("review") : undefined}
+          onBack={() => setPhase("list")}
           leaderboardHref={exam.leaderboardEnabled ? "#leaderboard" : undefined}
         />
         {exam.leaderboardEnabled && (
@@ -634,7 +657,7 @@ function ExamsPageInner() {
                 </CardHeader>
                 <CardContent className="space-y-3">
                   {pendingTraining.map((a) => {
-                    const examForSop = exams.find((e) => e.sopId === a.sopId && e.isActive);
+                    const examForSop = latestActiveSopExam(exams, a.sopId);
                     return (
                       <div
                         key={a.id}
@@ -758,6 +781,15 @@ function ExamsPageInner() {
                           <Button
                             size="sm"
                             disabled={busy || !unlocked}
+                            title={
+                              unlocked
+                                ? undefined
+                                : assignmentId
+                                  ? undefined
+                                  : acknowledgedSopIds.has(e.sopId || "")
+                                    ? "This SOP is still in training. The exam opens when training is marked ready."
+                                    : "Read and acknowledge the SOP before starting."
+                            }
                             onClick={(ev) => {
                               ev.stopPropagation();
                               if (!unlocked) return;
@@ -769,7 +801,11 @@ function ExamsPageInner() {
                             }}
                           >
                             <Play className="mr-1.5 h-3.5 w-3.5" />
-                            {unlocked ? "Start" : "Read SOP first"}
+                            {unlocked
+                              ? "Start"
+                              : acknowledgedSopIds.has(e.sopId || "")
+                                ? "Training in progress"
+                                : "Read SOP first"}
                           </Button>
                         )}
                       </div>

@@ -1,11 +1,7 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { z } from "zod";
-import {
-  unauthorized,
-  verifyAuthDetailed,
-  requirePermission,
-} from "@/lib/rbac/middleware";
+import { unauthorized, verifyAuthDetailed, requirePermission, authHttpStatus } from "@/lib/rbac/middleware";
 import { isOpenRouterConfigured, openRouterChat, providerErrorStatus } from "@/lib/ai/openrouter";
 import type { Permission } from "@/lib/rbac/permissions";
 
@@ -28,7 +24,7 @@ const KIND_PERMISSION: Record<"sop" | "policy" | "induction", Permission | null>
 export async function POST(request: NextRequest) {
   const verified = await verifyAuthDetailed(request);
   if (!verified.ok) {
-    const status = verified.reason === "admin_not_configured" ? 503 : 401;
+    const status = authHttpStatus(verified.reason);
     return unauthorized(verified.message, status);
   }
 

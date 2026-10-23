@@ -65,8 +65,14 @@ export default function FirstLoginOnboardingPage() {
 
   useEffect(() => {
     if (!profile) return;
-    if (!needsFirstLoginOnboarding(profile)) {
+    if (profile.onboardingCompletedAt) {
       router.replace(ROLE_DASHBOARD_ROUTES[profile.role] || "/dashboard/employee");
+      return;
+    }
+    // Flags can all be clear before finish() writes onboardingCompletedAt.
+    // Stay on the last step so that write still happens.
+    if (!needsFirstLoginOnboarding(profile) && !profile.mustChangePassword) {
+      setStep("done");
       return;
     }
     if (profile.mustChangePassword) setStep("password");
@@ -150,7 +156,7 @@ export default function FirstLoginOnboardingPage() {
   };
 
   return (
-    <div className="mx-auto max-w-xl space-y-6 py-4">
+    <div className="w-full space-y-6 py-4">
       <div>
         <h1 className="text-2xl font-bold tracking-tight">First-login setup</h1>
         <p className="text-muted-foreground">
@@ -276,13 +282,13 @@ export default function FirstLoginOnboardingPage() {
               You&apos;re all set
             </CardTitle>
             <CardDescription>
-              Continue to your employee dashboard. HR may assign induction modules next.
+              Your account is ready. Continue to your workspace.
             </CardDescription>
           </CardHeader>
           <CardContent>
             <Button onClick={() => void finish()} disabled={busy}>
               {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Go to Employee Dashboard
+              Continue
             </Button>
           </CardContent>
         </Card>
@@ -341,13 +347,13 @@ function PasswordStep({
           <Lock className="h-5 w-5" />
           Change temporary password
         </CardTitle>
-          <CardDescription>
-            Paste the one-time password from the credentials card, then choose a new password.{" "}
-            {PASSWORD_POLICY_HINT} Re-issuing credentials invalidates the previous temporary password.
-          </CardDescription>
+        <CardDescription>
+          Paste the one-time password from the credentials card, then choose a new password.{" "}
+          {PASSWORD_POLICY_HINT} Re-issuing credentials invalidates the previous temporary password.
+        </CardDescription>
       </CardHeader>
       <CardContent>
-        <form onSubmit={handleSubmit(onSubmit)} className="space-y-4" noValidate>
+        <form onSubmit={handleSubmit(onSubmit)} className="grid gap-4 lg:grid-cols-2" noValidate>
           {(
             [
               ["currentPassword", "Temporary password", "current", false],
@@ -355,7 +361,10 @@ function PasswordStep({
               ["confirmPassword", "Confirm new password", "confirm", true],
             ] as const
           ).map(([name, label, key, blockClipboard]) => (
-            <div key={name} className="space-y-2">
+            <div
+              key={name}
+              className={name === "currentPassword" ? "space-y-2 lg:col-span-2" : "space-y-2"}
+            >
               <Label htmlFor={name}>{label}</Label>
               <div className="relative">
                 <Input
@@ -397,12 +406,14 @@ function PasswordStep({
             </div>
           ))}
           {newPassword.length > 0 && (
-            <p className="text-xs text-muted-foreground">Strength: {strength}</p>
+            <p className="text-xs text-muted-foreground lg:col-span-2">Strength: {strength}</p>
           )}
-          <Button type="submit" disabled={isSubmitting}>
-            {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            Save password & continue
-          </Button>
+          <div className="lg:col-span-2">
+            <Button type="submit" disabled={isSubmitting}>
+              {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Save password & continue
+            </Button>
+          </div>
         </form>
       </CardContent>
     </Card>
@@ -467,7 +478,7 @@ function ProfileStep({
         <CardDescription>Verify how your name appears on training records.</CardDescription>
       </CardHeader>
       <CardContent>
-        <form onSubmit={handleSubmit(onSubmit)} className="space-y-4" noValidate>
+        <form onSubmit={handleSubmit(onSubmit)} className="grid gap-4 lg:grid-cols-2" noValidate>
           <div className="space-y-2">
             <Label htmlFor="displayName">Full name</Label>
             <Input id="displayName" {...register("displayName")} />
@@ -484,14 +495,16 @@ function ProfileStep({
             <Label htmlFor="emergencyContact">Emergency contact (optional)</Label>
             <Input id="emergencyContact" {...register("emergencyContact")} />
           </div>
-          <div className="space-y-2">
+          <div className="space-y-2 lg:col-span-2">
             <Label htmlFor="address">Address (optional)</Label>
             <Input id="address" {...register("address")} />
           </div>
-          <Button type="submit" disabled={isSubmitting}>
-            {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            Save profile & continue
-          </Button>
+          <div className="lg:col-span-2">
+            <Button type="submit" disabled={isSubmitting}>
+              {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Save profile & continue
+            </Button>
+          </div>
         </form>
       </CardContent>
     </Card>

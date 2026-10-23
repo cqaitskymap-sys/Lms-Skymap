@@ -25,6 +25,14 @@ function calendarParts(dateStr: string): { y: number; m: number; d: number } | n
   return { y, m, d };
 }
 
+/** yyyy-MM-dd in the viewer's local calendar, for `<input type="date">`. */
+export function localDateInputValue(date = new Date()): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
 export function localDayBound(dateStr: string, endOfDay: boolean): number {
   const parts = calendarParts(dateStr);
   if (parts) {

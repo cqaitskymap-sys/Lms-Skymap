@@ -99,7 +99,7 @@ export default function NewInductionModulePage() {
 
   return (
     <RequirePermission permission="induction:write">
-      <div className="mx-auto max-w-3xl space-y-6">
+      <div className="w-full space-y-6">
         <div className="flex items-start gap-3">
           <Button variant="ghost" size="icon" asChild className="mt-0.5 shrink-0">
             <Link href="/dashboard/induction" aria-label="Back to induction">

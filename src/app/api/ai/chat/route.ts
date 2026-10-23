@@ -1,10 +1,7 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { z } from "zod";
-import {
-  unauthorized,
-  verifyAuthDetailed,
-} from "@/lib/rbac/middleware";
+import { unauthorized, verifyAuthDetailed, authHttpStatus } from "@/lib/rbac/middleware";
 import { isOpenRouterConfigured, openRouterChat, providerErrorStatus } from "@/lib/ai/openrouter";
 import { DEFAULT_COMPANY_POLICIES } from "@/lib/onboarding/policies";
 
@@ -22,7 +19,7 @@ const bodySchema = z.object({
 export async function POST(request: NextRequest) {
   const verified = await verifyAuthDetailed(request);
   if (!verified.ok) {
-    const status = verified.reason === "admin_not_configured" ? 503 : 401;
+    const status = authHttpStatus(verified.reason);
     return unauthorized(verified.message, status);
   }
 

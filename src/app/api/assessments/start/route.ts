@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { z } from "zod";
-import { unauthorized, verifyAuthDetailed } from "@/lib/rbac/middleware";
+import { unauthorized, verifyAuthDetailed, authHttpStatus } from "@/lib/rbac/middleware";
 import { hasPermission } from "@/lib/rbac/permissions";
 import { startAssessmentServer } from "@/lib/assessments/server";
 
@@ -16,7 +16,7 @@ const bodySchema = z.object({
 export async function POST(request: NextRequest) {
   const verified = await verifyAuthDetailed(request);
   if (!verified.ok) {
-    const status = verified.reason === "admin_not_configured" ? 503 : 401;
+    const status = authHttpStatus(verified.reason);
     return unauthorized(verified.message, status);
   }
 
@@ -64,7 +64,7 @@ export async function POST(request: NextRequest) {
     inductionAssignmentId: parsed.data.inductionAssignmentId,
     actorId: auth.uid,
     enforceMaxAttempts,
-    skipTniGate: auth.role !== "employee",
+    skipTniGate: auth.role !== "employee" && !isAssignedTake,
     preview: auth.role !== "employee" && !isAssignedTake,
   });
 

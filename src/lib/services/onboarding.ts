@@ -253,7 +253,7 @@ export function needsFirstLoginOnboarding(profile: {
 } | null): boolean {
   if (!profile) return false;
   if (profile.onboardingCompletedAt) return false;
-  return Boolean(
-    profile.mustChangePassword || profile.mustUpdateProfile || profile.mustAcceptPolicies
-  );
+  // A password reset alone belongs on Settings. The wizard is for a new hire
+  // who still has to confirm a profile or accept policies.
+  return Boolean(profile.mustUpdateProfile || profile.mustAcceptPolicies);
 }

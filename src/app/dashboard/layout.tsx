@@ -1,6 +1,7 @@
 "use client";
 
-import { Suspense, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
+import { usePathname } from "next/navigation";
 import { Loader2 } from "lucide-react";
 import dynamic from "next/dynamic";
 import { AuthGuard } from "@/components/auth/auth-guard";
@@ -16,24 +17,40 @@ const AiTrainingChatbot = dynamic(
 
 function DashboardShell({ children }: { children: React.ReactNode }) {
   const [mobileOpen, setMobileOpen] = useState(false);
-  const { isLocked } = useExamLockOptional();
+  const pathname = usePathname();
+
+  useEffect(() => {
+    const mq = window.matchMedia("(min-width: 1024px)");
+    const closeIfDesktop = () => {
+      if (mq.matches) setMobileOpen(false);
+    };
+    closeIfDesktop();
+    mq.addEventListener("change", closeIfDesktop);
+    return () => mq.removeEventListener("change", closeIfDesktop);
+  }, []);
+  const { isLocked, lockReady } = useExamLockOptional();
+  const hideChrome =
+    isLocked || (!lockReady && (pathname === "/dashboard/exams" || pathname.startsWith("/dashboard/exams/")));
 
   return (
     <div className="dashboard-atmosphere relative flex h-screen overflow-hidden">
       <ExamLockGuard />
-      {!isLocked && (
+      {!hideChrome && (
         <Sidebar open={mobileOpen} onClose={() => setMobileOpen(false)} />
       )}
-      <div className="relative z-10 flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+      <div
+        className="relative z-10 flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
+        inert={mobileOpen ? true : undefined}
+      >
         <Header
-          examLocked={isLocked}
-          onMenuClick={isLocked ? undefined : () => setMobileOpen(true)}
+          examLocked={hideChrome}
+          onMenuClick={hideChrome ? undefined : () => setMobileOpen(true)}
         />
         <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden px-4 py-4 md:px-5 md:py-5">
           <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto pb-24 animate-fade-in">{children}</div>
         </main>
       </div>
-      {!isLocked && <AiTrainingChatbot />}
+      {!hideChrome && <AiTrainingChatbot />}
     </div>
   );
 }

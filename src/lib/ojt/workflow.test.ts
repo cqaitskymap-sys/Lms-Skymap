@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   criterionIsFail,
   evaluationDidFail,
+  executionDateInPlan,
   statusAfterEmployeeAck,
   statusAfterHodDecision,
   statusAfterQaDecision,
@@ -90,4 +91,15 @@ test("HOD rejection returns the record to training", () => {
     statusAfterHodDecision({ ...allOn, requireQaApproval: false }, "approved"),
     "completed"
   );
+});
+
+test("an execution date is in plan when it falls in any planned month", () => {
+  const assignment = {
+    year: 2026,
+    plannedExecutionMonth: 10,
+    plannedExecutionMonths: [10, 11],
+  };
+  assert.equal(executionDateInPlan("2026-11-15", assignment), true);
+  assert.equal(executionDateInPlan("2026-10-01", assignment), true);
+  assert.equal(executionDateInPlan("2026-12-01", assignment), false);
 });
