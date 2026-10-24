@@ -28,6 +28,7 @@ import {
   sopBulkRowIssues,
   type SopBulkDraft,
 } from "@/lib/sops/bulk-sheet";
+import { parseReadingMinutes } from "@/lib/sops/reading";
 import { reviewDateFromEffective } from "@/lib/utils";
 import type { UserRole } from "@/types";
 import { Button } from "@/components/ui/button";
@@ -223,6 +224,7 @@ export default function BulkSopPage() {
             changeSummary: "Initial release",
             effectiveDate: effective,
             reviewDate: reviewSource ? new Date(reviewSource).toISOString() : undefined,
+            readingMinutes: parseReadingMinutes(row.readingMinutes),
             files: row.files,
           },
           actor
@@ -367,6 +369,7 @@ export default function BulkSopPage() {
                     <TableHead>SOP number</TableHead>
                     <TableHead>Title</TableHead>
                     <TableHead>Version</TableHead>
+                    <TableHead>Reading time</TableHead>
                     <TableHead>Departments</TableHead>
                     <TableHead>Dates</TableHead>
                     <TableHead>Files</TableHead>
@@ -409,6 +412,20 @@ export default function BulkSopPage() {
                             placeholder="1"
                             onChange={(e) =>
                               updateRow(row.key, { versionNumber: e.target.value, status: "pending" })
+                            }
+                          />
+                        </TableCell>
+                        <TableCell className="min-w-[110px]">
+                          <Input
+                            type="number"
+                            min={1}
+                            max={240}
+                            step="1"
+                            value={row.readingMinutes}
+                            disabled={locked}
+                            placeholder="min"
+                            onChange={(e) =>
+                              updateRow(row.key, { readingMinutes: e.target.value, status: "pending" })
                             }
                           />
                         </TableCell>

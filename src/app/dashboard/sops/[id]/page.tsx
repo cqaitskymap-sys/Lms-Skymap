@@ -21,13 +21,14 @@ import {
   archiveSopVersion,
   recordSopView,
   reviseSopWithFiles,
+  setSopReadingMinutes,
   submitSopForReview,
   updateSopDetails,
   type SopActor,
 } from "@/lib/services/sops";
 import { useSopReadingSession } from "@/hooks/use-sop-reading";
 import { SopReadingBanner } from "@/components/sops/sop-reading-banner";
-import { formatReadingClock } from "@/lib/sops/reading";
+import { formatReadingClock, parseReadingMinutes, readingTimeLabel } from "@/lib/sops/reading";
 import { RequirePermission, Can } from "@/components/auth/require-permission";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { SopMediaPreview, SopFileDropzone, SopLoading, ViewerBadge } from "@/components/sops/sop-media-preview";
@@ -72,11 +73,14 @@ export default function SopDetailPage({ params }: { params: Promise<{ id: string
   const [editSummary, setEditSummary] = useState("");
   const [editEffective, setEditEffective] = useState("");
   const [editReview, setEditReview] = useState("");
+  const [editReading, setEditReading] = useState("");
   const [editFiles, setEditFiles] = useState<File[]>([]);
   const editOpened = useRef(false);
   const pendingFocus = useRef<string | null>(null);
   const [effectiveDate, setEffectiveDate] = useState("");
   const [reviewDate, setReviewDate] = useState("");
+  const [reviseReading, setReviseReading] = useState("");
+  const [readingDraft, setReadingDraft] = useState("");
   const [sendOpen, setSendOpen] = useState(false);
   const viewedOnce = useRef(false);
 
@@ -114,6 +118,10 @@ export default function SopDetailPage({ params }: { params: Promise<{ id: string
   const activeVersion = selected || currentVersion;
 
   useEffect(() => {
+    setReadingDraft(activeVersion?.readingMinutes ? String(activeVersion.readingMinutes) : "");
+  }, [activeVersion?.id, activeVersion?.readingMinutes]);
+
+  useEffect(() => {
     if (searchParams.get("edit") !== "1" || editOpened.current || !sop || !currentVersion) return;
     if (!can("sops:write")) return;
     const editable =
@@ -135,6 +143,7 @@ export default function SopDetailPage({ params }: { params: Promise<{ id: string
     setEditSummary(editable.changeSummary || "");
     setEditEffective(isoDateInput(editable.effectiveDate || sop.effectiveDate));
     setEditReview(isoDateInput(editable.reviewDate || sop.reviewDate));
+    setEditReading(editable.readingMinutes ? String(editable.readingMinutes) : "");
     setEditFiles([]);
     setShowEdit(true);
   }, [searchParams, sop, currentVersion, versions, can]);
@@ -162,6 +171,7 @@ export default function SopDetailPage({ params }: { params: Promise<{ id: string
     versionNumber: activeVersion?.versionNumber || "",
     userId: actor?.uid,
     hasPdf,
+    readingMinutes: activeVersion?.readingMinutes,
   });
 
   useEffect(() => {
@@ -235,6 +245,7 @@ export default function SopDetailPage({ params }: { params: Promise<{ id: string
     setEditSummary(version.changeSummary || "");
     setEditEffective(isoDateInput(version.effectiveDate || source.effectiveDate));
     setEditReview(isoDateInput(version.reviewDate || source.reviewDate));
+    setEditReading(version.readingMinutes ? String(version.readingMinutes) : "");
     setEditFiles([]);
   };
 
@@ -383,6 +394,9 @@ export default function SopDetailPage({ params }: { params: Promise<{ id: string
                           ? `${activeVersion.major}.${activeVersion.minor + 1}`
                           : String(activeVersion.major + 1)
                       );
+                      setReviseReading(
+                        activeVersion.readingMinutes ? String(activeVersion.readingMinutes) : ""
+                      );
                     }
                     return !open;
                   });
@@ -483,6 +497,21 @@ export default function SopDetailPage({ params }: { params: Promise<{ id: string
                 </div>
               </div>
               <div className="space-y-2">
+                <Label>Reading time (minutes)</Label>
+                <Input
+                  type="number"
+                  min={1}
+                  max={240}
+                  step="1"
+                  value={editReading}
+                  placeholder="10"
+                  onChange={(e) => setEditReading(e.target.value)}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Optional. Leave blank and employees only need to scroll every page.
+                </p>
+              </div>
+              <div className="space-y-2">
                 <Label>Change summary</Label>
                 <Textarea
                   rows={2}
@@ -500,9 +529,16 @@ export default function SopDetailPage({ params }: { params: Promise<{ id: string
               <div className="flex gap-2">
                 <Button
                   disabled={busy || !editNumber.trim() || !editTitle.trim() || !editVersion.trim()}
-                  onClick={() =>
-                    actor &&
-                    run(async () => {
+                  onClick={() => {
+                    let readingMinutes: number | undefined;
+                    try {
+                      readingMinutes = parseReadingMinutes(editReading);
+                    } catch (err) {
+                      toast.error(err instanceof Error ? err.message : "Enter a valid reading time");
+                      return;
+                    }
+                    if (!actor) return;
+                    void run(async () => {
                       await updateSopDetails(
                         sop.id,
                         {
@@ -519,14 +555,15 @@ export default function SopDetailPage({ params }: { params: Promise<{ id: string
                           reviewDate: editReview
                             ? new Date(editReview).toISOString()
                             : undefined,
+                          readingMinutes,
                           files: editFiles.length ? editFiles : undefined,
                         },
                         actor
                       );
                       setShowEdit(false);
                       setEditFiles([]);
-                    }, "SOP updated")
-                  }
+                    }, "SOP updated");
+                  }}
                 >
                   {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                   Save changes
@@ -558,13 +595,30 @@ export default function SopDetailPage({ params }: { params: Promise<{ id: string
                   rows={2}
                 />
               </div>
-              <div className="space-y-2">
-                <Label>Version number</Label>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <Label>Version number</Label>
                 <Input
                   value={reviseVersion}
                   onChange={(e) => setReviseVersion(e.target.value)}
                     placeholder="2"
                 />
+                </div>
+                <div className="space-y-2">
+                  <Label>Reading time (minutes)</Label>
+                  <Input
+                    type="number"
+                    min={1}
+                    max={240}
+                    step="1"
+                    value={reviseReading}
+                    placeholder="10"
+                    onChange={(e) => setReviseReading(e.target.value)}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Optional. Leave blank and employees only need to scroll every page.
+                  </p>
+                </div>
               </div>
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
@@ -592,9 +646,16 @@ export default function SopDetailPage({ params }: { params: Promise<{ id: string
               <div className="flex gap-2">
                 <Button
                   disabled={busy || !changeSummary || !reviseVersion.trim() || !reviseFiles.length}
-                  onClick={() =>
-                    actor &&
-                    run(async () => {
+                  onClick={() => {
+                    let readingMinutes: number | undefined;
+                    try {
+                      readingMinutes = parseReadingMinutes(reviseReading);
+                    } catch (err) {
+                      toast.error(err instanceof Error ? err.message : "Enter a valid reading time");
+                      return;
+                    }
+                    if (!actor) return;
+                    void run(async () => {
                       const created = await reviseSopWithFiles(
                         sop.id,
                         {
@@ -607,6 +668,7 @@ export default function SopDetailPage({ params }: { params: Promise<{ id: string
                           reviewDate: reviewDate
                             ? new Date(reviewDate).toISOString()
                             : undefined,
+                          readingMinutes: readingMinutes ?? null,
                         },
                         actor
                       );
@@ -616,8 +678,9 @@ export default function SopDetailPage({ params }: { params: Promise<{ id: string
                       setChangeSummary("");
                       setEffectiveDate("");
                       setReviewDate("");
-                    }, "Revision uploaded as draft")
-                  }
+                      setReviseReading("");
+                    }, "Revision uploaded as draft");
+                  }}
                 >
                   {busy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                   Save revision draft
@@ -682,6 +745,56 @@ export default function SopDetailPage({ params }: { params: Promise<{ id: string
                 <Meta label="Departments" value={deptNames || "—"} />
                 <Meta label="Effective date" value={formatDate(sop.effectiveDate || activeVersion.effectiveDate)} />
                 <Meta label="Review date" value={formatDate(sop.reviewDate || activeVersion.reviewDate)} />
+                {can("sops:write") &&
+                activeVersion.status !== "obsolete" &&
+                activeVersion.status !== "superseded" ? (
+                  <div className="space-y-2">
+                    <Label>Reading time (minutes)</Label>
+                    <div className="flex gap-2">
+                      <Input
+                        type="number"
+                        min={1}
+                        max={240}
+                        step="1"
+                        value={readingDraft}
+                        placeholder="Minutes"
+                        onChange={(e) => setReadingDraft(e.target.value)}
+                      />
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled={busy}
+                        onClick={() => {
+                          let readingMinutes: number | undefined;
+                          try {
+                            readingMinutes = parseReadingMinutes(readingDraft);
+                          } catch (err) {
+                            toast.error(
+                              err instanceof Error ? err.message : "Enter a valid reading time"
+                            );
+                            return;
+                          }
+                          if (!actor) return;
+                          void run(
+                            () => setSopReadingMinutes(sop.id, activeVersion.id, readingMinutes, actor),
+                            readingMinutes
+                              ? `Reading time set to ${readingMinutes} minutes`
+                              : "Reading time cleared"
+                          );
+                        }}
+                      >
+                        Save
+                      </Button>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Optional. Employees must stay this long before they can acknowledge. Leave blank
+                      and they only need to scroll every page.
+                    </p>
+                  </div>
+                ) : (
+                  <Meta label="Reading time" value={readingTimeLabel(activeVersion.readingMinutes)} />
+                )}
                 <Meta
                   label="Approver"
                   value={
@@ -749,7 +862,9 @@ export default function SopDetailPage({ params }: { params: Promise<{ id: string
                 <CardTitle className="text-base">Digital acknowledgement</CardTitle>
                 <CardDescription>
                   {enforceReading
-                    ? "Finish the reading timer and scroll every page, then confirm you have understood this SOP"
+                    ? activeVersion.readingMinutes
+                      ? "Finish the reading time set for this SOP and scroll every page, then confirm you have understood it"
+                      : "Scroll every page of this SOP, then confirm you have understood it"
                     : "Confirm you have read and understood the approved SOP"}
                 </CardDescription>
               </CardHeader>

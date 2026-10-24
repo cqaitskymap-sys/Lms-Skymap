@@ -6,9 +6,10 @@ import {
   saveSopReadingProgress,
 } from "@/lib/services/sop-reading";
 import {
+  fixedReadingSeconds,
   isReadingComplete,
   reconcileViewedPages,
-  requiredReadingSeconds,
+  resolveReadingSeconds,
 } from "@/lib/sops/reading";
 
 export type SopPageProgress = {
@@ -25,12 +26,16 @@ export function useSopReadingSession(params: {
   versionNumber: string;
   userId?: string;
   hasPdf: boolean;
+  /** Minutes set by the person who added this SOP. */
+  readingMinutes?: number;
 }) {
-  const { enabled, sopId, versionId, versionNumber, userId, hasPdf } = params;
+  const { enabled, sopId, versionId, versionNumber, userId, hasPdf, readingMinutes } = params;
+  const readingMinutesRef = useRef(readingMinutes);
+  readingMinutesRef.current = readingMinutes;
 
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [requiredSeconds, setRequiredSeconds] = useState(() =>
-    requiredReadingSeconds(0, hasPdf)
+    resolveReadingSeconds(readingMinutes, 0, hasPdf)
   );
   const [pagesSeen, setPagesSeen] = useState<number[]>([]);
   const [pageCount, setPageCount] = useState(0);
@@ -63,6 +68,7 @@ export function useSopReadingSession(params: {
         userId,
         elapsedSeconds: elapsedRef.current,
         requiredSeconds: requiredRef.current,
+        fixedReadingTime: fixedReadingSeconds(readingMinutesRef.current) != null ? true : false,
         pageCount: pageCountRef.current,
         pagesSeen: pagesRef.current,
         reachedLastPage: reachedLastRef.current,
@@ -81,7 +87,7 @@ export function useSopReadingSession(params: {
     let cancelled = false;
     setReady(false);
     setElapsedSeconds(0);
-    setRequiredSeconds(requiredReadingSeconds(0, hasPdf));
+    setRequiredSeconds(resolveReadingSeconds(readingMinutesRef.current, 0, hasPdf));
     setPagesSeen([]);
     setPageCount(0);
     setReachedLastPage(false);
@@ -96,8 +102,8 @@ export function useSopReadingSession(params: {
           liveCount > 0 && savedCount > 0 && liveCount !== savedCount;
         if (!liveDocumentDiffers) {
           setElapsedSeconds((prev) => Math.max(prev, saved.elapsedSeconds || 0));
-          setRequiredSeconds((prev) =>
-            Math.max(prev, saved.requiredSeconds || requiredReadingSeconds(saved.pageCount, hasPdf))
+          setRequiredSeconds(
+            resolveReadingSeconds(readingMinutesRef.current, saved.pageCount, hasPdf)
           );
           const savedViewed =
             !hasPdf ||
@@ -126,6 +132,12 @@ export function useSopReadingSession(params: {
       cancelled = true;
     };
   }, [enabled, userId, versionId, hasPdf]);
+
+  useEffect(() => {
+    const next = resolveReadingSeconds(readingMinutes, pageCountRef.current, hasPdf);
+    requiredRef.current = next;
+    setRequiredSeconds(next);
+  }, [readingMinutes, hasPdf]);
 
   useEffect(() => {
     if (!enabled || !userId || !ready) return;
@@ -168,7 +180,11 @@ export function useSopReadingSession(params: {
       // frozen clock does not unlock or block acknowledgement by accident.
       if (hasPdf && progress.pageCount <= 0) return;
 
-      const nextRequired = requiredReadingSeconds(progress.pageCount, hasPdf);
+      const nextRequired = resolveReadingSeconds(
+        readingMinutesRef.current,
+        progress.pageCount,
+        hasPdf
+      );
       const previousCount = pageCountRef.current;
       const documentChanged =
         previousCount > 0 &&
@@ -209,7 +225,7 @@ export function useSopReadingSession(params: {
     [enabled, hasPdf]
   );
 
-  const timerComplete = elapsedSeconds >= requiredSeconds && requiredSeconds > 0;
+  const timerComplete = requiredSeconds <= 0 || elapsedSeconds >= requiredSeconds;
   const readingComplete =
     ready &&
     isReadingComplete({

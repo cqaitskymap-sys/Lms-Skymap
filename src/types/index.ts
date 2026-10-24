@@ -546,6 +546,8 @@ export interface SopVersion extends Timestamps {
   viewCount?: number;
   acknowledgementCount?: number;
   retrainAssignedCount?: number;
+  /** Minutes the SOP author requires before acknowledgement. Blank means scroll every page, with no countdown. */
+  readingMinutes?: number;
 }
 
 export interface SopViewRecord {
@@ -574,6 +576,8 @@ export interface SopReadingProgress {
   pagesSeen: number[];
   reachedLastPage: boolean;
   allPagesViewed: boolean;
+  /** True when requiredSeconds comes from the SOP author's reading time. */
+  fixedReadingTime?: boolean;
   completedAt?: string;
   updatedAt: string;
 }

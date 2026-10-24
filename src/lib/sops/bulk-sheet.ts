@@ -1,6 +1,7 @@
 import * as XLSX from "xlsx";
 import type { Department } from "@/types";
 import { matchDepartment, parseSheetDate } from "@/lib/onboarding/legacy-sheet";
+import { parseReadingMinutes } from "@/lib/sops/reading";
 import { reviewDateFromEffective } from "@/lib/utils";
 
 export interface SopBulkDraft {
@@ -15,6 +16,7 @@ export interface SopBulkDraft {
   reviewDate: string;
   effectiveDateIssue?: string;
   reviewDateIssue?: string;
+  readingMinutes: string;
   files: File[];
 }
 
@@ -34,6 +36,10 @@ const HEADER_FIELDS: Record<string, keyof SopBulkDraft | "departments"> = {
   effective: "effectiveDate",
   reviewdate: "reviewDate",
   review: "reviewDate",
+  readingtimeminutes: "readingMinutes",
+  readingtime: "readingMinutes",
+  readingminutes: "readingMinutes",
+  readtime: "readingMinutes",
 };
 
 function headerKey(value: string): string {
@@ -51,6 +57,7 @@ export function blankSopBulkDraft(): SopBulkDraft {
     unmatchedDepartments: [],
     effectiveDate: "",
     reviewDate: "",
+    readingMinutes: "",
     files: [],
   };
 }
@@ -88,6 +95,7 @@ export function downloadSopBulkTemplate(): void {
       "Departments",
       "Effective date",
       "Review date",
+      "Reading time (minutes)",
     ],
   ]);
   ws["!cols"] = [
@@ -97,6 +105,7 @@ export function downloadSopBulkTemplate(): void {
     { wch: 28 },
     { wch: 16 },
     { wch: 16 },
+    { wch: 24 },
   ];
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, "SOPs");
@@ -146,6 +155,10 @@ export function parseSopBulkWorkbook(data: ArrayBuffer, departments: Department[
       if (field === "versionNumber") {
         const version = String(raw ?? "").trim().replace(/^v/i, "");
         draft.versionNumber = version || "1";
+        return;
+      }
+      if (field === "readingMinutes") {
+        draft.readingMinutes = String(raw ?? "").trim();
         return;
       }
       if (
@@ -268,6 +281,13 @@ export function sopBulkRowIssues(row: SopBulkDraft, duplicate = false): string[]
   if (row.unmatchedDepartments.length) issues.push("Unknown department");
   if (row.effectiveDateIssue) issues.push(`Effective date (${row.effectiveDateIssue})`);
   if (row.reviewDateIssue) issues.push(`Review date (${row.reviewDateIssue})`);
+  if (row.readingMinutes.trim()) {
+    try {
+      parseReadingMinutes(row.readingMinutes);
+    } catch {
+      issues.push("Reading time");
+    }
+  }
   if (!row.files.length) issues.push("PDF");
   return issues;
 }

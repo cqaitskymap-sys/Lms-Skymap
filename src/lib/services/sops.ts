@@ -609,6 +609,7 @@ export async function createSopWithFiles(
     effectiveDate?: string;
     reviewDate?: string;
     versionNumber?: string;
+    readingMinutes?: number;
     files: File[];
   },
   actor: SopActor
@@ -661,6 +662,7 @@ export async function createSopWithFiles(
         : addDays(now, 365),
     viewCount: 0,
     acknowledgementCount: 0,
+    readingMinutes: data.readingMinutes,
     createdAt: now,
     updatedAt: now,
     createdBy: actor.uid,
@@ -716,6 +718,8 @@ export async function reviseSopWithFiles(
     majorBump?: boolean;
     effectiveDate?: string;
     reviewDate?: string;
+    /** null clears a time inherited from the previous version. */
+    readingMinutes?: number | null;
   },
   actor: SopActor
 ): Promise<SopVersion> {
@@ -775,6 +779,10 @@ export async function reviseSopWithFiles(
     reviewDate: params.reviewDate ? calendarDateToIso(params.reviewDate) : addDays(now, 365),
     viewCount: 0,
     acknowledgementCount: 0,
+    readingMinutes:
+      params.readingMinutes === null
+        ? undefined
+        : params.readingMinutes ?? current.readingMinutes,
     createdAt: now,
     updatedAt: now,
     createdBy: actor.uid,
@@ -1320,6 +1328,7 @@ export async function updateSopDetails(
     changeSummary: string;
     effectiveDate?: string;
     reviewDate?: string;
+    readingMinutes?: number;
     files?: File[];
     versionId?: string;
   },
@@ -1396,6 +1405,9 @@ export async function updateSopDetails(
             mimeType,
             effectiveDate,
             reviewDate: reviewDate || v.reviewDate,
+            ...(data.readingMinutes
+              ? { readingMinutes: data.readingMinutes }
+              : { readingMinutes: undefined }),
             updatedAt: now,
           }
         : v
@@ -1440,6 +1452,7 @@ export async function updateSopDetails(
       mimeType,
       effectiveDate: effectiveDate ?? deleteField(),
       reviewDate: reviewDate ?? current.reviewDate ?? deleteField(),
+      readingMinutes: data.readingMinutes ?? deleteField(),
       updatedAt: now,
       updatedBy: actor.uid,
     });
@@ -1467,6 +1480,46 @@ export async function updateSopDetails(
     action: "update",
     resourceId: sopId,
     description: `Edited SOP ${sopNumber} version ${parsed.versionNumber}`,
+  });
+}
+
+export async function setSopReadingMinutes(
+  sopId: string,
+  versionId: string,
+  readingMinutes: number | undefined,
+  actor: SopActor
+): Promise<void> {
+  const bundle = await getSopBundle(sopId);
+  const version = bundle.versions.find((v) => v.id === versionId);
+  if (!version) throw new Error("SOP version not found");
+  if (version.status === "obsolete" || version.status === "superseded") {
+    throw new Error("This version can no longer be changed");
+  }
+  const now = nowISO();
+  if (await preferLocalSopStore()) {
+    const store = readSopStore();
+    store.versions = store.versions.map((v) => {
+      if (v.id !== versionId) return v;
+      const next = { ...v, updatedAt: now, updatedBy: actor.uid };
+      if (readingMinutes) next.readingMinutes = readingMinutes;
+      else delete next.readingMinutes;
+      return next;
+    });
+    writeSopStore(store);
+  } else {
+    await updateDoc(doc(db, COLLECTIONS.sopVersions, versionId), {
+      readingMinutes: readingMinutes ?? deleteField(),
+      updatedAt: now,
+      updatedBy: actor.uid,
+    });
+  }
+  await writeAuditClient({
+    actor,
+    action: "update",
+    resourceId: sopId,
+    description: readingMinutes
+      ? `Set reading time for SOP version ${version.versionNumber} to ${readingMinutes} minutes`
+      : `Cleared the reading time for SOP version ${version.versionNumber}`,
   });
 }
 

@@ -26,8 +26,9 @@ export function SopReadingBanner({
   readingComplete: boolean;
   hasPdf: boolean;
 }) {
+  const timerRequired = requiredSeconds > 0;
   const timePct =
-    requiredSeconds > 0 ? Math.min(100, Math.round((elapsedSeconds / requiredSeconds) * 100)) : 0;
+    timerRequired ? Math.min(100, Math.round((elapsedSeconds / requiredSeconds) * 100)) : 0;
   const pagePct =
     pageCount > 0 ? Math.min(100, Math.round((pagesSeen.length / pageCount) * 100)) : allPagesViewed ? 100 : 0;
 
@@ -51,10 +52,12 @@ export function SopReadingBanner({
     <div className="space-y-3 rounded-lg border border-primary/20 bg-primary/5 p-3">
       <p className="text-sm font-medium">Read this SOP before acknowledging</p>
       <p className="text-xs text-muted-foreground">
-        Stay on this page until the timer finishes
-        {hasPdf ? ", and scroll every page to the end." : "."}
+        {timerRequired
+          ? `Stay on this page until the timer finishes${hasPdf ? ", and scroll every page to the end." : "."}`
+          : "Scroll every page to the end before acknowledging."}
       </p>
-      <div className="grid gap-3 sm:grid-cols-2">
+      <div className={cn("grid gap-3", timerRequired && hasPdf && "sm:grid-cols-2")}>
+        {timerRequired && (
         <div className="space-y-1.5">
           <div className="flex items-center justify-between text-xs">
             <span className="flex items-center gap-1 font-medium">
@@ -67,6 +70,7 @@ export function SopReadingBanner({
           </div>
           <Progress value={timePct} className="h-2" />
         </div>
+        )}
         {hasPdf && (
           <div className="space-y-1.5">
             <div className="flex items-center justify-between text-xs">

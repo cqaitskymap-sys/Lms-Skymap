@@ -46,9 +46,15 @@ function mergeProgress(
   const elapsedSeconds = documentChanged
     ? newer.elapsedSeconds || 0
     : Math.max(a.elapsedSeconds || 0, b.elapsedSeconds || 0);
+  const newerSetsTime = newer.fixedReadingTime === true || newer.fixedReadingTime === false;
+  const newerClearsTimer = newer.fixedReadingTime === false && (newer.requiredSeconds || 0) === 0;
   const requiredSeconds = documentChanged
     ? newer.requiredSeconds || 0
-    : Math.max(a.requiredSeconds || 0, b.requiredSeconds || 0);
+    : newer.fixedReadingTime === true || newerClearsTimer
+      ? newer.requiredSeconds || 0
+      : older.fixedReadingTime === true && newer.fixedReadingTime !== false
+        ? older.requiredSeconds || 0
+        : Math.max(a.requiredSeconds || 0, b.requiredSeconds || 0);
   const pageCount = documentChanged ? newerCount : Math.max(newerCount, olderCount);
   const reachedLastPage = documentChanged
     ? Boolean(newer.reachedLastPage)
@@ -72,6 +78,7 @@ function mergeProgress(
     ...newer,
     elapsedSeconds,
     requiredSeconds,
+    fixedReadingTime: newerSetsTime ? newer.fixedReadingTime : older.fixedReadingTime,
     pageCount,
     pagesSeen,
     reachedLastPage,
@@ -126,6 +133,7 @@ export async function saveSopReadingProgress(
     pagesSeen: Array.from(new Set(input.pagesSeen)).sort((a, b) => a - b),
     reachedLastPage: input.reachedLastPage,
     allPagesViewed: input.allPagesViewed,
+    fixedReadingTime: input.fixedReadingTime,
     completedAt: input.completedAt,
     updatedAt: now,
   };

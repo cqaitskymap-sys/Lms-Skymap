@@ -187,6 +187,10 @@ export function SopPdfReader({
     const el = scrollRef.current;
     if (!el || numPages <= 0 || !trackPages || renderedCount < numPages) return;
     const frame = window.requestAnimationFrame(() => {
+      const pages = el.querySelectorAll<HTMLElement>("[data-sop-page]");
+      if (pages.length < numPages) return;
+      const laidOut = Array.from(pages).every((page) => page.offsetHeight >= 80);
+      if (!laidOut) return;
       if (el.scrollHeight <= el.clientHeight + 8) {
         for (let i = 1; i <= numPages; i++) seenRef.current.add(i);
         lastPageRef.current = true;
@@ -317,16 +321,21 @@ function TrackedPage({
   onRendered?: (page: number) => void;
   onMetrics?: (heightOverWidth: number) => void;
 }) {
+  const boxRef = useRef<HTMLDivElement>(null);
   const topRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const [laidOut, setLaidOut] = useState(false);
 
   useEffect(() => {
+    if (!laidOut) return;
     const rootEl = root.current;
-    if (!rootEl) return;
+    const box = boxRef.current;
+    if (!rootEl || !box || box.offsetHeight < 80) return;
     const nodes = [topRef.current, bottomRef.current].filter(Boolean) as HTMLDivElement[];
     if (!nodes.length) return;
     const observer = new IntersectionObserver(
       (entries) => {
+        if (box.offsetHeight < 80) return;
         for (const entry of entries) {
           if (!entry.isIntersecting) continue;
           if (entry.target === topRef.current) onVisible(pageNumber);
@@ -337,10 +346,10 @@ function TrackedPage({
     );
     nodes.forEach((n) => observer.observe(n));
     return () => observer.disconnect();
-  }, [root, pageNumber, last, onVisible, onBottomVisible, width]);
+  }, [laidOut, root, pageNumber, last, onVisible, onBottomVisible, width]);
 
   return (
-    <div className={cn("relative w-fit max-w-full shadow-sm")}>
+    <div ref={boxRef} data-sop-page={pageNumber} className={cn("relative w-fit max-w-full shadow-sm")}>
       <div ref={topRef} className="h-1 w-full" />
       <Page
         pageNumber={pageNumber}
@@ -351,7 +360,12 @@ function TrackedPage({
           const viewport = page.getViewport({ scale: 1 });
           if (viewport.width > 0) onMetrics?.(viewport.height / viewport.width);
         }}
-        onRenderSuccess={() => onRendered?.(pageNumber)}
+        onRenderSuccess={() => {
+          onRendered?.(pageNumber);
+          window.requestAnimationFrame(() => {
+            if ((boxRef.current?.offsetHeight ?? 0) >= 80) setLaidOut(true);
+          });
+        }}
         className="overflow-hidden rounded-sm bg-white"
       />
       <div ref={bottomRef} className="h-1 w-full" />

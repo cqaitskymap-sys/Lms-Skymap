@@ -4,11 +4,58 @@ export const MIN_READING_SECONDS = 60;
 export const SECONDS_PER_PAGE = 30;
 /** Used when the SOP has no PDF (video / PPT only). */
 export const FALLBACK_READING_SECONDS = 120;
+/** Longest reading time the SOP author can require. */
+export const MAX_READING_MINUTES = 240;
 
 export function requiredReadingSeconds(pageCount: number, hasPdf: boolean): number {
   if (!hasPdf) return FALLBACK_READING_SECONDS;
   if (pageCount <= 0) return MIN_READING_SECONDS;
   return Math.max(MIN_READING_SECONDS, pageCount * SECONDS_PER_PAGE);
+}
+
+/** Minutes chosen by the person who added the SOP. Blank means no fixed time. */
+export function parseReadingMinutes(value: string): number | undefined {
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  if (!/^\d+(\.\d)?$/.test(trimmed)) {
+    throw new Error("Enter the reading time in minutes, like 10");
+  }
+  const minutes = Number(trimmed);
+  if (minutes < 1 || minutes > MAX_READING_MINUTES) {
+    throw new Error(`Reading time must be between 1 and ${MAX_READING_MINUTES} minutes`);
+  }
+  return minutes;
+}
+
+/** Seconds from the author's reading time, or null when they left it blank. */
+export function fixedReadingSeconds(readingMinutes?: number): number | null {
+  if (typeof readingMinutes !== "number" || !Number.isFinite(readingMinutes) || readingMinutes <= 0) {
+    return null;
+  }
+  return Math.round(Math.min(readingMinutes, MAX_READING_MINUTES) * 60);
+}
+
+/**
+ * Time the employee must stay on the SOP.
+ * The author sets this. A PDF with no time set has no countdown — scrolling every page is enough.
+ * Video or slides with no time set still use a short fallback.
+ */
+export function resolveReadingSeconds(
+  readingMinutes: number | undefined,
+  pageCount: number,
+  hasPdf: boolean
+): number {
+  const fixed = fixedReadingSeconds(readingMinutes);
+  if (fixed) return fixed;
+  if (hasPdf) return 0;
+  return requiredReadingSeconds(pageCount, false);
+}
+
+export function readingTimeLabel(readingMinutes?: number): string {
+  const fixed = fixedReadingSeconds(readingMinutes);
+  if (!fixed || !readingMinutes) return "Not set";
+  const minutes = readingMinutes;
+  return `${minutes} minute${minutes === 1 ? "" : "s"}`;
 }
 
 export function readingProgressId(userId: string, versionId: string): string {
@@ -49,9 +96,7 @@ export function isReadingComplete(params: {
   requiredSeconds: number;
   allPagesViewed: boolean;
 }): boolean {
-  return (
-    params.requiredSeconds > 0 &&
-    params.elapsedSeconds >= params.requiredSeconds &&
-    params.allPagesViewed
-  );
+  const timeDone =
+    params.requiredSeconds <= 0 || params.elapsedSeconds >= params.requiredSeconds;
+  return timeDone && params.allPagesViewed;
 }

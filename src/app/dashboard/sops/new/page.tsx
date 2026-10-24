@@ -19,6 +19,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { parseReadingMinutes } from "@/lib/sops/reading";
 import { reviewDateFromEffective } from "@/lib/utils";
 import type { UserRole } from "@/types";
 
@@ -33,6 +34,7 @@ const schema = z.object({
   changeSummary: z.string().optional(),
   effectiveDate: z.string().optional(),
   reviewDate: z.string().optional(),
+  readingMinutes: z.string().optional(),
 });
 
 type FormValues = z.infer<typeof schema>;
@@ -57,6 +59,7 @@ export default function NewSopPage() {
       changeSummary: "Initial release",
       effectiveDate: "",
       reviewDate: "",
+      readingMinutes: "",
     },
   });
   const effectiveField = register("effectiveDate");
@@ -82,6 +85,13 @@ export default function NewSopPage() {
       toast.error("Upload at least one PDF, PPT, or video");
       return;
     }
+    let readingMinutes: number | undefined;
+    try {
+      readingMinutes = parseReadingMinutes(data.readingMinutes || "");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Enter a valid reading time");
+      return;
+    }
     setLoading(true);
     try {
       const { sop } = await createSopWithFiles(
@@ -100,6 +110,7 @@ export default function NewSopPage() {
           reviewDate: data.reviewDate
             ? new Date(data.reviewDate).toISOString()
             : undefined,
+          readingMinutes,
           files,
         },
         actor
@@ -231,6 +242,25 @@ export default function NewSopPage() {
                     Fills automatically: 3 years after the effective date, one day earlier.
                   </p>
                 </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Reading time (minutes)</Label>
+                <Input
+                  type="number"
+                  min={1}
+                  max={240}
+                  step="1"
+                  placeholder="10"
+                  {...register("readingMinutes")}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Optional. Employees must stay on this SOP for this long before they can acknowledge
+                  it. Leave blank and they only need to scroll every page.
+                </p>
+                {errors.readingMinutes && (
+                  <p className="text-xs text-destructive">{errors.readingMinutes.message}</p>
+                )}
               </div>
 
               <div className="space-y-2">
