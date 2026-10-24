@@ -8,6 +8,13 @@ const OPEN_ASSIGNMENT = new Set([
   "retraining",
 ]);
 
+/** Every exam in the project allows this many takes. */
+export const EXAM_MAX_ATTEMPTS = 3;
+
+export function withExamAttemptLimit<T extends { maxAttempts?: number }>(exam: T): T {
+  return { ...exam, maxAttempts: EXAM_MAX_ATTEMPTS };
+}
+
 export function attemptsRemaining(finishedInCycle: number, maxAttempts: number): boolean {
   const allowance = Number.isFinite(maxAttempts) && maxAttempts > 0 ? maxAttempts : 1;
   return finishedInCycle < allowance;

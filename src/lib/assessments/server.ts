@@ -12,7 +12,7 @@ import {
   selectQuestionsForExam,
   toAttemptQuestions,
 } from "@/lib/assessments/engine";
-import { attemptsRemaining, hasOutstandingTraining } from "@/lib/assessments/training-cycle";
+import { attemptsRemaining, hasOutstandingTraining, withExamAttemptLimit } from "@/lib/assessments/training-cycle";
 import { generateId } from "@/lib/services/helpers";
 import { issueCertificateForAttemptServer } from "@/lib/certificates/issue-server";
 import { getProgressForStage, getStageIndex } from "@/lib/lifecycle/stages";
@@ -186,7 +186,7 @@ async function questionsWithAnswerKeys(
 async function loadExam(examId: string): Promise<Exam | null> {
   const snap = await adminDb.collection(COLLECTIONS.exams).doc(examId).get();
   if (!snap.exists) return null;
-  return { id: snap.id, ...snap.data() } as Exam;
+  return withExamAttemptLimit({ id: snap.id, ...snap.data() } as Exam);
 }
 
 async function loadBankQuestions(exam: Exam): Promise<Question[]> {

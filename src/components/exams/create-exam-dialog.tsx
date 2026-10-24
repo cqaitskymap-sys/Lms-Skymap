@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { Loader2, Plus } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
 import { createExam, createQuestionBank } from "@/lib/services/assessments";
+import { EXAM_MAX_ATTEMPTS } from "@/lib/assessments/training-cycle";
 import { listSopsDetailed } from "@/lib/services/sops";
 import { Can } from "@/components/auth/require-permission";
 import { Button } from "@/components/ui/button";
@@ -104,7 +105,7 @@ export function CreateExamDialog({ banks, onCreated }: Props) {
           shuffleOptions: true,
           randomizeFromBank: true,
           negativeMarkingEnabled: false,
-          maxAttempts: 3,
+          maxAttempts: EXAM_MAX_ATTEMPTS,
           showResultsImmediately: true,
           autoSaveEnabled: true,
           autoSaveIntervalSeconds: 30,

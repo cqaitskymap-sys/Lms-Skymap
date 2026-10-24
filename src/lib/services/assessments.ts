@@ -35,7 +35,7 @@ import {
   selectQuestionsForExam,
   toAttemptQuestions,
 } from "@/lib/assessments/engine";
-import { attemptsRemaining } from "@/lib/assessments/training-cycle";
+import { attemptsRemaining, withExamAttemptLimit, EXAM_MAX_ATTEMPTS } from "@/lib/assessments/training-cycle";
 import {
   pushAttemptLocal,
   readAssessmentStore,
@@ -105,11 +105,12 @@ function validateQuestionPayload(
 
 async function loadExam(examId: string): Promise<Exam | null> {
   if (await preferLocalData()) {
-    return readAssessmentStore().exams.find((e) => e.id === examId) || null;
+    const found = readAssessmentStore().exams.find((e) => e.id === examId);
+    return found ? withExamAttemptLimit(found) : null;
   }
   const snap = await getDoc(doc(db, COLLECTIONS.exams, examId));
   if (!snap.exists()) return null;
-  return { id: snap.id, ...snap.data() } as Exam;
+  return withExamAttemptLimit({ id: snap.id, ...snap.data() } as Exam);
 }
 
 async function loadBankQuestions(exam: Exam): Promise<Question[]> {
@@ -174,11 +175,12 @@ export async function listQuestions(filters?: {
 }
 
 export async function listExams(): Promise<Exam[]> {
-  if (await preferLocalData()) return readAssessmentStore().exams.filter((e) => e.isActive);
-  const snap = await getDocs(collection(db, COLLECTIONS.exams));
-  return snap.docs
-    .map((d) => ({ id: d.id, ...d.data() }) as Exam)
-    .filter((e) => e.isActive);
+  const rows = await preferLocalData()
+    ? readAssessmentStore().exams.filter((e) => e.isActive)
+    : (await getDocs(collection(db, COLLECTIONS.exams))).docs
+        .map((d) => ({ id: d.id, ...d.data() }) as Exam)
+        .filter((e) => e.isActive);
+  return rows.map((exam) => withExamAttemptLimit(exam));
 }
 
 export async function getExam(id: string): Promise<Exam | null> {
@@ -1142,9 +1144,6 @@ export async function createExam(
   if (data.passPercentage < 1 || data.passPercentage > 100) {
     throw new Error("Pass percentage must be between 1 and 100");
   }
-  if (data.maxAttempts < 1 || data.maxAttempts > 20) {
-    throw new Error("Max attempts must be between 1 and 20");
-  }
   const certPass = data.certificatePassPercentage ?? data.passPercentage;
   if (certPass < data.passPercentage || certPass > 100) {
     throw new Error("Certificate pass % must be ≥ exam pass % and ≤ 100");
@@ -1166,6 +1165,7 @@ export async function createExam(
   const now = nowISO();
   const exam: Exam = {
     ...data,
+    maxAttempts: EXAM_MAX_ATTEMPTS,
     certificatePassPercentage: certPass,
     id,
     createdAt: now,

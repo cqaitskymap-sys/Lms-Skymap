@@ -8,6 +8,7 @@ import {
   openRouterChat,
   providerErrorStatus,
 } from "@/lib/ai/openrouter";
+import { EXAM_MAX_ATTEMPTS } from "@/lib/assessments/training-cycle";
 
 const bodySchema = z.object({
   topic: z.string().min(3).max(400),
@@ -136,7 +137,7 @@ function normalizeBlueprint(
     Math.max(15, questionCount * 2)
   );
   const passPercentage = clampInt(draft.passPercentage, 50, 100, 70);
-  const maxAttempts = clampInt(draft.maxAttempts, 1, 5, 2);
+  const maxAttempts = EXAM_MAX_ATTEMPTS;
 
   let mix = {
     easy: clampInt(draft.difficultyMix?.easy, 0, questionCount, Math.floor(questionCount * 0.3)),
