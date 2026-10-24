@@ -13,6 +13,7 @@ import {
   listJobDescriptions,
   listTNIs,
   syncLocalTnisToFirebase,
+  trainingExecutionDatesBySop,
   updateTNI,
 } from "@/lib/services/training";
 import {
@@ -537,11 +538,12 @@ function TniPageInner() {
     employee: Employee;
     selectedJd?: JobDescription;
     selectedNeeds: NeedRow[];
+    executionDates?: Record<string, string>;
     preparedBy?: JdSignoff;
     approvedBy?: JdSignoff;
   }) {
     if (typeof window === "undefined") return;
-    const { employee, selectedJd, selectedNeeds, preparedBy, approvedBy } = args;
+    const { employee, selectedJd, selectedNeeds, executionDates, preparedBy, approvedBy } = args;
 
     const rowsHtml = selectedNeeds
       .map((need, index) => {
@@ -550,13 +552,15 @@ function TniPageInner() {
         const plannedDate = formatDateForPrint(
           need.targetCompletionDate || addDays(employee.dateOfJoining, index < 6 ? 1 : 2)
         );
+        const executedAt = need.sopId ? executionDates?.[need.sopId] : undefined;
+        const executedDate = executedAt ? formatDateForPrint(executedAt) : "";
         return `
           <tr>
             <td class="center">${index + 1}</td>
             <td>${escapeHtml(need.topic || "—")}</td>
             <td class="center">${sopRef}</td>
             <td class="center">${escapeHtml(plannedDate)}</td>
-            <td></td>
+            <td class="center">${escapeHtml(executedDate)}</td>
           </tr>
         `;
       })
@@ -1008,11 +1012,17 @@ function TniPageInner() {
     }
   }
 
-  function handlePrintSaved(record: TrainingNeedIdentification) {
+  async function handlePrintSaved(record: TrainingNeedIdentification) {
     const emp = employees.find((e) => e.id === record.employeeId);
     if (!emp) {
       toast.error("Employee details not found for this TNI");
       return;
+    }
+    let executionDates: Record<string, string> = {};
+    try {
+      executionDates = await trainingExecutionDatesBySop(emp.id, emp.userId);
+    } catch {
+      executionDates = {};
     }
     printTniSheet({
       employee: emp,
@@ -1028,6 +1038,7 @@ function TniPageInner() {
         rationale: n.rationale,
         targetCompletionDate: n.targetCompletionDate,
       })),
+      executionDates,
       preparedBy: record.preparedBySignoff,
       approvedBy: record.approvedBySignoff,
     });

@@ -100,6 +100,14 @@ const STAFF_DIRECTORY_ROLES: UserProfile["role"][] = [
   "trainer",
 ];
 
+/** Print numbers such as revision 0 and experience 5 as 00 and 05. */
+function formatTwoDigitValue(value: string | number): string {
+  const raw = String(value).trim();
+  const match = raw.match(/^(\d+)([\s\S]*)$/);
+  if (!match) return raw;
+  return `${match[1].padStart(2, "0")}${match[2]}`;
+}
+
 function staffSelectKey(uid: string): string {
   return `${STAFF_KEY_PREFIX}${uid}`;
 }
@@ -1114,7 +1122,6 @@ function JdPageInner() {
       emp?.departmentName ||
       card?.departmentName ||
       "—";
-    const subDepartment = record.subDepartment?.trim() || "";
     const employeeCode =
       emp?.employeeCode || card?.employeeCode || record.employeeCode || "—";
     const joiningDate = formatDate(
@@ -1123,7 +1130,8 @@ function JdPageInner() {
     const effectiveDate = formatDate(record.effectiveFrom);
     const qualification =
       (record.qualifications || []).filter(Boolean).join(", ") || "—";
-    const experienceText = record.experience?.trim() || "—";
+    const experienceRaw = record.experience?.trim() || "";
+    const experienceText = experienceRaw ? formatTwoDigitValue(experienceRaw) : "—";
     const managerFromList = employees.find(
       (row) => row.id === (emp?.reportingManagerId || card?.reportingManagerId)
     );
@@ -1134,7 +1142,7 @@ function JdPageInner() {
         card?.reportingManagerName,
         managerFromList ? employeeFullName(managerFromList) : ""
       ) || "—";
-    const revisionNo = String(record.version ?? 1);
+    const revisionNo = formatTwoDigitValue(record.version ?? 0);
     const supersedes =
       record.supersedesNo?.trim() ||
       (record.version && record.version > 1 ? String(record.version - 1) : "—");
@@ -1250,7 +1258,6 @@ function JdPageInner() {
             .info-table { table-layout: fixed; }
             .info-table .label { font-weight: 700; width: 24%; white-space: normal; }
             .info-table .value { width: 26%; word-break: break-word; }
-            .subdept { display: block; margin-top: 2px; }
             .intro { margin: 10px 0; font-size: 13px; line-height: 1.45; text-align: justify; }
             .resp-table th { text-align: center; font-weight: 700; background: #f3f3f3; }
             .center { text-align: center; width: 70px; }
@@ -1299,11 +1306,7 @@ function JdPageInner() {
               </tr>
               <tr>
                 <td class="label">Department</td>
-                <td class="value">${escapeHtml(deptName)}${
-                  subDepartment
-                    ? `<span class="subdept">${escapeHtml(subDepartment)}</span>`
-                    : ""
-                }</td>
+                <td class="value">${escapeHtml(deptName)}</td>
                 <td class="label">Employee Code</td>
                 <td class="value">${escapeHtml(employeeCode)}</td>
               </tr>
@@ -2038,7 +2041,9 @@ function JdPageInner() {
                         <span className="font-mono text-xs text-muted-foreground">
                           {record.jdNo || record.id}
                         </span>
-                        <span className="text-xs text-muted-foreground">Rev. {record.version}</span>
+                        <span className="text-xs text-muted-foreground">
+                          Rev. {formatTwoDigitValue(record.version ?? 0)}
+                        </span>
                       </div>
                       <p className="text-xs text-muted-foreground">
                         {(() => {

@@ -595,6 +595,65 @@ export async function getEmployeeAssignments(
   }
 }
 
+function keepEarlierDate(current: string | undefined, next?: string): string | undefined {
+  if (!next) return current;
+  if (!current || next < current) return next;
+  return current;
+}
+
+/** Earliest date each SOP was actually trained or acknowledged for this employee. */
+export async function trainingExecutionDatesBySop(
+  employeeId: string,
+  userId?: string
+): Promise<Record<string, string>> {
+  const dates: Record<string, string> = {};
+  const note = (sopId: string | undefined, iso?: string) => {
+    if (!sopId || !iso) return;
+    dates[sopId] = keepEarlierDate(dates[sopId], iso) || iso;
+  };
+
+  try {
+    const assignments = await getEmployeeAssignments(employeeId);
+    for (const row of assignments) note(row.sopId, row.trainingCompletedAt);
+  } catch {
+    /* Viewer may not be allowed to list assignments. */
+  }
+
+  if (preferTrainingLocal()) {
+    const { readSopStore } = await import("@/lib/sops/demo-store");
+    for (const ack of readSopStore().acknowledgements) {
+      if (ack.employeeId === employeeId || (userId && ack.userId === userId)) {
+        note(ack.sopId, ack.acknowledgedAt);
+      }
+    }
+    return dates;
+  }
+
+  const pullAcks = async (field: "employeeId" | "userId", value: string) => {
+    const snap = await getDocs(
+      query(collection(db, COLLECTIONS.sopAcknowledgements), where(field, "==", value))
+    );
+    for (const row of snap.docs) {
+      const data = row.data() as { sopId?: string; acknowledgedAt?: string };
+      note(data.sopId, data.acknowledgedAt);
+    }
+  };
+
+  try {
+    await pullAcks("employeeId", employeeId);
+  } catch {
+    /* Missing index or rules — acknowledgement dates are optional on the form. */
+  }
+  if (userId) {
+    try {
+      await pullAcks("userId", userId);
+    } catch {
+      /* Same as above. */
+    }
+  }
+  return dates;
+}
+
 function normalizeJdNo(value: string): string {
   return value.trim().toUpperCase();
 }
