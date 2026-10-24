@@ -14,7 +14,7 @@ import {
 import { GlassCard, GlassCardHeader } from "@/components/dashboard/glass-card";
 import { MotionItem } from "@/components/dashboard/motion";
 import { listTrainingSessions } from "@/lib/services/training";
-import { cn } from "@/lib/utils";
+import { calendarDayKey, cn } from "@/lib/utils";
 
 export function MiniCalendar({ month }: { month?: Date }) {
   const [now, setNow] = useState<Date | null>(null);
@@ -29,15 +29,21 @@ export function MiniCalendar({ month }: { month?: Date }) {
       void listTrainingSessions()
         .then((sessions) => {
           setEvents(
-            sessions.map((s) => ({
-              date: s.scheduledAt.slice(0, 10),
-              tone:
-                s.status === "completed"
-                  ? "accent"
-                  : s.status === "cancelled"
-                    ? "danger"
-                    : "primary",
-            }))
+            sessions.flatMap((s) => {
+              const date = calendarDayKey(s.scheduledAt);
+              if (!date) return [];
+              return [
+                {
+                  date,
+                  tone:
+                    s.status === "completed"
+                      ? "accent"
+                      : s.status === "cancelled"
+                        ? "danger"
+                        : "primary",
+                },
+              ];
+            })
           );
         })
         .catch(() => setEvents([]));

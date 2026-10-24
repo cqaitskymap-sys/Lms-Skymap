@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { calendarDateToIso, formatDate, formatDateTime, localDayBound } from "./utils";
+import { calendarDateToIso, calendarDayKey, formatDate, formatDateTime, localDayBound } from "./utils";
 
 test("date-only values are stored at noon UTC", () => {
   assert.equal(calendarDateToIso("2026-10-17"), "2026-10-17T12:00:00.000Z");
@@ -32,6 +32,19 @@ test("a real timestamp is not forced onto its UTC date", () => {
   const parsed = new Date(iso);
   parsed.setHours(23, 59, 59, 999);
   assert.equal(localDayBound(iso, true), parsed.getTime());
+});
+
+test("stored calendar days keep their written day", () => {
+  assert.equal(calendarDayKey("2026-10-17"), "2026-10-17");
+  assert.equal(calendarDayKey("2026-10-17T12:00:00.000Z"), "2026-10-17");
+  assert.equal(calendarDayKey("not-a-date"), null);
+});
+
+test("a real timestamp uses the viewer's local day", () => {
+  const iso = "2026-10-17T19:30:00.000Z";
+  const local = new Date(iso);
+  const expected = `${local.getFullYear()}-${String(local.getMonth() + 1).padStart(2, "0")}-${String(local.getDate()).padStart(2, "0")}`;
+  assert.equal(calendarDayKey(iso), expected);
 });
 
 test("a date-only bound is the end of that calendar day", () => {

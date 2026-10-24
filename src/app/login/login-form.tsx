@@ -134,18 +134,19 @@ function LoginForm() {
               ))}
             </div>
           </div>
-          <div className="space-y-1">
+          <div className="space-y-1 pb-8">
             <p className="text-sm text-slate-300/80">© 2026 SKYMAP · PharmaLMS</p>
             <DeveloperCredit className="text-slate-400/90" />
           </div>
         </div>
       </div>
 
-      <div className="dashboard-atmosphere relative flex min-h-screen w-full flex-col overflow-y-auto bg-gradient-to-br from-slate-50 via-white to-cyan-50/50 px-6 py-12 lg:h-full lg:min-h-0 lg:w-1/2 dark:from-transparent dark:via-transparent dark:to-transparent">
-        <div aria-hidden className="pointer-events-none absolute inset-0 hidden dark:block">
+      <div className="dashboard-atmosphere relative min-h-screen w-full min-w-0 overflow-hidden bg-gradient-to-br from-slate-50 via-white to-cyan-50/50 lg:h-full lg:min-h-0 lg:w-1/2 dark:from-transparent dark:via-transparent dark:to-transparent">
+        <div aria-hidden className="pointer-events-none absolute inset-0 hidden overflow-hidden dark:block">
           <div className="absolute left-1/2 top-[38%] h-72 w-72 -translate-x-1/2 -translate-y-1/2 rounded-full bg-sky-400/30 blur-[80px]" />
-          <div className="absolute -right-10 bottom-10 h-56 w-56 rounded-full bg-violet-500/30 blur-[70px]" />
+          <div className="absolute bottom-10 right-0 h-56 w-56 translate-x-1/3 rounded-full bg-violet-500/30 blur-[70px]" />
         </div>
+        <div className="relative flex h-full min-h-screen flex-col overflow-y-auto px-6 py-12 lg:min-h-0">
         <div className="relative mx-auto my-auto w-full max-w-md space-y-6">
 
           {deactivated && (
@@ -157,7 +158,7 @@ function LoginForm() {
           <div className="relative">
             <div
               aria-hidden
-              className="pointer-events-none absolute -inset-8 -z-10 rounded-[2rem] bg-sky-400/25 blur-3xl"
+              className="pointer-events-none absolute inset-x-2 -top-6 -z-10 h-24 rounded-[2rem] bg-sky-400/25 blur-3xl"
             />
             <Card className="relative overflow-hidden border-white/25 shadow-[0_30px_80px_-40px_rgba(80,140,255,0.85)]">
               <div className="pointer-events-none absolute inset-x-8 top-0 h-px bg-gradient-to-r from-transparent via-white/80 to-transparent" />
@@ -276,6 +277,7 @@ function LoginForm() {
             </Link>
           </p>
           <DeveloperCredit className="text-center text-muted-foreground/80 lg:hidden" />
+        </div>
         </div>
       </div>
     </div>

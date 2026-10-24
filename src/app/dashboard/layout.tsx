@@ -47,7 +47,7 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
           onMenuClick={hideChrome ? undefined : () => setMobileOpen(true)}
         />
         <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden px-4 py-4 md:px-5 md:py-5">
-          <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto pb-24 animate-fade-in">{children}</div>
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden overflow-y-auto pb-24 animate-fade-in">{children}</div>
         </main>
       </div>
       {!hideChrome && <AiTrainingChatbot />}

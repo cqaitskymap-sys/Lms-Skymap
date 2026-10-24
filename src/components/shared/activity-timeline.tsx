@@ -14,13 +14,13 @@ interface ActivityTimelineProps {
 
 export function ActivityTimeline({ items, maxHeight = "400px" }: ActivityTimelineProps) {
   return (
-    <div className="w-full overflow-y-auto pr-1" style={{ maxHeight }}>
+    <div className="w-full overflow-x-hidden overflow-y-auto pr-1" style={{ maxHeight }}>
       <div className="relative space-y-0 pl-6 pr-3">
         <div className="absolute left-2 top-2 bottom-2 w-px bg-border" />
         {items.map((item) => (
           <div key={item.id} className="relative pb-6 last:pb-0">
             <div className="absolute -left-4 top-1.5 h-2.5 w-2.5 rounded-full border-2 border-primary bg-background" />
-            <p className="text-sm font-medium">{item.description}</p>
+            <p className="break-words text-sm font-medium">{item.description}</p>
             <p className="text-xs text-muted-foreground">
               {auditActorText(item)} · {item.action} · {formatDateTime(item.timestamp)}
             </p>

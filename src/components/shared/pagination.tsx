@@ -17,6 +17,7 @@ export function Pagination({ page, totalPages, onPageChange, className }: Pagina
   return (
     <div className={cn("flex items-center justify-end gap-2 pt-4", className)}>
       <Button
+        type="button"
         variant="outline"
         size="sm"
         disabled={page <= 1}
@@ -29,6 +30,7 @@ export function Pagination({ page, totalPages, onPageChange, className }: Pagina
         Page {page} of {totalPages}
       </span>
       <Button
+        type="button"
         variant="outline"
         size="sm"
         disabled={page >= totalPages}

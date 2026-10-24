@@ -33,6 +33,27 @@ export function localDateInputValue(date = new Date()): string {
   return `${y}-${m}-${d}`;
 }
 
+/**
+ * Calendar day for a stored value.
+ * Noon/midnight UTC dates keep their written day. Real timestamps use the local day,
+ * so an evening UTC instant does not land on the previous date in India.
+ */
+export function calendarDayKey(value: string | Date | undefined | null): string | null {
+  if (value == null || value === "") return null;
+  if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) return null;
+    return localDateInputValue(value);
+  }
+  const trimmed = value.trim();
+  const parts = calendarParts(trimmed);
+  if (parts) {
+    return `${parts.y}-${String(parts.m).padStart(2, "0")}-${String(parts.d).padStart(2, "0")}`;
+  }
+  const parsed = new Date(trimmed);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return localDateInputValue(parsed);
+}
+
 export function localDayBound(dateStr: string, endOfDay: boolean): number {
   const parts = calendarParts(dateStr);
   if (parts) {
