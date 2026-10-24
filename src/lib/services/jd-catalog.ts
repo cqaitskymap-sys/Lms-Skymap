@@ -3,8 +3,7 @@
  * One document per department. When a document exists, it replaces the built-in lists.
  */
 
-import { collection, deleteDoc, doc, getDocs, setDoc } from "firebase/firestore/lite";
-import { auth, COLLECTIONS, db } from "@/lib/firebase/client";
+import { auth } from "@/lib/firebase/client";
 import { isDemoMode } from "@/lib/demo/data";
 import {
   normalizeJdCatalogDraft,
@@ -51,36 +50,8 @@ async function authHeaders(): Promise<HeadersInit> {
   };
 }
 
-function isPermissionDenied(err: unknown): boolean {
-  if (!err || typeof err !== "object") return false;
-  const code = "code" in err ? String((err as { code: unknown }).code) : "";
-  return code === "permission-denied" || /insufficient permissions/i.test(String(err));
-}
-
-function asRecord(id: string, data: Record<string, unknown>): JdMasterRecord {
-  return {
-    id,
-    departmentId: typeof data.departmentId === "string" ? data.departmentId : id,
-    sections: Array.isArray(data.sections)
-      ? (data.sections as JdMasterRecord["sections"])
-      : [],
-    designations: Array.isArray(data.designations)
-      ? (data.designations as JdMasterRecord["designations"])
-      : [],
-    updatedAt: typeof data.updatedAt === "string" ? data.updatedAt : "",
-    updatedBy: typeof data.updatedBy === "string" ? data.updatedBy : undefined,
-  };
-}
-
 export async function listJdMasters(): Promise<JdMasterRecord[]> {
   if (isDemoMode()) return readDemo();
-  try {
-    const snap = await getDocs(collection(db, COLLECTIONS.jdCatalog));
-    return snap.docs.map((row) => asRecord(row.id, row.data() as Record<string, unknown>));
-  } catch {
-    /* Client rules can block this collection until they are deployed. */
-  }
-
   const res = await fetch("/api/jd-catalog", { headers: await authHeaders() });
   const json = await res.json().catch(() => ({}));
   if (!res.ok || !Array.isArray(json.masters)) {
@@ -118,16 +89,6 @@ export async function saveJdMaster(input: {
   }
 
   if (!auth.currentUser) throw new Error("You must be signed in");
-  try {
-    await setDoc(doc(db, COLLECTIONS.jdCatalog, departmentId), stored);
-    notifyUpdated();
-    return stored;
-  } catch (err) {
-    if (!isPermissionDenied(err)) {
-      throw err instanceof Error ? err : new Error("Could not save JD lists");
-    }
-  }
-
   const res = await fetch("/api/jd-catalog", {
     method: "PUT",
     headers: await authHeaders(),
@@ -148,15 +109,6 @@ export async function deleteJdMaster(departmentId: string): Promise<void> {
     return;
   }
   if (!auth.currentUser) throw new Error("You must be signed in");
-  try {
-    await deleteDoc(doc(db, COLLECTIONS.jdCatalog, departmentId));
-    notifyUpdated();
-    return;
-  } catch (err) {
-    if (!isPermissionDenied(err)) {
-      throw err instanceof Error ? err : new Error("Could not restore the original lists");
-    }
-  }
   const res = await fetch(
     `/api/jd-catalog?departmentId=${encodeURIComponent(departmentId)}`,
     { method: "DELETE", headers: await authHeaders() }

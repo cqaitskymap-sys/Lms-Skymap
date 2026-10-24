@@ -43,6 +43,32 @@ export function useExams() {
   return { exams, loading, refresh };
 }
 
+export function useQuestionBanks() {
+  const [banks, setBanks] = useState<QuestionBank[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    try {
+      setBanks(await listQuestionBanks());
+    } catch (err) {
+      console.warn("[useQuestionBanks] refresh failed:", err);
+      setBanks([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refresh();
+    const onUpdate = () => void refresh();
+    window.addEventListener(ASSESSMENT_UPDATED_EVENT, onUpdate);
+    return () => window.removeEventListener(ASSESSMENT_UPDATED_EVENT, onUpdate);
+  }, [refresh]);
+
+  return { banks, loading, refresh };
+}
+
 export function useQuestionBank(filters?: {
   bankId?: string;
   difficulty?: string;

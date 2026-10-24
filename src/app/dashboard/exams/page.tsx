@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
 import { useExamLock } from "@/contexts/exam-lock-context";
-import { useExamAnalytics, useExamLeaderboard, useExams, useQuestionBank } from "@/hooks/use-assessment";
+import { useExamAnalytics, useExamLeaderboard, useExams, useQuestionBanks } from "@/hooks/use-assessment";
 import {
   autoSaveAssessment,
   deleteExam,
@@ -77,7 +77,7 @@ function ExamsPageInner() {
   const { profile } = useAuth();
   const { lockExam, unlockExam, isLocked, attemptId: lockedAttemptId } = useExamLock();
   const { exams, loading: examsLoading, refresh: refreshExams } = useExams();
-  const { banks } = useQuestionBank();
+  const { banks } = useQuestionBanks();
 
   const [phase, setPhase] = useState<Phase>("list");
   const [exam, setExam] = useState<Exam | null>(null);
