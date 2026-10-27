@@ -50,15 +50,124 @@ export function isJdSignoffParty(
   return false;
 }
 
+export const MAX_ABSENCE_HANDOVERS = 3;
+
+export function absenceHandoverParties(
+  jd: Pick<
+    JobDescription,
+    | "absenceHandovers"
+    | "absenceHandoverEmployeeId"
+    | "absenceHandoverUserId"
+    | "absenceHandoverName"
+    | "absenceHandoverStatus"
+    | "absenceHandoverAcknowledgedAt"
+    | "absenceHandoverAcknowledgedBy"
+    | "absenceHandoverAcknowledgedByName"
+    | "absenceHandoverSignatureText"
+  >
+): JdSignoff[] {
+  const fromList = (jd.absenceHandovers || []).filter(
+    (signoff) => signoff.employeeId || signoff.userId
+  );
+  if (fromList.length) return fromList.slice(0, MAX_ABSENCE_HANDOVERS);
+  const legacy = signoffFromLegacyAbsence(jd as JobDescription);
+  return legacy ? [legacy] : [];
+}
+
+export function formatAbsenceHandoverNames(parties: { name?: string }[]): string {
+  const names = parties.map((party) => party.name?.trim()).filter((name): name is string => Boolean(name));
+  if (names.length <= 1) return names[0] || "";
+  if (names.length === 2) return `${names[0]} and ${names[1]}`;
+  return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+}
+
+/** Fields written on the JD so older screens and inbox queries stay in sync. */
+export function absenceHandoverWriteFields(parties: JdSignoff[]): Partial<JobDescription> {
+  const compact = parties.slice(0, MAX_ABSENCE_HANDOVERS).map((party) => compactJdSignoff(party));
+  const first = compact[0];
+  const employeeIds = compact
+    .map((party) => party.employeeId)
+    .filter((id): id is string => Boolean(id));
+  const userIds = [
+    ...new Set(compact.map((party) => party.userId).filter((id): id is string => Boolean(id))),
+  ];
+  const names = formatAbsenceHandoverNames(compact);
+  const allAcknowledged =
+    compact.length > 0 && compact.every((party) => party.status === "acknowledged");
+  const singleAcknowledged =
+    compact.length === 1 && compact[0].status === "acknowledged" ? compact[0] : undefined;
+  return {
+    absenceHandovers: compact,
+    absenceHandoverEmployeeIds: employeeIds,
+    absenceHandoverUserIds: userIds,
+    absenceHandoverEmployeeId: first?.employeeId,
+    absenceHandoverName: names || undefined,
+    absenceHandoverUserId: first?.userId,
+    absenceHandoverStatus: compact.length ? (allAcknowledged ? "acknowledged" : "pending") : undefined,
+    absenceHandoverAcknowledgedAt: singleAcknowledged?.acknowledgedAt,
+    absenceHandoverAcknowledgedBy: singleAcknowledged?.acknowledgedBy,
+    absenceHandoverAcknowledgedByName: singleAcknowledged?.acknowledgedByName,
+    absenceHandoverSignatureText: singleAcknowledged?.signatureText,
+  };
+}
+
+export function acknowledgeAbsenceParty(
+  jd: JobDescription,
+  actor: { uid: string; name: string; employeeId?: string },
+  extraEmployeeIds: string[],
+  now: string
+): JdSignoff[] {
+  const parties = absenceHandoverParties(jd);
+  if (!parties.length) {
+    throw new Error("This Job Description has no person named for that signature");
+  }
+  const mine = parties.find(
+    (signoff) =>
+      isJdSignoffParty(signoff, actor, extraEmployeeIds) && signoff.status !== "acknowledged"
+  );
+  if (!mine) {
+    const already = parties.some((signoff) => isJdSignoffParty(signoff, actor, extraEmployeeIds));
+    throw new Error(
+      already
+        ? "This signature is already approved"
+        : "Only the named person can approve this signature"
+    );
+  }
+  const name = (actor.name || mine.name || "Assignee").trim();
+  const signed = compactJdSignoff({
+    ...mine,
+    status: "acknowledged",
+    acknowledgedAt: now,
+    acknowledgedBy: actor.uid,
+    acknowledgedByName: name,
+    signatureText: buildJdComputerGeneratedSignature(name, now),
+  });
+  return parties.map((signoff) =>
+    sameJdSignoffPerson(signoff, mine) ? signed : compactJdSignoff(signoff)
+  );
+}
+
 export function isJdHandoverAssignee(
-  jd: Pick<JobDescription, "absenceHandoverUserId" | "absenceHandoverEmployeeId" | "assignedBy" | "acceptedBy">,
+  jd: Pick<
+    JobDescription,
+    | "absenceHandovers"
+    | "absenceHandoverUserId"
+    | "absenceHandoverEmployeeId"
+    | "absenceHandoverName"
+    | "absenceHandoverStatus"
+    | "absenceHandoverAcknowledgedAt"
+    | "absenceHandoverAcknowledgedBy"
+    | "absenceHandoverAcknowledgedByName"
+    | "absenceHandoverSignatureText"
+    | "assignedBy"
+    | "acceptedBy"
+  >,
   actor: { uid: string; employeeId?: string },
   extraEmployeeIds: string[] = []
 ): boolean {
-  if (jd.absenceHandoverUserId && jd.absenceHandoverUserId === actor.uid) return true;
-  const ids = new Set(extraEmployeeIds.filter(Boolean));
-  if (actor.employeeId) ids.add(actor.employeeId);
-  if (jd.absenceHandoverEmployeeId && ids.has(jd.absenceHandoverEmployeeId)) return true;
+  if (absenceHandoverParties(jd).some((signoff) => isJdSignoffParty(signoff, actor, extraEmployeeIds))) {
+    return true;
+  }
   if (isJdSignoffParty(jd.assignedBy, actor, extraEmployeeIds)) return true;
   if (isJdSignoffParty(jd.acceptedBy, actor, extraEmployeeIds)) return true;
   return false;
@@ -85,10 +194,17 @@ export function signoffFromLegacyAbsence(jd: JobDescription): JdSignoff | undefi
 export function getJdSignoff(jd: JobDescription, slot: JdSignoffSlot): JdSignoff | undefined {
   if (slot === "assigned_by") return jd.assignedBy;
   if (slot === "accepted_by") return jd.acceptedBy;
-  return signoffFromLegacyAbsence(jd);
+  return absenceHandoverParties(jd)[0];
 }
 
 export function isJdSignoffPending(jd: JobDescription, slot: JdSignoffSlot): boolean {
+  if (slot === "absence_handover") {
+    const parties = absenceHandoverParties(jd);
+    return parties.some(
+      (signoff) =>
+        (signoff.employeeId || signoff.userId) && signoff.status !== "acknowledged"
+    );
+  }
   const signoff = getJdSignoff(jd, slot);
   if (!signoff) return false;
   if (!signoff.employeeId && !signoff.userId) return false;
@@ -101,12 +217,13 @@ export function actorPendingSlots(
   extraEmployeeIds: string[] = []
 ): JdSignoffSlot[] {
   const slots: JdSignoffSlot[] = [];
-  if (
-    isJdSignoffParty(signoffFromLegacyAbsence(jd), actor, extraEmployeeIds) &&
-    isJdSignoffPending(jd, "absence_handover")
-  ) {
-    slots.push("absence_handover");
-  }
+  const myHandover = absenceHandoverParties(jd).some(
+    (signoff) =>
+      isJdSignoffParty(signoff, actor, extraEmployeeIds) &&
+      (signoff.employeeId || signoff.userId) &&
+      signoff.status !== "acknowledged"
+  );
+  if (myHandover) slots.push("absence_handover");
   if (isJdSignoffParty(jd.assignedBy, actor, extraEmployeeIds) && isJdSignoffPending(jd, "assigned_by")) {
     slots.push("assigned_by");
   }

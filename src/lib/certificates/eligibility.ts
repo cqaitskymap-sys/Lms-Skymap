@@ -2,13 +2,14 @@ import type { AssessmentAttempt, Exam } from "@/types";
 
 export function collectRequiredSopIds(params: {
   tniNeeds: Array<{ sopId?: string }>;
-  assignments: Array<{ sopId?: string }>;
+  assignments: Array<{ sopId?: string; excludeFromCertificate?: boolean }>;
 }): Set<string> {
   const sopIds = new Set<string>();
   for (const need of params.tniNeeds) {
     if (need.sopId) sopIds.add(need.sopId);
   }
   for (const assignment of params.assignments) {
+    if (assignment.excludeFromCertificate) continue;
     if (assignment.sopId) sopIds.add(assignment.sopId);
   }
   return sopIds;

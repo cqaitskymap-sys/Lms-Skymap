@@ -60,7 +60,7 @@ export function OjtNextStepBanner({
       <div className="space-y-1">
         <div className="flex flex-wrap items-center gap-2">
           <p className="font-semibold">{action.title}</p>
-          <StatusBadge status={assignment.status} label={ojtStatusLabel(assignment.status)} />
+          <StatusBadge status={assignment.status} label={ojtStatusLabel(assignment.status, assignment.selfStudy)} />
         </div>
         <p className="text-sm text-muted-foreground">{action.hint}</p>
         <p className="text-xs text-muted-foreground">Who should act now: {action.waitingOn}</p>

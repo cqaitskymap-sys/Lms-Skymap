@@ -19,7 +19,12 @@ import {
   type JdPendingSignoffRow,
 } from "@/lib/services/jd-handover";
 import { resolveLinkedUserUid } from "@/lib/services/notifications";
-import { sameJdSignoffPerson } from "@/lib/jd/absence-handover";
+import {
+  absenceHandoverParties,
+  formatAbsenceHandoverNames,
+  MAX_ABSENCE_HANDOVERS,
+  sameJdSignoffPerson,
+} from "@/lib/jd/absence-handover";
 import { JdHandoverPendingCard } from "@/components/jd/jd-handover-pending";
 import { TRAINING_UPDATED_EVENT } from "@/lib/training/demo-store";
 import {
@@ -280,7 +285,7 @@ function JdPageInner() {
   const [staffUsers, setStaffUsers] = useState<UserProfile[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [employeeId, setEmployeeId] = useState("");
-  const [handoverEmployeeId, setHandoverEmployeeId] = useState("");
+  const [handoverEmployeeIds, setHandoverEmployeeIds] = useState<string[]>([]);
   const [assignedByEmployeeId, setAssignedByEmployeeId] = useState("");
   const [acceptedByEmployeeId, setAcceptedByEmployeeId] = useState("");
   const [jdNo, setJdNo] = useState("");
@@ -549,7 +554,7 @@ function JdPageInner() {
       rows = rows.filter(
         (r) =>
           r.employeeId === employeeScopeId ||
-          r.absenceHandoverEmployeeId === employeeScopeId ||
+          absenceHandoverParties(r).some((party) => party.employeeId === employeeScopeId) ||
           r.assignedBy?.employeeId === employeeScopeId ||
           r.acceptedBy?.employeeId === employeeScopeId ||
           assignedIds.has(r.id)
@@ -571,9 +576,22 @@ function JdPageInner() {
     [scopedEmployees, employeeId]
   );
 
-  const selectedHandover = useMemo(
-    () => employees.find((e) => e.id === handoverEmployeeId) || null,
-    [employees, handoverEmployeeId]
+  const handoverOptions = useMemo(() => {
+    const byId = new Map(handoverCandidates.map((employee) => [employee.id, employee]));
+    for (const id of handoverEmployeeIds) {
+      if (byId.has(id)) continue;
+      const employee = employees.find((row) => row.id === id);
+      if (employee) byId.set(id, employee);
+    }
+    return [...byId.values()];
+  }, [handoverCandidates, handoverEmployeeIds, employees]);
+
+  const selectedHandovers = useMemo(
+    () =>
+      handoverEmployeeIds
+        .map((id) => employees.find((employee) => employee.id === id))
+        .filter((employee): employee is Employee => Boolean(employee)),
+    [employees, handoverEmployeeIds]
   );
 
   const selectedAssigned = useMemo(
@@ -667,6 +685,13 @@ function JdPageInner() {
   }, [employeeId, editingId]);
 
   useEffect(() => {
+    if (!employeeId) return;
+    setHandoverEmployeeIds((current) =>
+      current.includes(employeeId) ? current.filter((id) => id !== employeeId) : current
+    );
+  }, [employeeId]);
+
+  useEffect(() => {
     if (!acknowledgeFromUrl) return;
     const node = document.getElementById(`jd-${acknowledgeFromUrl}`);
     node?.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -688,7 +713,7 @@ function JdPageInner() {
     setSupersedesNo("");
     setEffectiveFrom(localDateInputValue());
     setEmployeeId("");
-    setHandoverEmployeeId("");
+    setHandoverEmployeeIds([]);
     setAssignedByEmployeeId("");
     setAcceptedByEmployeeId("");
   }
@@ -789,13 +814,19 @@ function JdPageInner() {
       toast.error("Department required — handover employee first");
       return;
     }
-    const handoverEmp = employees.find((x) => x.id === handoverEmployeeId);
-    if (!handoverEmp) {
+    const handoverEmps = handoverEmployeeIds
+      .map((id) => employees.find((employee) => employee.id === id))
+      .filter((employee): employee is Employee => Boolean(employee));
+    if (!handoverEmps.length) {
       toast.error("Select who will take over in case of absence");
       return;
     }
-    if (handoverEmp.id === employeeId) {
-      toast.error("Absence handover person must be someone else");
+    if (handoverEmps.length > MAX_ABSENCE_HANDOVERS) {
+      toast.error("You can name up to 3 colleagues for absence handover");
+      return;
+    }
+    if (handoverEmps.some((employee) => employee.id === employeeId)) {
+      toast.error("Absence handover people must be someone else");
       return;
     }
     const assignedIdentity = selectionIdentity(assignedByEmployeeId, {
@@ -810,9 +841,8 @@ function JdPageInner() {
       toast.error("Assigned by and Accepted by must be different people");
       return;
     }
-    const handoverName = employeeFullName(handoverEmp);
-    if (!handoverName) {
-      toast.error("Selected handover person has no name");
+    if (handoverEmps.some((employee) => !employeeFullName(employee))) {
+      toast.error("Each handover person needs a name");
       return;
     }
 
@@ -843,8 +873,18 @@ function JdPageInner() {
 
     setBusy(true);
     try {
-      const handoverUid =
-        handoverEmp.userId || (await resolveLinkedUserUid(handoverEmp.id));
+      const absenceHandovers: JdSignoff[] = [];
+      for (const handoverEmp of handoverEmps) {
+        const handoverUid =
+          handoverEmp.userId || (await resolveLinkedUserUid(handoverEmp.id));
+        absenceHandovers.push({
+          employeeId: handoverEmp.id,
+          name: employeeFullName(handoverEmp),
+          designation: handoverEmp.designation,
+          ...(handoverUid ? { userId: handoverUid } : {}),
+          status: "pending",
+        });
+      }
       const assignedUid = assignedIsSelf
         ? profile.uid
         : assignedStaff
@@ -919,9 +959,7 @@ function JdPageInner() {
         experience: experience.trim(),
         supersedesNo: supersedesNo.trim(),
         effectiveFrom: calendarDateToIso(effectiveFrom),
-        absenceHandoverEmployeeId: handoverEmp.id,
-        absenceHandoverName: handoverName,
-        ...(handoverUid ? { absenceHandoverUserId: handoverUid } : {}),
+        absenceHandovers,
         assignedBy,
         acceptedBy,
       };
@@ -939,11 +977,14 @@ function JdPageInner() {
         if (hasUid) willNotify.push(name);
         else missingLogin.push(name);
       };
-      notifyIfChanged(
-        !previous || previous.absenceHandoverEmployeeId !== handoverEmp.id,
-        handoverName,
-        Boolean(handoverUid)
-      );
+      const previousHandovers = previous ? absenceHandoverParties(previous) : [];
+      for (const handover of absenceHandovers) {
+        notifyIfChanged(
+          !previousHandovers.some((party) => sameJdSignoffPerson(party, handover)),
+          handover.name || "",
+          Boolean(handover.userId)
+        );
+      }
       notifyIfChanged(
         !previous || !sameJdSignoffPerson(previous.assignedBy, assignedBy),
         assignedName,
@@ -1024,7 +1065,11 @@ function JdPageInner() {
     setExperience(record.experience || "");
     setSupersedesNo(record.supersedesNo || "");
     setEffectiveFrom((record.effectiveFrom || "").slice(0, 10));
-    setHandoverEmployeeId(record.absenceHandoverEmployeeId || "");
+    setHandoverEmployeeIds(
+      absenceHandoverParties(record)
+        .map((party) => party.employeeId)
+        .filter((id): id is string => Boolean(id))
+    );
     setAssignedByEmployeeId(
       signoffToSelectValue(record.assignedBy, {
         selfUid: profile?.uid,
@@ -1148,13 +1193,30 @@ function JdPageInner() {
       (record.version && record.version > 1 ? String(record.version - 1) : "—");
     const jdNo = (record.jdNo || record.id).toUpperCase();
     const logoUrl = `${window.location.origin}/brand/skymap-logo.png`;
-    const handoverName = record.absenceHandoverName?.trim() || "";
-    const handoverAcked = record.absenceHandoverStatus === "acknowledged";
-    const ackName =
-      record.absenceHandoverAcknowledgedByName?.trim() || handoverName;
-    const ackStamp = record.absenceHandoverAcknowledgedAt
-      ? formatDate(record.absenceHandoverAcknowledgedAt)
-      : "";
+    const handoverParties = absenceHandoverParties(record);
+    const handoverName = formatAbsenceHandoverNames(handoverParties);
+    const handoverAckHtml = handoverParties.length
+      ? handoverParties
+          .map((party) => {
+            const acked = party.status === "acknowledged";
+            const ackName = (party.acknowledgedByName || party.name || "").trim();
+            const ackStamp = party.acknowledgedAt ? formatDate(party.acknowledgedAt) : "";
+            return `
+              <p class="ack">
+                Acknowledged by${party.name ? ` (${escapeHtml(party.name)})` : ""}:
+                ${
+                  acked && ackName
+                    ? `<span class="esign-block">
+                        <span class="esign">${escapeHtml(ackName)}</span>
+                        <span class="esign-note">Electronically computer-generated signature</span>
+                        ${ackStamp ? `<span class="esign-date">${escapeHtml(ackStamp)}</span>` : ""}
+                      </span>`
+                    : `<span class="line">&nbsp;</span>`
+                }
+              </p>`;
+          })
+          .join("")
+      : `<p class="ack">Acknowledged by: <span class="line">&nbsp;</span></p>`;
 
     const printSignCell = (title: string, signoff?: JdSignoff) => {
       const signed =
@@ -1358,18 +1420,7 @@ function JdPageInner() {
               }
               with intimation to the assignee.
             </p>
-            <p class="ack">
-              Acknowledged by:
-              ${
-                handoverAcked && ackName
-                  ? `<span class="esign-block">
-                      <span class="esign">${escapeHtml(ackName)}</span>
-                      <span class="esign-note">Electronically computer-generated signature</span>
-                      ${ackStamp ? `<span class="esign-date">${escapeHtml(ackStamp)}</span>` : ""}
-                    </span>`
-                  : `<span class="line">&nbsp;</span>`
-              }
-            </p>
+            ${handoverAckHtml}
           </div>
           <div class="page">
             ${headerBlock}
@@ -1820,45 +1871,77 @@ function JdPageInner() {
                 </div>
                 <div className="space-y-2">
                   <Label>In case of absence, hand over responsibility to</Label>
-                  <Select
-                    value={handoverEmployeeId || undefined}
-                    onValueChange={setHandoverEmployeeId}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select colleague" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {(handoverEmployeeId &&
-                      !handoverCandidates.some((e) => e.id === handoverEmployeeId) &&
-                      selectedHandover
-                        ? [selectedHandover, ...handoverCandidates]
-                        : handoverCandidates
-                      ).map((e) => (
-                        <SelectItem key={e.id} value={e.id}>
-                          {employeeFullName(e)} · {e.employeeCode}
-                          {e.designation ? ` · ${e.designation}` : ""}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  {handoverCandidates.length === 0 && (
-                    <p className="text-xs text-muted-foreground">
-                      No other employees available to name as absence handover.
-                    </p>
-                  )}
+                  <div className="max-h-48 space-y-1 overflow-y-auto rounded-md border p-2">
+                    {handoverOptions.length === 0 ? (
+                      <p className="px-1 py-2 text-xs text-muted-foreground">
+                        No other employees available to name as absence handover.
+                      </p>
+                    ) : (
+                      handoverOptions.map((colleague) => {
+                        const checked = handoverEmployeeIds.includes(colleague.id);
+                        return (
+                          <label
+                            key={colleague.id}
+                            className="flex cursor-pointer items-center gap-2 rounded px-1 py-1.5 text-sm hover:bg-muted/60"
+                          >
+                            <Checkbox
+                              checked={checked}
+                              onCheckedChange={(value) => {
+                                const nextChecked = value === true;
+                                if (
+                                  nextChecked &&
+                                  !checked &&
+                                  handoverEmployeeIds.length >= MAX_ABSENCE_HANDOVERS
+                                ) {
+                                  toast.error(
+                                    "You can name up to 3 colleagues for absence handover"
+                                  );
+                                  return;
+                                }
+                                setHandoverEmployeeIds((current) =>
+                                  nextChecked
+                                    ? current.includes(colleague.id)
+                                      ? current
+                                      : [...current, colleague.id]
+                                    : current.filter((id) => id !== colleague.id)
+                                );
+                              }}
+                            />
+                            <span>
+                              {employeeFullName(colleague)} · {colleague.employeeCode}
+                              {colleague.designation ? ` · ${colleague.designation}` : ""}
+                            </span>
+                          </label>
+                        );
+                      })
+                    )}
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Select up to 3 colleagues ({handoverEmployeeIds.length} of{" "}
+                    {MAX_ABSENCE_HANDOVERS}). Each person gets a notification and must
+                    Approve. Then their e-signature appears on the JD.
+                  </p>
                   <p className="text-sm leading-relaxed text-muted-foreground">
                     In case of your absence; hand over your responsibility to{" "}
                     <span className="font-semibold text-foreground">
-                      {selectedHandover
-                        ? employeeFullName(selectedHandover)
-                        : "_______________"}
+                      {formatAbsenceHandoverNames(
+                        selectedHandovers.map((colleague) => ({
+                          name: employeeFullName(colleague),
+                        }))
+                      ) || "_______________"}
                     </span>{" "}
                     with intimation to the assignee.
                   </p>
-                  {handoverEmployeeId && !selectedHandover?.userId && (
+                  {selectedHandovers.some((colleague) => !colleague.userId) && (
                     <p className="text-xs text-amber-700 dark:text-amber-200">
-                      This person has no login account, so they will not receive a
-                      notification.
+                      {selectedHandovers
+                        .filter((colleague) => !colleague.userId)
+                        .map((colleague) => employeeFullName(colleague))
+                        .join(", ")}{" "}
+                      {selectedHandovers.filter((colleague) => !colleague.userId).length === 1
+                        ? "has"
+                        : "have"}{" "}
+                      no login account, so they will not receive a notification.
                     </p>
                   )}
                 </div>
@@ -2075,40 +2158,34 @@ function JdPageInner() {
                           Uploaded file: {record.sourceDocument.fileName}
                         </a>
                       )}
-                      {record.absenceHandoverName && (
-                        <p className="text-xs text-muted-foreground">
-                          Absence handover:{" "}
-                          <span className="font-medium text-foreground">
-                            {record.absenceHandoverName}
-                          </span>
-                          {record.absenceHandoverStatus === "acknowledged"
-                            ? ` · acknowledged ${formatDate(record.absenceHandoverAcknowledgedAt)}`
-                            : " · pending acknowledgement"}
-                        </p>
-                      )}
+                      {absenceHandoverParties(record).map((party) => (
+                        <div key={party.employeeId || party.userId || party.name}>
+                          {signoffLine("Absence handover", party)}
+                          {party.status === "acknowledged" &&
+                            (party.acknowledgedByName || party.signatureText) && (
+                              <div className="mt-1.5 w-fit max-w-full rounded-md border border-dashed bg-muted/40 px-2.5 py-1.5">
+                                <p
+                                  className="text-base leading-tight text-blue-800 dark:text-blue-300"
+                                  style={{
+                                    fontFamily: '"Segoe Script", "Lucida Handwriting", cursive',
+                                  }}
+                                >
+                                  {party.acknowledgedByName || party.name}
+                                </p>
+                                <p className="text-[11px] italic leading-tight text-muted-foreground">
+                                  Electronically computer-generated signature
+                                </p>
+                                {party.signatureText && (
+                                  <p className="text-[11px] leading-tight text-muted-foreground">
+                                    {party.signatureText}
+                                  </p>
+                                )}
+                              </div>
+                            )}
+                        </div>
+                      ))}
                       {signoffLine("Assigned by", record.assignedBy)}
                       {signoffLine("Accepted by", record.acceptedBy)}
-                      {record.absenceHandoverStatus === "acknowledged" &&
-                        (record.absenceHandoverAcknowledgedByName ||
-                          record.absenceHandoverSignatureText) && (
-                          <div className="mt-1.5 w-fit max-w-full rounded-md border border-dashed bg-muted/40 px-2.5 py-1.5">
-                            <p
-                              className="text-base leading-tight text-blue-800 dark:text-blue-300"
-                              style={{ fontFamily: '"Segoe Script", "Lucida Handwriting", cursive' }}
-                            >
-                              {record.absenceHandoverAcknowledgedByName ||
-                                record.absenceHandoverName}
-                            </p>
-                            <p className="text-[11px] italic leading-tight text-muted-foreground">
-                              Electronically computer-generated signature
-                            </p>
-                            {record.absenceHandoverSignatureText && (
-                              <p className="text-[11px] leading-tight text-muted-foreground">
-                                {record.absenceHandoverSignatureText}
-                              </p>
-                            )}
-                          </div>
-                        )}
                     </div>
                     <div className="flex flex-wrap items-center gap-1.5">
                       <Button

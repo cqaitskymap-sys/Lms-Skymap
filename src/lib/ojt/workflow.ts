@@ -7,9 +7,9 @@ import {
 } from "@/lib/ojt/constants";
 
 const TRANSITIONS: Record<OjtStatus, readonly OjtStatus[]> = {
-  draft: ["selected", "cancelled"],
-  selected: ["assigned", "scheduled", "cancelled"],
-  assigned: ["scheduled", "cancelled"],
+  draft: ["selected", "in_progress", "cancelled"],
+  selected: ["assigned", "scheduled", "in_progress", "cancelled"],
+  assigned: ["scheduled", "in_progress", "cancelled"],
   scheduled: ["in_progress", "cancelled", "rescheduled"],
   // Employee ack can be disabled in settings — evaluation then jumps to HOD / QA / completed.
   in_progress: [

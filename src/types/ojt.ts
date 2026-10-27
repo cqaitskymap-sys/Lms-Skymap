@@ -263,6 +263,10 @@ export interface OjtAssignment extends Timestamps, OjtApprovalConfig {
   location?: string;
   trainerId?: string;
   trainerName?: string;
+  /** No trainer. The employee logs in, reads the SOP, then takes the exam. */
+  selfStudy?: boolean;
+  /** Training row that unlocks the SOP exam. It does not issue a certificate. */
+  trainingAssignmentId?: string;
   supervisorId?: string;
   supervisorName?: string;
   hodUserId?: string;
@@ -326,6 +330,13 @@ export interface OjtSettings extends Timestamps, OjtApprovalConfig {
   matrixApprovals: OjtFormApprovalConfig;
 }
 
+/** Person chosen to add the electronic signature for one printed block. */
+export interface OjtFormAssignee {
+  role: OjtFormSignoffRole;
+  userId: string;
+  userName: string;
+}
+
 export interface OjtFormSignoff {
   role: OjtFormSignoffRole;
   action: "prepared" | "checked" | "verified" | "approved" | "rejected";
@@ -361,6 +372,8 @@ export interface OjtFormDocument extends Timestamps {
   companyName?: string;
   trainingCoordinatorUserId?: string;
   trainingCoordinatorName?: string;
+  /** Chosen approver for each signature block. */
+  assignees?: OjtFormAssignee[];
   signoffs: OjtFormSignoff[];
   revisions: OjtFormRevision[];
   locked: boolean;

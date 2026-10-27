@@ -436,7 +436,15 @@ export async function submitAssessment(
 
   const evaluated = evaluateAttempt(questionsWithKeys, mergedAnswers, exam);
   const passed = !expired && evaluated.passed;
-  const certificateEligible = !expired && evaluated.certificateEligible;
+  let excludeFromCertificate = false;
+  if (attempt.assignmentId) {
+    const { readTrainingStore } = await import("@/lib/training/demo-store");
+    excludeFromCertificate = Boolean(
+      readTrainingStore().assignments.find((row) => row.id === attempt.assignmentId)?.excludeFromCertificate
+    );
+  }
+  const certificateEligible =
+    !expired && evaluated.certificateEligible && !excludeFromCertificate;
 
   const updated: AssessmentAttempt = {
     ...attempt,
@@ -598,6 +606,7 @@ async function handleTrainingAssessmentResult(
             row.id !== assignmentId &&
             row.employeeId === current.employeeId &&
             row.sopId === current.sopId &&
+            !row.excludeFromCertificate &&
             openStatuses.has(row.status)
         );
         if (!alreadyOpen) {
@@ -618,12 +627,26 @@ async function handleTrainingAssessmentResult(
             isRetraining: true,
             previousAssignmentId: assignmentId,
             triggeredBySopRevision: false,
+            ojtAssignmentId: current.ojtAssignmentId,
+            excludeFromCertificate: current.excludeFromCertificate,
             createdAt: now,
             updatedAt: now,
             createdBy: actorId,
           });
           writeTrainingStore(fresh);
         }
+      }
+      if (current && (status === "passed" || status === "failed")) {
+        const { settleOjtSelfStudyAfterExam } = await import("@/lib/services/ojt");
+        await settleOjtSelfStudyAfterExam({
+          employeeId: current.employeeId,
+          sopId: current.sopId,
+          ojtAssignmentId: current.ojtAssignmentId,
+          passed: status === "passed",
+          finalFail: status === "failed",
+          percentage: attempt.percentage,
+          actorId,
+        });
       }
     } catch {
       /* non-blocking */
@@ -707,6 +730,8 @@ async function handleTrainingAssessmentResult(
       isRetraining: true,
       previousAssignmentId: assignmentId,
       triggeredBySopRevision: false,
+      ojtAssignmentId: prev.ojtAssignmentId,
+      excludeFromCertificate: prev.excludeFromCertificate,
       createdAt: now,
       updatedAt: now,
       createdBy: actorId,

@@ -157,8 +157,17 @@ export async function issueCertificateForAttemptServer(
     .where("employeeId", "==", attempt.employeeId)
     .get();
   const assignmentRows = assignmentSnap.docs.map((d) => {
-    const data = d.data() as { sopId?: string; status?: string };
-    return { id: d.id, sopId: data.sopId, status: data.status };
+    const data = d.data() as {
+      sopId?: string;
+      status?: string;
+      excludeFromCertificate?: boolean;
+    };
+    return {
+      id: d.id,
+      sopId: data.sopId,
+      status: data.status,
+      excludeFromCertificate: data.excludeFromCertificate,
+    };
   });
   if (hasOutstandingTraining(assignmentRows, "")) {
     return {
@@ -295,7 +304,10 @@ export async function issueCertificateForAttemptServer(
     .get();
   await Promise.all(
     assignSnap.docs
-      .filter((d) => (d.data() as { status?: string }).status === "passed")
+      .filter((d) => {
+        const data = d.data() as { status?: string; excludeFromCertificate?: boolean };
+        return data.status === "passed" && !data.excludeFromCertificate;
+      })
       .map((d) =>
         d.ref.set(
           { certificateId: id, updatedAt: now, updatedBy: actorId },

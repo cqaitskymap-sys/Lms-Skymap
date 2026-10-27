@@ -24,7 +24,7 @@ export function OjtMatrixLegend() {
         <LegendSwatch className="bg-muted text-muted-foreground" label="NA" hint="Not needed for this person" />
       </div>
       <p className="text-[11px] text-muted-foreground">
-        S row = click under a name to mark ✓ or NA. E row later shows the training date. After ✓, open All records to book a date.
+        S row = click under a name to mark ✓ or NA. E row later shows the training date.
       </p>
     </div>
   );

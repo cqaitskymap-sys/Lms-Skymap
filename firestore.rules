@@ -75,6 +75,13 @@ service cloud.firestore {
           && 'acceptedBy' in resource.data
           && 'employeeId' in resource.data.acceptedBy
           && resource.data.acceptedBy.employeeId == userDoc().employeeId)
+        || ('absenceHandoverUserIds' in resource.data
+          && resource.data.absenceHandoverUserIds is list
+          && resource.data.absenceHandoverUserIds.hasAny([request.auth.uid]))
+        || (userDoc().keys().hasAny(['employeeId'])
+          && 'absenceHandoverEmployeeIds' in resource.data
+          && resource.data.absenceHandoverEmployeeIds is list
+          && resource.data.absenceHandoverEmployeeIds.hasAny([userDoc().employeeId]))
       );
     }
 
@@ -129,9 +136,13 @@ service cloud.firestore {
     // Named absence-cover person may only stamp acknowledgement + e-signature fields.
     function isJdAbsenceHandoverAck() {
       return isJdAbsenceHandoverAssignee()
-        && resource.data.get('absenceHandoverStatus', 'pending') != 'acknowledged'
-        && request.resource.data.absenceHandoverStatus == 'acknowledged'
         && onlyUpdating([
+          'absenceHandovers',
+          'absenceHandoverEmployeeIds',
+          'absenceHandoverUserIds',
+          'absenceHandoverName',
+          'absenceHandoverEmployeeId',
+          'absenceHandoverUserId',
           'absenceHandoverStatus',
           'absenceHandoverAcknowledgedAt',
           'absenceHandoverAcknowledgedBy',

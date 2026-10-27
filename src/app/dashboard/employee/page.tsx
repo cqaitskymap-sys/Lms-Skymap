@@ -82,7 +82,8 @@ export default function EmployeeDashboardPage() {
                         {item.sopNumber}
                       </span>
                       <StatusBadge
-                        status={item.acknowledged ? "passed" : "in_progress"}
+                        status={item.acknowledged ? "passed" : "pending"}
+                        label={item.acknowledged ? "Acknowledged" : "Not acknowledged"}
                       />
                     </div>
                   </div>
@@ -156,7 +157,7 @@ export default function EmployeeDashboardPage() {
               <ClipboardCheck className="mt-0.5 h-5 w-5 text-cyan-700" />
               <div>
                 <p className="font-medium">On Job Training</p>
-                <p className="text-sm text-muted-foreground">View assigned OJT and acknowledge completed practical training</p>
+                <p className="text-sm text-muted-foreground">Read the assigned SOP, then take the exam. OJT does not issue a certificate.</p>
                 <Button size="sm" variant="link" className="px-0" asChild>
                   <Link href="/dashboard/ojt/assignments">My OJT</Link>
                 </Button>

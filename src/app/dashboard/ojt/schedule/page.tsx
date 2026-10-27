@@ -1,49 +1,38 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
 import { hasPermission } from "@/lib/rbac/permissions";
-import { listOjtAssignments, listOjtStaffOptions, scheduleOjtAssignment } from "@/lib/services/ojt";
+import { listOjtAssignments, releaseOjtSelfStudy } from "@/lib/services/ojt";
 import { toOjtActor } from "@/lib/ojt/actor";
 import { OJT_UPDATED_EVENT } from "@/lib/ojt/demo-store";
-import { calendarDateToIso, monthName } from "@/lib/ojt/constants";
-import { executionDateInPlan } from "@/lib/ojt/workflow";
+import { monthName } from "@/lib/ojt/constants";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { StatusBadge } from "@/components/shared/status-badge";
 import { OjtEmptyState } from "@/components/ojt/ojt-empty-state";
 import { OjtPageHint } from "@/components/ojt/ojt-page-hint";
 import { ojtStatusLabel } from "@/lib/ojt/next-action";
 import type { OjtAssignment } from "@/types/ojt";
 
+function isSelfStudyQueue(row: OjtAssignment): boolean {
+  if (row.selfStudy) {
+    return ["selected", "assigned", "in_progress"].includes(row.status);
+  }
+  return ["draft", "selected", "assigned"].includes(row.status);
+}
+
 export default function OjtSchedulePage() {
   const { profile } = useAuth();
   const canSchedule = profile?.role ? hasPermission(profile.role, "ojt:schedule") : false;
-  const canAuthorizeDeviation = profile?.role === "qa" || profile?.role === "super_admin";
   const [rows, setRows] = useState<OjtAssignment[]>([]);
-  const [trainers, setTrainers] = useState<{ uid: string; displayName: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState("");
-  const [date, setDate] = useState("");
-  const [startTime, setStartTime] = useState("09:00");
-  const [endTime, setEndTime] = useState("11:00");
-  const [location, setLocation] = useState("");
-  const [trainerId, setTrainerId] = useState("");
   const [busy, setBusy] = useState(false);
-  const [deviationReason, setDeviationReason] = useState("");
+  const releasing = useRef(false);
 
   const refresh = useCallback(async (opts?: { silent?: boolean }) => {
     if (!opts?.silent) setLoading(true);
@@ -51,20 +40,11 @@ export default function OjtSchedulePage() {
       const filters =
         profile?.role === "department_head" && profile.departmentId
           ? { departmentId: profile.departmentId }
-          : profile?.role === "trainer"
-            ? { trainerId: profile.uid }
-            : undefined;
+          : undefined;
       const all = await listOjtAssignments(filters);
-      setRows(all.filter((a) => ["selected", "assigned", "rescheduled"].includes(a.status)));
-      const staff = await listOjtStaffOptions();
-      setTrainers(
-        staff.filter(
-          (u) =>
-            u.role === "trainer" || u.role === "department_head" || u.role === "super_admin"
-        )
-      );
+      setRows(all.filter(isSelfStudyQueue));
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to load schedule queue");
+      toast.error(err instanceof Error ? err.message : "Failed to load self-study queue");
     } finally {
       setLoading(false);
     }
@@ -77,66 +57,38 @@ export default function OjtSchedulePage() {
     return () => window.removeEventListener(OJT_UPDATED_EVENT, onUpdate);
   }, [refresh]);
 
-  const selected = rows.find((r) => r.id === selectedId);
+  const waiting = rows.filter((row) => !row.selfStudy);
 
-  const selectRow = (row: OjtAssignment) => {
-    setSelectedId(row.id);
-    setTrainerId(row.trainerId || "");
-    setDate("");
-    setStartTime("09:00");
-    setEndTime("11:00");
-    setLocation("");
-    setDeviationReason("");
-  };
+  useEffect(() => {
+    if (!canSchedule || !profile || releasing.current || waiting.length === 0) return;
+    releasing.current = true;
+    const actor = toOjtActor(profile);
+    void (async () => {
+      try {
+        for (const row of waiting) {
+          await releaseOjtSelfStudy(row.id, actor);
+        }
+        toast.success("Self study started. Employees log in, read the SOP, then take the exam. No certificate.");
+        await refresh({ silent: true });
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Could not start self study");
+      } finally {
+        releasing.current = false;
+      }
+    })();
+  }, [canSchedule, profile, waiting, refresh]);
 
-  const handleSave = async () => {
-    if (!profile || !selected || !date || !trainerId) {
-      toast.error("Select OJT, trainer, and execution date");
-      return;
-    }
-    if (endTime <= startTime) {
-      toast.error("End time must be after the start time");
-      return;
-    }
+  const selected = rows.find((row) => row.id === selectedId) || rows[0];
+
+  const startOne = async (row: OjtAssignment) => {
+    if (!profile) return;
     setBusy(true);
     try {
-      const trainer = trainers.find((t) => t.uid === trainerId);
-      const outside = selected && date ? !executionDateInPlan(calendarDateToIso(date), selected) : false;
-      if (outside && !canAuthorizeDeviation) {
-        toast.error("A QA officer or admin must authorize a date outside the planned month.");
-        setBusy(false);
-        return;
-      }
-      if (outside && !deviationReason.trim()) {
-        toast.error("Date is outside the planned execution month. Record an authorized deviation reason.");
-        setBusy(false);
-        return;
-      }
-      await scheduleOjtAssignment(
-        selected.id,
-        {
-          executionDate: date,
-          startTime,
-          endTime,
-          location,
-          trainerId,
-          trainerName: trainer?.displayName,
-          deviation: outside
-            ? {
-                reason: deviationReason.trim(),
-                approvedBy: profile.uid,
-                approvedByName: profile.displayName,
-                approvalDate: new Date().toISOString(),
-              }
-            : undefined,
-        },
-        toOjtActor(profile)
-      );
-      toast.success("OJT scheduled");
-      setSelectedId("");
+      await releaseOjtSelfStudy(row.id, toOjtActor(profile));
+      toast.success(`${row.employeeName} can now log in, read the SOP, and take the exam`);
       await refresh();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Schedule failed");
+      toast.error(err instanceof Error ? err.message : "Could not start self study");
     } finally {
       setBusy(false);
     }
@@ -145,22 +97,22 @@ export default function OjtSchedulePage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">Step 4 — Book a date</h1>
+        <h1 className="text-2xl font-bold tracking-tight">Step 4 — Self study</h1>
         <p className="text-muted-foreground">
-          Pick a person on the left, then fill trainer, day, time and room on the right.
+          OJT has no trainer. Assigned people log in with their employee ID, read the SOP, then take the exam.
         </p>
       </div>
-      <OjtPageHint title="Tip">
-        The date should fall in the planned training month shown under the name. If it does not, you must write a reason.
+      <OjtPageHint title="No certificate">
+        Passing this exam closes the OJT record. It does not generate a training certificate.
       </OjtPageHint>
       {!canSchedule ? (
-        <p className="text-sm text-muted-foreground">You can view assigned OJT but cannot schedule sessions.</p>
+        <p className="text-sm text-muted-foreground">You can view self study, but you cannot start it.</p>
       ) : null}
       <div className="grid gap-4 lg:grid-cols-2">
         <Card>
           <CardHeader>
-            <CardTitle>Waiting for a date</CardTitle>
-            <CardDescription>People who were selected but do not have a day yet</CardDescription>
+            <CardTitle>Assigned people</CardTitle>
+            <CardDescription>They study the SOP themselves. Nobody books a trainer or a room.</CardDescription>
           </CardHeader>
           <CardContent>
             {loading ? (
@@ -169,26 +121,26 @@ export default function OjtSchedulePage() {
               </div>
             ) : rows.length === 0 ? (
               <OjtEmptyState
-                title="Nobody is waiting"
-                description="First select people in step 3. They will appear here so you can book a day."
+                title="Nobody is assigned"
+                description="First select people in step 3. They will appear here for self study."
                 actionHref="/dashboard/ojt/matrix"
                 actionLabel="Select people"
               />
             ) : (
               <ul className="space-y-2">
-                {rows.map((a) => (
-                  <li key={a.id}>
+                {rows.map((row) => (
+                  <li key={row.id}>
                     <button
                       type="button"
-                      onClick={() => selectRow(a)}
-                      className={`w-full rounded-lg border p-3 text-left ${selectedId === a.id ? "border-primary bg-primary/5" : ""}`}
+                      onClick={() => setSelectedId(row.id)}
+                      className={`w-full rounded-lg border p-3 text-left ${selected?.id === row.id ? "border-primary bg-primary/5" : ""}`}
                     >
                       <div className="flex items-center justify-between gap-2">
-                        <span className="font-medium">{a.employeeName}</span>
-                        <StatusBadge status={a.status} label={ojtStatusLabel(a.status)} />
+                        <span className="font-medium">{row.employeeName}</span>
+                        <StatusBadge status={row.status} label={ojtStatusLabel(row.status, row.selfStudy)} />
                       </div>
                       <p className="text-sm text-muted-foreground">
-                        {a.trainingTopic} · {monthName(a.plannedExecutionMonth)} {a.year}
+                        {row.trainingTopic} · {monthName(row.plannedExecutionMonth)} {row.year}
                       </p>
                     </button>
                   </li>
@@ -199,75 +151,40 @@ export default function OjtSchedulePage() {
         </Card>
         <Card>
           <CardHeader>
-            <CardTitle>When and where</CardTitle>
+            <CardTitle>What the employee does</CardTitle>
             <CardDescription>
               {selected
-                ? `${selected.employeeName} · ${selected.trainingTopic}. Prefer a date in ${monthName(selected.plannedExecutionMonth)} ${selected.year}.`
-                : "Click a person on the left first."}
+                ? `${selected.employeeName} · ${selected.trainingTopic}`
+                : "Select a person on the left."}
             </CardDescription>
           </CardHeader>
-          <CardContent className="grid gap-3">
-            <div className="space-y-1">
-              <Label>Trainer</Label>
-              <Select value={trainerId || undefined} onValueChange={setTrainerId} disabled={!canSchedule}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Trainer" />
-                </SelectTrigger>
-                <SelectContent>
-                  {trainers.map((u) => (
-                    <SelectItem key={u.uid} value={u.uid}>
-                      {u.displayName}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1">
-              <Label>Training date</Label>
-              <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} disabled={!canSchedule} />
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1">
-                <Label>Start</Label>
-                <Input type="time" value={startTime} onChange={(e) => setStartTime(e.target.value)} />
-              </div>
-              <div className="space-y-1">
-                <Label>End</Label>
-                <Input type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)} />
-              </div>
-            </div>
-            <div className="space-y-1">
-              <Label>Room / location</Label>
-              <Input value={location} onChange={(e) => setLocation(e.target.value)} placeholder="e.g. Dispensing room / Line 2" />
-            </div>
-            {selected && date && !executionDateInPlan(calendarDateToIso(date), selected) && (
-              <div className="space-y-1 rounded-lg border border-amber-300/60 p-3">
-                {canAuthorizeDeviation ? (
-                  <>
-                    <Label>Authorized deviation reason</Label>
-                    <Textarea
-                      value={deviationReason}
-                      onChange={(e) => setDeviationReason(e.target.value)}
-                      placeholder="Why is training outside the planned execution month? Original planned month is kept."
-                    />
-                    <p className="text-xs text-muted-foreground">
-                      Original planned month ({monthName(selected.plannedExecutionMonth)} {selected.year}) is not overwritten.
-                    </p>
-                  </>
+          <CardContent className="grid gap-3 text-sm">
+            {selected ? (
+              <>
+                <p>1. Log in with employee ID {selected.employeeCode}.</p>
+                <p>2. Read {selected.sopNumber || selected.trainingTopic}.</p>
+                <p>3. Take the exam after the SOP is finished.</p>
+                <p className="text-muted-foreground">A certificate is not issued for this OJT.</p>
+                {selected.sopId ? (
+                  <Button asChild variant="outline">
+                    <Link href={`/dashboard/sops/${selected.sopId}`}>Open SOP</Link>
+                  </Button>
                 ) : (
-                  <p className="text-sm text-amber-800 dark:text-amber-200">
-                    This date is outside the planned execution month. Ask QA or an admin to schedule it.
+                  <p className="text-amber-700 dark:text-amber-300">
+                    This topic has no SOP linked. Add the SOP on the topic before the employee can study.
                   </p>
                 )}
-              </div>
-            )}
-            <Button disabled={!canSchedule || busy || !selected} onClick={() => void handleSave()}>
-              Book this session
-            </Button>
-            {selected && (
-              <Button asChild variant="outline">
-                <Link href={`/dashboard/ojt/assignments/${selected.id}`}>Open record</Link>
-              </Button>
+                {!selected.selfStudy && canSchedule ? (
+                  <Button disabled={busy} onClick={() => void startOne(selected)}>
+                    Start self study
+                  </Button>
+                ) : null}
+                <Button asChild variant="outline">
+                  <Link href={`/dashboard/ojt/assignments/${selected.id}`}>Open record</Link>
+                </Button>
+              </>
+            ) : (
+              <p className="text-muted-foreground">Click a person on the left first.</p>
             )}
           </CardContent>
         </Card>

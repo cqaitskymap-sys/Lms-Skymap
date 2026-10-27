@@ -28,15 +28,15 @@ const PLANNER_STEPS = [
   },
   {
     n: "4",
-    title: "Book a date",
-    body: "Pick trainer, day, time and room.",
+    title: "Self study",
+    body: "There is no trainer. The employee logs in, reads the SOP, then takes the exam. This does not issue a certificate.",
     href: "/dashboard/ojt/schedule",
   },
   {
     n: "5",
-    title: "Train & score",
-    body: "Trainer shows the job on the floor, then marks pass or fail.",
-    href: "/dashboard/ojt/execution",
+    title: "Exam result",
+    body: "A pass closes the OJT record. A certificate is not generated for this path.",
+    href: "/dashboard/ojt/assignments",
   },
   {
     n: "6",
@@ -55,15 +55,15 @@ const EMPLOYEE_STEPS = [
   },
   {
     n: "2",
-    title: "Attend with trainer",
-    body: "This is practical training on the floor — not a written exam.",
-    href: "/dashboard/ojt/assignments",
+    title: "Read the SOP",
+    body: "Log in with your employee ID and study the SOP on your own. There is no trainer.",
+    href: "/dashboard/sops",
   },
   {
     n: "3",
-    title: "Confirm you understood",
-    body: "After the trainer scores you, open the record and click Confirm.",
-    href: "/dashboard/ojt/assignments",
+    title: "Take the exam",
+    body: "After you finish the SOP, take its exam. Passing does not issue a certificate.",
+    href: "/dashboard/exams",
   },
 ];
 
@@ -92,7 +92,7 @@ export function ojtRoleIntro(role?: UserRole | null): { title: string; body: str
   if (role === "employee") {
     return {
       title: "Your on-job training",
-      body: "Attend the practical session, then confirm you understood. You do not need to plan months or pick people.",
+      body: "Log in with your employee ID, read the assigned SOP, then take the exam. OJT does not issue a certificate.",
     };
   }
   if (role === "trainer") {
@@ -109,7 +109,7 @@ export function ojtRoleIntro(role?: UserRole | null): { title: string; body: str
   }
   return {
     title: "On-job training",
-    body: "Practical training on the shop floor. Follow the numbered steps — this is not a classroom exam.",
+    body: "Assign people, then they log in and self-study the SOP before the exam. There is no trainer and no certificate.",
   };
 }
 

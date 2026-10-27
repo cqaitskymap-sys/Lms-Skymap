@@ -39,7 +39,13 @@ export type OjtProgressStep = {
   state: "done" | "current" | "upcoming" | "blocked";
 };
 
-export function ojtStatusLabel(status: string): string {
+export function ojtStatusLabel(status: string, selfStudy?: boolean): string {
+  if (
+    selfStudy &&
+    (status === "in_progress" || status === "selected" || status === "assigned")
+  ) {
+    return "Self study";
+  }
   if (status === "overdue") return "Overdue";
   return OJT_STATUS_LABELS[status as OjtStatus] ?? status.replace(/_/g, " ");
 }
@@ -52,6 +58,24 @@ export function ojtWorkflowSteps(assignment: OjtAssignment): OjtProgressStep[] {
   const status = assignment.status;
   if (status === "cancelled") {
     return [{ key: "cancelled", label: "Cancelled", state: "blocked" }];
+  }
+
+  if (assignment.selfStudy) {
+    const failed = status === "failed" || status === "retraining_required";
+    const keys = [
+      { key: "select", label: "Person chosen" },
+      { key: "study", label: "Read SOP and exam" },
+      { key: "done", label: "Done" },
+    ];
+    const currentKey = status === "completed" ? "done" : failed ? "study" : "study";
+    const currentIndex = keys.findIndex((step) => step.key === currentKey);
+    return keys.map((step, index) => {
+      if (failed && step.key === "study") return { ...step, state: "blocked" as const };
+      if (status === "completed") return { ...step, state: "done" as const };
+      if (index < currentIndex) return { ...step, state: "done" as const };
+      if (index === currentIndex) return { ...step, state: "current" as const };
+      return { ...step, state: "upcoming" as const };
+    });
   }
 
   const failed = status === "failed" || status === "retraining_required";
@@ -122,31 +146,45 @@ export function ojtNextAction(
     };
   }
 
+  if (assignment.selfStudy) {
+    const failed = assignment.status === "failed" || assignment.status === "retraining_required";
+    return {
+      title: failed ? "Exam not passed" : "Read the SOP, then take the exam",
+      hint: failed
+        ? "Ask the department if this person should try the exam again. OJT does not issue a certificate."
+        : "Log in with your employee ID, study the SOP, then sit the exam. OJT does not issue a certificate.",
+      waitingOn: assignment.employeeName,
+      href: assignment.sopId ? `/dashboard/sops/${assignment.sopId}` : href,
+      canAct: r === "employee",
+      tone: failed || overdue ? "danger" : "warning",
+    };
+  }
+
   const byStatus: Partial<Record<OjtStatus, OjtNextAction>> = {
     draft: {
-      title: "Finish selecting this person",
-      hint: "Open Select people and mark ✓ for this topic.",
+      title: "Start self study",
+      hint: "Open this record and start self study. The employee reads the SOP, then takes the exam.",
       waitingOn: "Department head",
-      href: "/dashboard/ojt/matrix",
-      canAct: can(r, "ojt:assign"),
+      href,
+      canAct: can(r, "ojt:assign") || can(r, "ojt:schedule"),
       tone: "default",
       formId: "ojt-schedule",
     },
     selected: {
-      title: "Pick a trainer",
-      hint: "Choose who will show this job on the floor.",
+      title: "Start self study",
+      hint: "There is no trainer. Start self study so this person can read the SOP and take the exam.",
       waitingOn: "Department head",
       href,
-      canAct: can(r, "ojt:assign"),
+      canAct: can(r, "ojt:assign") || can(r, "ojt:schedule"),
       tone: overdue ? "danger" : "warning",
       formId: "ojt-schedule",
     },
     assigned: {
-      title: "Book a date",
-      hint: `Pick a day in ${monthHint(assignment)} and a room.`,
+      title: "Start self study",
+      hint: "There is no trainer. Start self study so this person can read the SOP and take the exam.",
       waitingOn: "Department head",
-      href: can(r, "ojt:schedule") ? "/dashboard/ojt/schedule" : href,
-      canAct: can(r, "ojt:schedule"),
+      href,
+      canAct: can(r, "ojt:assign") || can(r, "ojt:schedule"),
       tone: overdue ? "danger" : "warning",
       formId: "ojt-schedule",
     },
@@ -233,7 +271,7 @@ export function ojtNextAction(
   };
 
   const action = byStatus[assignment.status] ?? {
-    title: ojtStatusLabel(assignment.status),
+    title: ojtStatusLabel(assignment.status, assignment.selfStudy),
     hint: "Open the record to continue.",
     waitingOn: "—",
     href,
@@ -250,25 +288,6 @@ export function ojtNextAction(
     };
   }
   return action;
-}
-
-function monthHint(assignment: OjtAssignment): string {
-  const names = [
-    "",
-    "January",
-    "February",
-    "March",
-    "April",
-    "May",
-    "June",
-    "July",
-    "August",
-    "September",
-    "October",
-    "November",
-    "December",
-  ];
-  return `${names[assignment.plannedExecutionMonth] || "the planned month"} ${assignment.year}`;
 }
 
 export function actionableOjtQueue(

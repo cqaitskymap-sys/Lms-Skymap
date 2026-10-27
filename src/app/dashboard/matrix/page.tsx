@@ -237,7 +237,7 @@ export default function MatrixPage() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="sticky left-0 bg-background">Employee</TableHead>
+                    <TableHead className="sticky left-0 z-20 bg-background">Employee</TableHead>
                     {matrixSops.map((s) => (
                       <TableHead key={s.id} className="whitespace-nowrap text-xs">
                         {s.sopNumber}
@@ -248,7 +248,7 @@ export default function MatrixPage() {
                 <TableBody>
                   {visibleEmployees.map((e) => (
                     <TableRow key={e.id}>
-                      <TableCell className="sticky left-0 bg-background font-medium">
+                      <TableCell className="sticky left-0 z-10 bg-background font-medium">
                         {e.firstName} {e.lastName}
                         <span className="ml-1 text-xs text-muted-foreground">
                           {e.employeeCode}
@@ -259,7 +259,7 @@ export default function MatrixPage() {
                         const status = matrixCellStatus(a, s);
                         return (
                           <TableCell key={s.id}>
-                            <StatusBadge status={status} />
+                            <StatusBadge status={status} label={matrixCellLabel(status)} />
                           </TableCell>
                         );
                       })}

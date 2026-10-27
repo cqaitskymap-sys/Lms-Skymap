@@ -331,7 +331,7 @@ export default function OjtDashboardPage() {
                       </div>
                       <StatusBadge
                         status={assignment.status}
-                        label={ojtStatusLabel(assignment.status)}
+                        label={ojtStatusLabel(assignment.status, assignment.selfStudy)}
                       />
                     </li>
                   ))}

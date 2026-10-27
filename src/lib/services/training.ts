@@ -48,6 +48,9 @@ import {
   resolveLinkedUserUid,
 } from "@/lib/services/notifications";
 import {
+  absenceHandoverParties,
+  absenceHandoverWriteFields,
+  acknowledgeAbsenceParty,
   buildJdComputerGeneratedSignature,
   compactJdSignoff,
   extraEmployeeIdsFromEmployees,
@@ -55,6 +58,7 @@ import {
   isJdSignoffParty,
   isJdSignoffPending,
   JD_SIGNOFF_SLOTS,
+  MAX_ABSENCE_HANDOVERS,
   parseJdSignoffSlot,
   sameJdSignoffPerson,
 } from "@/lib/jd/absence-handover";
@@ -678,13 +682,14 @@ async function assertUniqueJdNo(jdNo: string, excludeId?: string): Promise<void>
   }
 }
 
-async function notifyJdSignoff(
+async function notifyJdSignoffTarget(
   jd: JobDescription,
   slot: JdSignoffSlot,
+  signoff: JdSignoff | undefined,
   actorId: string
 ): Promise<void> {
-  const signoff = getJdSignoff(jd, slot);
   if (!signoff || (!signoff.employeeId && !signoff.userId)) return;
+  if (signoff.status === "acknowledged") return;
   const meta = JD_SIGNOFF_SLOTS[slot];
   const label = jd.jdNo || jd.id;
   const title = `${meta.label} – ${meta.actionLabel.toLowerCase()} required`;
@@ -724,6 +729,30 @@ async function notifyJdSignoff(
   }
 }
 
+async function notifyJdSignoff(
+  jd: JobDescription,
+  slot: JdSignoffSlot,
+  actorId: string
+): Promise<void> {
+  if (slot === "absence_handover") {
+    for (const party of absenceHandoverParties(jd)) {
+      await notifyJdSignoffTarget(jd, slot, party, actorId);
+    }
+    return;
+  }
+  await notifyJdSignoffTarget(jd, slot, getJdSignoff(jd, slot), actorId);
+}
+
+async function notifyAbsenceHandoverParties(
+  jd: JobDescription,
+  parties: JdSignoff[],
+  actorId: string
+): Promise<void> {
+  for (const party of parties) {
+    await notifyJdSignoffTarget(jd, "absence_handover", party, actorId);
+  }
+}
+
 async function notifyAllJdSignoffs(jd: JobDescription, actorId: string): Promise<void> {
   await notifyJdSignoff(jd, "absence_handover", actorId);
   await notifyJdSignoff(jd, "assigned_by", actorId);
@@ -753,6 +782,56 @@ function mergeResolvedSignoffLogin(existing: JdSignoff, next: JdSignoff): JdSign
   if (existing.status === "acknowledged") return null;
   if (existing.userId || !next.userId) return null;
   return compactJdSignoff({ ...existing, userId: next.userId });
+}
+
+async function mergeAbsenceHandoverUpdates(
+  existing: JobDescription,
+  incoming: JdSignoff[]
+): Promise<{ fields: Partial<JobDescription>; notify: JdSignoff[] }> {
+  const previous = absenceHandoverParties(existing);
+  const next: JdSignoff[] = [];
+  const notify: JdSignoff[] = [];
+  for (const raw of incoming.slice(0, MAX_ABSENCE_HANDOVERS)) {
+    if (!raw?.employeeId && !raw?.userId) continue;
+    const hydrated = await hydrateSignoffUserId({
+      employeeId: raw.employeeId,
+      userId: raw.userId,
+      name: raw.name,
+      designation: raw.designation,
+      status: raw.status === "acknowledged" ? "acknowledged" : "pending",
+      acknowledgedAt: raw.acknowledgedAt,
+      acknowledgedBy: raw.acknowledgedBy,
+      acknowledgedByName: raw.acknowledgedByName,
+      signatureText: raw.signatureText,
+    });
+    if (!hydrated || (!hydrated.employeeId && !hydrated.userId)) continue;
+    if (hydrated.status === "acknowledged") {
+      next.push(hydrated);
+      continue;
+    }
+    const prev = previous.find((party) => sameJdSignoffPerson(party, hydrated));
+    if (prev?.status === "acknowledged") {
+      next.push(
+        compactJdSignoff({
+          ...prev,
+          ...(hydrated.userId && !prev.userId ? { userId: hydrated.userId } : {}),
+          name: prev.name || hydrated.name,
+          designation: prev.designation || hydrated.designation,
+        })
+      );
+      continue;
+    }
+    const pending = compactJdSignoff({
+      employeeId: hydrated.employeeId,
+      userId: prev?.userId || hydrated.userId,
+      name: hydrated.name || prev?.name,
+      designation: hydrated.designation || prev?.designation,
+      status: "pending",
+    });
+    if (!prev) notify.push(pending);
+    next.push(pending);
+  }
+  return { fields: absenceHandoverWriteFields(next), notify };
 }
 
 async function notifyJdAbsenceHandover(jd: JobDescription, actorId: string): Promise<void> {
@@ -862,25 +941,32 @@ export async function createJobDescription(
 
   const id = generateId("jd");
   const now = nowISO();
-  let absenceHandoverUserId = data.absenceHandoverUserId;
-  if (data.absenceHandoverEmployeeId && !absenceHandoverUserId) {
-    absenceHandoverUserId =
-      (await resolveLinkedUserUid(data.absenceHandoverEmployeeId)) || undefined;
-  }
+  const handoverSource = data.absenceHandovers?.length
+    ? data.absenceHandovers
+    : data.absenceHandoverEmployeeId || data.absenceHandoverUserId
+      ? [
+          {
+            employeeId: data.absenceHandoverEmployeeId,
+            userId: data.absenceHandoverUserId,
+            name: data.absenceHandoverName,
+            status: "pending" as const,
+          },
+        ]
+      : [];
+  const handoverMerge = await mergeAbsenceHandoverUpdates(
+    { id: "", employeeId: data.employeeId } as JobDescription,
+    handoverSource
+  );
   const assignedBy = await hydrateSignoffUserId(data.assignedBy);
   const acceptedBy = await hydrateSignoffUserId(data.acceptedBy);
-  const handoverPending = Boolean(
-    data.absenceHandoverEmployeeId || absenceHandoverUserId
-  );
   const jd: JobDescription = {
     ...data,
+    ...handoverMerge.fields,
     effectiveFrom: data.effectiveFrom ? calendarDateToIso(data.effectiveFrom) : data.effectiveFrom,
     id,
     jdNo,
     version,
     status: "draft",
-    ...(absenceHandoverUserId ? { absenceHandoverUserId } : {}),
-    ...(handoverPending ? { absenceHandoverStatus: "pending" as const } : {}),
     ...(assignedBy ? { assignedBy } : {}),
     ...(acceptedBy ? { acceptedBy } : {}),
     createdAt: now,
@@ -939,10 +1025,22 @@ export async function listJobDescriptions(filters?: {
       rows = rows.filter((j) => j.employeeId === filters.employeeId);
     }
     if (filters?.handoverEmployeeId) {
-      rows = rows.filter((j) => j.absenceHandoverEmployeeId === filters.handoverEmployeeId);
+      const handoverEmployeeId = filters.handoverEmployeeId;
+      rows = rows.filter(
+        (j) =>
+          j.absenceHandoverEmployeeId === handoverEmployeeId ||
+          j.absenceHandoverEmployeeIds?.includes(handoverEmployeeId) ||
+          absenceHandoverParties(j).some((party) => party.employeeId === handoverEmployeeId)
+      );
     }
     if (filters?.handoverUserId) {
-      rows = rows.filter((j) => j.absenceHandoverUserId === filters.handoverUserId);
+      const handoverUserId = filters.handoverUserId;
+      rows = rows.filter(
+        (j) =>
+          j.absenceHandoverUserId === handoverUserId ||
+          j.absenceHandoverUserIds?.includes(handoverUserId) ||
+          absenceHandoverParties(j).some((party) => party.userId === handoverUserId)
+      );
     }
     return rows.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }
@@ -1018,24 +1116,32 @@ export async function updateJobDescription(
     safeUpdates.effectiveFrom = calendarDateToIso(safeUpdates.effectiveFrom);
   }
 
-  const handoverChanged =
-    safeUpdates.absenceHandoverEmployeeId !== undefined &&
-    safeUpdates.absenceHandoverEmployeeId !== existing.absenceHandoverEmployeeId;
+  let handoverChanged = false;
+  let handoverPartiesToNotify: JdSignoff[] | null = null;
+  if (Array.isArray(safeUpdates.absenceHandovers)) {
+    const merged = await mergeAbsenceHandoverUpdates(existing, safeUpdates.absenceHandovers);
+    Object.assign(safeUpdates, merged.fields);
+    handoverPartiesToNotify = merged.notify;
+  } else {
+    handoverChanged =
+      safeUpdates.absenceHandoverEmployeeId !== undefined &&
+      safeUpdates.absenceHandoverEmployeeId !== existing.absenceHandoverEmployeeId;
 
-  if (handoverChanged) {
-    safeUpdates.absenceHandoverStatus = "pending";
-    for (const field of JD_ACK_CLEAR_FIELDS) {
-      (safeUpdates as Record<string, unknown>)[field] = undefined;
+    if (handoverChanged) {
+      safeUpdates.absenceHandoverStatus = "pending";
+      for (const field of JD_ACK_CLEAR_FIELDS) {
+        (safeUpdates as Record<string, unknown>)[field] = undefined;
+      }
     }
-  }
 
-  if (safeUpdates.absenceHandoverEmployeeId && !safeUpdates.absenceHandoverUserId) {
-    const linkedUid = await resolveLinkedUserUid(safeUpdates.absenceHandoverEmployeeId);
-    if (linkedUid) safeUpdates.absenceHandoverUserId = linkedUid;
-  }
+    if (safeUpdates.absenceHandoverEmployeeId && !safeUpdates.absenceHandoverUserId) {
+      const linkedUid = await resolveLinkedUserUid(safeUpdates.absenceHandoverEmployeeId);
+      if (linkedUid) safeUpdates.absenceHandoverUserId = linkedUid;
+    }
 
-  if (handoverChanged && !safeUpdates.absenceHandoverUserId) {
-    (safeUpdates as Record<string, unknown>).absenceHandoverUserId = undefined;
+    if (handoverChanged && !safeUpdates.absenceHandoverUserId) {
+      (safeUpdates as Record<string, unknown>).absenceHandoverUserId = undefined;
+    }
   }
 
   let assignedChanged = false;
@@ -1114,7 +1220,11 @@ export async function updateJobDescription(
     }
     store.jobDescriptions = store.jobDescriptions.map((j) => (j.id === id ? updated : j));
     writeTrainingStore(store);
-    if (handoverChanged) await notifyJdAbsenceHandover(updated, actorId);
+    if (handoverPartiesToNotify?.length) {
+      await notifyAbsenceHandoverParties(updated, handoverPartiesToNotify, actorId);
+    } else if (handoverChanged) {
+      await notifyJdAbsenceHandover(updated, actorId);
+    }
     if (assignedChanged) await notifyJdSignoff(updated, "assigned_by", actorId);
     if (acceptedChanged) await notifyJdSignoff(updated, "accepted_by", actorId);
     return updated;
@@ -1138,7 +1248,11 @@ export async function updateJobDescription(
     if (snap.exists()) {
       notifyTrainingUpdated();
       const updated = { id: snap.id, ...snap.data() } as JobDescription;
-      if (handoverChanged) await notifyJdAbsenceHandover(updated, actorId);
+      if (handoverPartiesToNotify?.length) {
+        await notifyAbsenceHandoverParties(updated, handoverPartiesToNotify, actorId);
+      } else if (handoverChanged) {
+        await notifyJdAbsenceHandover(updated, actorId);
+      }
       if (assignedChanged) await notifyJdSignoff(updated, "assigned_by", actorId);
       if (acceptedChanged) await notifyJdSignoff(updated, "accepted_by", actorId);
       return updated;
@@ -1160,11 +1274,18 @@ export async function acknowledgeJdSignoff(
   const slot = parseJdSignoffSlot(slotInput);
   const jd = await getJobDescription(id);
   if (!jd) throw new Error("Job Description not found");
+  const extraIds = extraEmployeeIdsFromEmployees(actor, readLifecycleStore().employees);
+  const now = nowISO();
+
+  if (slot === "absence_handover") {
+    const parties = acknowledgeAbsenceParty(jd, actor, extraIds, now);
+    return updateJobDescription(id, { absenceHandovers: parties }, actor.uid);
+  }
+
   const signoff = getJdSignoff(jd, slot);
   if (!signoff || (!signoff.employeeId && !signoff.userId)) {
     throw new Error("This Job Description has no person named for that signature");
   }
-  const extraIds = extraEmployeeIdsFromEmployees(actor, readLifecycleStore().employees);
   if (!isJdSignoffParty(signoff, actor, extraIds)) {
     throw new Error("Only the named person can approve this signature");
   }
@@ -1172,23 +1293,8 @@ export async function acknowledgeJdSignoff(
     throw new Error("This signature is already approved");
   }
 
-  const now = nowISO();
   const name = (actor.name || signoff.name || "Assignee").trim();
   const signature = buildJdComputerGeneratedSignature(name, now);
-
-  if (slot === "absence_handover") {
-    return updateJobDescription(
-      id,
-      {
-        absenceHandoverStatus: "acknowledged",
-        absenceHandoverAcknowledgedAt: now,
-        absenceHandoverAcknowledgedBy: actor.uid,
-        absenceHandoverAcknowledgedByName: name,
-        absenceHandoverSignatureText: signature,
-      },
-      actor.uid
-    );
-  }
 
   const key = slot === "assigned_by" ? "assignedBy" : "acceptedBy";
   return updateJobDescription(

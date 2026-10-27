@@ -16,6 +16,7 @@ import { attemptsRemaining, hasOutstandingTraining, withExamAttemptLimit } from 
 import { generateId } from "@/lib/services/helpers";
 import { issueCertificateForAttemptServer } from "@/lib/certificates/issue-server";
 import { getProgressForStage, getStageIndex } from "@/lib/lifecycle/stages";
+import type { OjtStatus } from "@/types/ojt";
 import type {
   AssessmentAttempt,
   Exam,
@@ -739,8 +740,18 @@ export async function submitAssessmentServer(
 
   const evaluated = evaluateAttempt(questionsWithKeys, mergedAnswers, exam);
   const passed = !expired && evaluated.passed;
+  let excludeFromCertificate = false;
+  if (attempt.assignmentId) {
+    const assignSnap = await adminDb
+      .collection(COLLECTIONS.trainingAssignments)
+      .doc(attempt.assignmentId)
+      .get();
+    excludeFromCertificate = Boolean(
+      (assignSnap.data() as { excludeFromCertificate?: boolean } | undefined)?.excludeFromCertificate
+    );
+  }
   const certificateEligible =
-    !attempt.preview && !expired && evaluated.certificateEligible;
+    !attempt.preview && !expired && evaluated.certificateEligible && !excludeFromCertificate;
 
   const updated: AssessmentAttempt = {
     ...attempt,
@@ -954,6 +965,58 @@ export async function submitAssessmentServer(
   }
 }
 
+async function settleOjtSelfStudyServer(params: {
+  employeeId: string;
+  sopId?: string;
+  ojtAssignmentId?: string;
+  passed: boolean;
+  finalFail: boolean;
+  percentage?: number;
+  actorId: string;
+}): Promise<void> {
+  if (!params.passed && !params.finalFail) return;
+  try {
+  const snap = await adminDb
+    .collection(COLLECTIONS.ojtAssignments)
+    .where("employeeId", "==", params.employeeId)
+    .get();
+  const now = new Date().toISOString();
+  for (const docSnap of snap.docs) {
+    const row = docSnap.data() as {
+      selfStudy?: boolean;
+      status?: OjtStatus;
+      sopId?: string;
+      actualExecutionDate?: string;
+      trainingTopic?: string;
+    };
+    if (!row.selfStudy) continue;
+    if (row.status === "cancelled") continue;
+    if (params.passed && row.status === "completed") continue;
+    if (!params.passed && (row.status === "completed" || row.status === "failed")) continue;
+    const matches =
+      (params.ojtAssignmentId && docSnap.id === params.ojtAssignmentId) ||
+      (params.sopId && row.sopId === params.sopId);
+    if (!matches || !row.status) continue;
+    const target: OjtStatus = params.passed ? "completed" : "failed";
+    await docSnap.ref.set(
+      {
+        status: target,
+        overallCompetency: params.passed ? "competent" : "not_competent",
+        actualExecutionDate: row.actualExecutionDate || now.slice(0, 10),
+        remarks: params.passed
+          ? `Self-study exam passed${params.percentage != null ? ` (${params.percentage}%)` : ""}. No certificate is issued for OJT.`
+          : `Self-study exam not passed${params.percentage != null ? ` (${params.percentage}%)` : ""}. No certificate is issued for OJT.`,
+        updatedAt: now,
+        updatedBy: params.actorId,
+      },
+      { merge: true }
+    );
+  }
+  } catch (err) {
+    console.error("[ojt] self-study settle failed", err);
+  }
+}
+
 async function handleTrainingResultServer(
   assignmentId: string,
   attempt: AssessmentAttempt,
@@ -993,8 +1056,17 @@ async function handleTrainingResultServer(
       .where("employeeId", "==", attempt.employeeId)
       .get();
     const assignmentRows = allAssignSnap.docs.map((d) => {
-      const data = d.data() as { sopId?: string; status?: string };
-      return { id: d.id, sopId: data.sopId, status: data.status };
+      const data = d.data() as {
+        sopId?: string;
+        status?: string;
+        excludeFromCertificate?: boolean;
+      };
+      return {
+        id: d.id,
+        sopId: data.sopId,
+        status: data.status,
+        excludeFromCertificate: data.excludeFromCertificate,
+      };
     });
     const outstanding = hasOutstandingTraining(assignmentRows, assignmentId);
 
@@ -1017,6 +1089,15 @@ async function handleTrainingResultServer(
         { merge: true }
       );
     }
+    await settleOjtSelfStudyServer({
+      employeeId: attempt.employeeId,
+      sopId: prev.sopId,
+      ojtAssignmentId: prev.ojtAssignmentId,
+      passed: true,
+      finalFail: false,
+      percentage: attempt.percentage,
+      actorId,
+    });
     return;
   }
 
@@ -1059,6 +1140,16 @@ async function handleTrainingResultServer(
     { merge: true }
   );
 
+  await settleOjtSelfStudyServer({
+    employeeId: attempt.employeeId,
+    sopId: prev.sopId,
+    ojtAssignmentId: prev.ojtAssignmentId,
+    passed: false,
+    finalFail: true,
+    percentage: attempt.percentage,
+    actorId,
+  });
+
   const siblingSnap = await adminDb
     .collection(COLLECTIONS.trainingAssignments)
     .where("employeeId", "==", prev.employeeId)
@@ -1073,7 +1164,8 @@ async function handleTrainingResultServer(
   ]);
   const alreadyOpen = siblingSnap.docs.some((d) => {
     if (d.id === assignmentId) return false;
-    const row = d.data() as { sopId?: string; status?: string };
+    const row = d.data() as { sopId?: string; status?: string; excludeFromCertificate?: boolean };
+    if (row.excludeFromCertificate) return false;
     return row.sopId === prev.sopId && openStatuses.has(row.status || "");
   });
   if (alreadyOpen) return;
@@ -1095,6 +1187,8 @@ async function handleTrainingResultServer(
     isRetraining: true,
     previousAssignmentId: assignmentId,
     triggeredBySopRevision: false,
+    ojtAssignmentId: prev.ojtAssignmentId,
+    excludeFromCertificate: prev.excludeFromCertificate,
     createdAt: now,
     updatedAt: now,
     createdBy: actorId,

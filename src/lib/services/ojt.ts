@@ -19,7 +19,7 @@ import {
 import { deleteObject, getDownloadURL, ref, uploadBytes } from "firebase/storage";
 import { assertAllowedUpload, isTrainingEvidence, sanitizeStorageFileName } from "@/lib/uploads/safe-file";
 import { db, storage, COLLECTIONS } from "@/lib/firebase/client";
-import type { Employee, SopDocument, SopVersion } from "@/types";
+import type { Employee, SopDocument, SopVersion, TrainingAssignment } from "@/types";
 import type {
   OjtActor,
   OjtApplicability,
@@ -35,6 +35,7 @@ import type {
   OjtFormSignoffRole,
   OjtPlan,
   OjtSettings,
+  OjtStatus,
   OjtTopic,
 } from "@/types/ojt";
 import { generateId, nowISO, stripUndefined } from "@/lib/services/helpers";
@@ -49,6 +50,7 @@ import {
   dateFallsInMonth,
   formatRevisionNumber,
   nextRevisionNumber,
+  OJT_FORM_SIGNOFF_LABELS,
   parseCalendarDateParts,
 } from "@/lib/ojt/constants";
 import {
@@ -77,8 +79,11 @@ import {
   canSignFormRole,
   emptyFormDocument,
   formApprovalsFor,
+  formAssignee,
   formDocumentId,
+  hasAcceptedSignoff,
   mergeOjtSettings,
+  requiredRolesForApproval,
   statusAfterFormSignoff,
 } from "@/lib/ojt/forms";
 import { getSopBundle, listSopsDetailed } from "@/lib/services/sops";
@@ -1014,6 +1019,83 @@ function defaultMonths(
   return { selectionMonth, plannedExecutionMonth, plannedExecutionMonths: list };
 }
 
+const OPEN_SELF_STUDY_TRAINING = new Set([
+  "assigned",
+  "in_progress",
+  "training_scheduled",
+  "training_completed",
+  "assessment_pending",
+  "retraining",
+]);
+
+async function ensureOjtSelfStudyTraining(
+  assignment: OjtAssignment,
+  actorId: string
+): Promise<{ trainingAssignmentId?: string; alreadyPassed: boolean }> {
+  if (!assignment.sopId) return { alreadyPassed: false };
+  const { getEmployeeAssignments } = await import("@/lib/services/training");
+  const { isDemoMode } = await import("@/lib/demo/data");
+  const {
+    preferTrainingLocal,
+    readTrainingStore,
+    writeTrainingStore,
+    notifyTrainingUpdated,
+  } = await import("@/lib/training/demo-store");
+  const existing = await getEmployeeAssignments(assignment.employeeId);
+  const sameSop = existing.filter((row) => row.sopId === assignment.sopId);
+  const open = sameSop.find((row) => OPEN_SELF_STUDY_TRAINING.has(row.status));
+  if (open) return { trainingAssignmentId: open.id, alreadyPassed: false };
+  const passed = sameSop.find((row) => row.status === "passed");
+  if (passed) return { trainingAssignmentId: passed.id, alreadyPassed: true };
+
+  let acknowledged = false;
+  try {
+    const { getEmployee } = await import("@/lib/services/employees");
+    const { listAcknowledgementsForUser } = await import("@/lib/services/sops");
+    const employee = await getEmployee(assignment.employeeId);
+    if (employee?.userId) {
+      const acks = await listAcknowledgementsForUser(employee.userId);
+      acknowledged = acks.some(
+        (ack) =>
+          ack.sopId === assignment.sopId &&
+          (!assignment.sopVersionId || ack.versionId === assignment.sopVersionId)
+      );
+    }
+  } catch {
+    acknowledged = false;
+  }
+
+  const now = nowISO();
+  const row: TrainingAssignment = {
+    id: generateId("ta"),
+    employeeId: assignment.employeeId,
+    sopId: assignment.sopId,
+    sopVersionId: assignment.sopVersionId || "current",
+    assignedBy: actorId,
+    departmentId: assignment.departmentId,
+    status: acknowledged ? "assessment_pending" : "assigned",
+    startedAt: acknowledged ? now : undefined,
+    trainingCompletedAt: acknowledged ? now : undefined,
+    attemptCount: 0,
+    isRetraining: false,
+    triggeredBySopRevision: false,
+    ojtAssignmentId: assignment.id,
+    excludeFromCertificate: true,
+    createdAt: now,
+    updatedAt: now,
+    createdBy: actorId,
+  };
+  if (preferTrainingLocal() || isDemoMode()) {
+    const store = readTrainingStore();
+    store.assignments.push(row);
+    writeTrainingStore(store);
+  } else {
+    await setDoc(doc(db, COLLECTIONS.trainingAssignments, row.id), stripUndefined(row));
+  }
+  notifyTrainingUpdated();
+  return { trainingAssignmentId: row.id, alreadyPassed: false };
+}
+
 export async function createOjtAssignmentForEmployee(params: {
   plan: OjtPlan;
   employee: Employee;
@@ -1053,7 +1135,7 @@ export async function createOjtAssignmentForEmployee(params: {
   const hodUserId = await departmentHeadUserId(
     params.employee.departmentId || params.plan.departmentId
   );
-  const assignment: OjtAssignment = {
+  let assignment: OjtAssignment = {
     id: assignmentId,
     planId: params.plan.id,
     topicId: params.plan.topicId,
@@ -1079,48 +1161,52 @@ export async function createOjtAssignmentForEmployee(params: {
     plannedExecutionMonth: months.plannedExecutionMonth,
     plannedExecutionMonths: months.plannedExecutionMonths,
     selectionDate: now,
-    trainerId: params.trainerId || params.plan.trainerId,
-    trainerName: params.trainerName || params.plan.trainerName,
+    selfStudy: true,
+    requireTrainerSignoff: false,
     hodUserId,
     responsiblePersonId: params.plan.responsiblePersonId,
     responsiblePersonName: params.plan.responsiblePersonName,
-    status: params.trainerId || params.plan.trainerId ? "assigned" : "selected",
+    status: "in_progress",
     remarks: params.remarks,
     attachments: [],
     attempts: [],
     attemptNumber: 1,
     isRetraining: false,
     requireEmployeeAck: params.plan.requireEmployeeAck,
-    requireTrainerSignoff: params.plan.requireTrainerSignoff,
     requireHodVerification: params.plan.requireHodVerification,
     requireQaApproval: params.plan.requireQaApproval,
     createdAt: now,
     updatedAt: now,
     createdBy: params.actor.uid,
   };
+  if (assignment.sopId) {
+    const training = await ensureOjtSelfStudyTraining(assignment, params.actor.uid);
+    assignment = {
+      ...assignment,
+      trainingAssignmentId: training.trainingAssignmentId,
+      status: training.alreadyPassed ? "completed" : "in_progress",
+      overallCompetency: training.alreadyPassed ? "competent" : assignment.overallCompetency,
+      actualExecutionDate: training.alreadyPassed ? now.slice(0, 10) : assignment.actualExecutionDate,
+      remarks: training.alreadyPassed
+        ? "SOP exam was already passed. OJT closed. No certificate is issued for OJT."
+        : assignment.remarks,
+    };
+  }
   await saveAssignment(assignment);
   await safeNotify(() =>
     notifyEmployee({
       employeeId: assignment.employeeId,
       type: "ojt",
-      title: "OJT assigned",
-      message: `You have been selected for On Job Training: ${assignment.trainingTopic}`,
-      link: `/dashboard/ojt/assignments/${assignment.id}`,
+      title: "OJT self study",
+      message: assignment.sopId
+        ? `Log in with your employee ID, read ${assignment.sopNumber || assignment.trainingTopic}, then take the exam. OJT does not issue a certificate.`
+        : `Log in with your employee ID and open ${assignment.trainingTopic}. OJT does not issue a certificate.`,
+      link: assignment.sopId
+        ? `/dashboard/sops/${assignment.sopId}`
+        : `/dashboard/ojt/assignments/${assignment.id}`,
       actorId: params.actor.uid,
     })
   );
-  if (assignment.trainerId) {
-    await safeNotify(() =>
-      createNotification({
-        userId: assignment.trainerId!,
-        type: "ojt",
-        title: "OJT trainer assignment",
-        message: `${assignment.employeeName} — ${assignment.trainingTopic}`,
-        link: `/dashboard/ojt/assignments/${assignment.id}`,
-        actorId: params.actor.uid,
-      })
-    );
-  }
   await audit({
     action: "assign",
     resourceType: "ojt_assignment",
@@ -1133,6 +1219,125 @@ export async function createOjtAssignmentForEmployee(params: {
     },
   });
   return assignment;
+}
+
+/** Move an existing "needs trainer" row onto self-study. No date or trainer. */
+export async function releaseOjtSelfStudy(id: string, actor: OjtActor): Promise<OjtAssignment> {
+  const assignment = await getOjtAssignment(id);
+  if (!assignment) throw new Error("OJT assignment not found");
+  if (assignment.status === "completed" || assignment.status === "cancelled") return assignment;
+  if (assignment.selfStudy && assignment.status === "in_progress" && assignment.trainingAssignmentId) {
+    return assignment;
+  }
+  if (!["draft", "selected", "assigned", "in_progress"].includes(assignment.status)) {
+    return assignment;
+  }
+
+  const training = await ensureOjtSelfStudyTraining(assignment, actor.uid);
+  let status: OjtStatus = assignment.status;
+  if (training.alreadyPassed) {
+    if (status !== "in_progress") {
+      assertTransition(status, "in_progress");
+      status = "in_progress";
+    }
+    assertTransition(status, "completed");
+    status = "completed";
+  } else if (status !== "in_progress") {
+    assertTransition(status, "in_progress");
+    status = "in_progress";
+  }
+
+  const now = nowISO();
+  const next: OjtAssignment = {
+    ...assignment,
+    selfStudy: true,
+    requireTrainerSignoff: false,
+    status,
+    trainingAssignmentId: training.trainingAssignmentId || assignment.trainingAssignmentId,
+    overallCompetency: training.alreadyPassed ? "competent" : assignment.overallCompetency,
+    actualExecutionDate: training.alreadyPassed
+      ? assignment.actualExecutionDate || now.slice(0, 10)
+      : assignment.actualExecutionDate,
+    remarks: training.alreadyPassed
+      ? "SOP exam was already passed. OJT closed. No certificate is issued for OJT."
+      : assignment.remarks,
+    updatedAt: now,
+    updatedBy: actor.uid,
+  };
+  await saveAssignment(next);
+  if (!training.alreadyPassed) {
+    await safeNotify(() =>
+      notifyEmployee({
+        employeeId: next.employeeId,
+        type: "ojt",
+        title: "OJT self study",
+        message: next.sopId
+          ? `Log in with your employee ID, read ${next.sopNumber || next.trainingTopic}, then take the exam. OJT does not issue a certificate.`
+          : `Log in with your employee ID and open ${next.trainingTopic}. OJT does not issue a certificate.`,
+        link: next.sopId ? `/dashboard/sops/${next.sopId}` : `/dashboard/ojt/assignments/${next.id}`,
+        actorId: actor.uid,
+      })
+    );
+  }
+  await audit({
+    action: "update",
+    resourceType: "ojt_assignment",
+    resourceId: id,
+    description: `Started self study for ${assignment.employeeName}`,
+    before: { status: assignment.status },
+    after: { status: next.status, selfStudy: true },
+  });
+  return next;
+}
+
+/** Close self-study OJT when the linked SOP exam is passed or finally failed. */
+export async function settleOjtSelfStudyAfterExam(params: {
+  employeeId: string;
+  sopId?: string;
+  ojtAssignmentId?: string;
+  passed: boolean;
+  finalFail: boolean;
+  percentage?: number;
+  actorId: string;
+}): Promise<void> {
+  if (!params.passed && !params.finalFail) return;
+  const rows = await listOjtAssignments({ employeeId: params.employeeId });
+  for (const assignment of rows) {
+    if (!assignment.selfStudy) continue;
+    if (assignment.status === "cancelled") continue;
+    if (params.passed && assignment.status === "completed") continue;
+    if (!params.passed && (assignment.status === "completed" || assignment.status === "failed")) continue;
+    const matches =
+      (params.ojtAssignmentId && assignment.id === params.ojtAssignmentId) ||
+      (params.sopId && assignment.sopId === params.sopId);
+    if (!matches) continue;
+    const target: OjtStatus = params.passed ? "completed" : "failed";
+    const now = nowISO();
+    const next: OjtAssignment = {
+      ...assignment,
+      status: target,
+      overallCompetency: params.passed ? "competent" : "not_competent",
+      actualExecutionDate: assignment.actualExecutionDate || now.slice(0, 10),
+      remarks: params.passed
+        ? `Self-study exam passed${params.percentage != null ? ` (${params.percentage}%)` : ""}. No certificate is issued for OJT.`
+        : `Self-study exam not passed${params.percentage != null ? ` (${params.percentage}%)` : ""}. No certificate is issued for OJT.`,
+      updatedAt: now,
+      updatedBy: params.actorId,
+    };
+    await saveAssignment(next);
+    await safeNotify(() =>
+      notifyEmployee({
+        employeeId: next.employeeId,
+        type: "ojt",
+        title: params.passed ? "OJT self study passed" : "OJT self study not passed",
+        message: params.passed
+          ? `${next.trainingTopic} is complete. A certificate is not issued for OJT.`
+          : `${next.trainingTopic} was not passed. Ask your department if you should try again.`,
+        link: `/dashboard/ojt/assignments/${next.id}`,
+        actorId: params.actorId,
+      })
+    );
+  }
 }
 
 export async function setPlanEmployeeApplicability(params: {
@@ -2279,6 +2484,97 @@ export async function updateOjtFormDocumentMeta(
   return next;
 }
 
+function formSignoffLink(doc: OjtFormDocument): string {
+  const base = doc.kind === "planner" ? "/dashboard/ojt/planner" : "/dashboard/ojt/matrix";
+  const params = new URLSearchParams({
+    departmentId: doc.departmentId,
+    year: String(doc.year),
+  });
+  return `${base}?${params.toString()}`;
+}
+
+async function notifyFormAssigneeIfReady(
+  doc: OjtFormDocument,
+  role: OjtFormSignoffRole,
+  actorId: string
+): Promise<void> {
+  const person = formAssignee(doc, role);
+  if (!person?.userId || person.userId === actorId) return;
+  if (hasAcceptedSignoff(doc, role)) return;
+  const settings = await getOjtSettings();
+  const config = formApprovalsFor(doc.kind, settings);
+  if (!canSignFormRole(doc, config, role)) return;
+  const labels = OJT_FORM_SIGNOFF_LABELS[role];
+  const formName = doc.kind === "planner" ? "On Job Training Planner" : "Employee Training Matrix";
+  await safeNotify(() =>
+    createNotification({
+      userId: person.userId,
+      type: "ojt",
+      title: `${labels.title} — electronic signature needed`,
+      message: `${doc.departmentName || "Department"} ${doc.year} ${formName}. You are ${labels.subtitle}. Open this and add your electronic signature.`,
+      link: formSignoffLink(doc),
+      actorId,
+      id: `ojt-form-${doc.id}-${doc.revisionNumber}-${role}-${person.userId}`,
+      metadata: {
+        kind: "ojt_form_signoff",
+        ojtKind: doc.kind,
+        year: String(doc.year),
+        departmentId: doc.departmentId,
+        departmentName: doc.departmentName || "",
+        role,
+      },
+    })
+  );
+}
+
+export async function assignOjtFormApprover(params: {
+  kind: OjtFormKind;
+  year: number;
+  departmentId: string;
+  departmentName?: string;
+  role: OjtFormSignoffRole;
+  userId: string;
+  userName: string;
+  actor: OjtActor;
+}): Promise<OjtFormDocument> {
+  const userId = params.userId.trim();
+  const userName = params.userName.trim();
+  if (!userId || !userName) throw new Error("Select who will approve this step");
+  const row = await ensureOjtFormDocument({
+    kind: params.kind,
+    year: params.year,
+    departmentId: params.departmentId,
+    departmentName: params.departmentName,
+    actor: params.actor,
+  });
+  assertFormUnlocked(row, "choosing an approver");
+  if (hasAcceptedSignoff(row, params.role)) {
+    throw new Error("This step already has an electronic signature");
+  }
+  const assignees = [
+    ...(row.assignees || []).filter((item) => item.role !== params.role),
+    { role: params.role, userId, userName },
+  ];
+  const next: OjtFormDocument = {
+    ...row,
+    assignees,
+    departmentName: params.departmentName || row.departmentName,
+    updatedAt: nowISO(),
+    updatedBy: params.actor.uid,
+  };
+  await saveFormDocument(next);
+  await notifyFormAssigneeIfReady(next, params.role, params.actor.uid);
+  const labels = OJT_FORM_SIGNOFF_LABELS[params.role];
+  await audit({
+    action: "update",
+    resourceType: `ojt_${params.kind}`,
+    resourceId: next.id,
+    description: `Assigned ${userName} to ${labels.title} on ${params.kind} ${params.departmentId} ${params.year}`,
+    after: { role: params.role, userId, userName },
+  });
+  return next;
+}
+
 export async function signOjtFormDocument(params: {
   kind: OjtFormKind;
   year: number;
@@ -2299,6 +2595,14 @@ export async function signOjtFormDocument(params: {
   });
   if (row.locked && params.action !== "rejected") {
     throw new Error("This controlled form is already approved. Create a revision to change it.");
+  }
+  const assignee = formAssignee(row, params.role);
+  if (!assignee) throw new Error("Select who will approve this step before signing");
+  if (params.actor.role !== "super_admin" && assignee.userId !== params.actor.uid) {
+    throw new Error(`This step is assigned to ${assignee.userName}`);
+  }
+  if (params.action !== "rejected" && hasAcceptedSignoff(row, params.role)) {
+    throw new Error("This step already has an electronic signature");
   }
   const config = formApprovalsFor(params.kind, settings);
   if (params.action !== "rejected" && !canSignFormRole(row, config, params.role)) {
@@ -2333,6 +2637,11 @@ export async function signOjtFormDocument(params: {
     updatedBy: params.actor.uid,
   };
   await saveFormDocument(next);
+  if (!rejected) {
+    const required = requiredRolesForApproval(config);
+    const nextRole = required[required.indexOf(params.role) + 1];
+    if (nextRole) await notifyFormAssigneeIfReady(next, nextRole, params.actor.uid);
+  }
   await audit({
     action: rejected ? "reject" : "approve",
     resourceType: `ojt_${params.kind}`,
@@ -2382,6 +2691,8 @@ export async function createOjtFormRevision(params: {
     updatedBy: params.actor.uid,
   };
   await saveFormDocument(next);
+  const firstRole = requiredRolesForApproval(formApprovalsFor(params.kind, await getOjtSettings()))[0];
+  if (firstRole) await notifyFormAssigneeIfReady(next, firstRole, params.actor.uid);
   await audit({
     action: "create",
     resourceType: `ojt_${params.kind}`,

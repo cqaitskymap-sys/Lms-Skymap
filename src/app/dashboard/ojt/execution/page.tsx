@@ -40,8 +40,10 @@ export default function OjtExecutionQueuePage() {
               : undefined;
       const all = await listOjtAssignments(filters);
       setRows(
-        all.filter((a) =>
-          ["scheduled", "rescheduled", "in_progress", "trainer_completed"].includes(a.status)
+        all.filter(
+          (a) =>
+            !a.selfStudy &&
+            ["scheduled", "rescheduled", "in_progress", "trainer_completed"].includes(a.status)
         )
       );
     } catch (err) {
@@ -87,7 +89,7 @@ export default function OjtExecutionQueuePage() {
               description={
                 profile?.role === "trainer"
                   ? "When a department books you as trainer, the session will show up here."
-                  : "Book a date first. Then the trainer can start from this list."
+                  : "New OJT is self study. This list is only for an older session that still has a trainer."
               }
               actionHref={
                 profile?.role && hasPermission(profile.role, "ojt:schedule")
@@ -96,7 +98,7 @@ export default function OjtExecutionQueuePage() {
               }
               actionLabel={
                 profile?.role && hasPermission(profile.role, "ojt:schedule")
-                  ? "Book a date"
+                  ? "Self study"
                   : "View records"
               }
             />
@@ -114,7 +116,7 @@ export default function OjtExecutionQueuePage() {
                     <p className="mt-1 text-xs text-muted-foreground">{next.title}</p>
                   </div>
                   <div className="flex items-center gap-2">
-                    <StatusBadge status={displayOjtStatus(a)} label={ojtStatusLabel(displayOjtStatus(a))} />
+                    <StatusBadge status={displayOjtStatus(a)} label={ojtStatusLabel(displayOjtStatus(a), a.selfStudy)} />
                     <Button size="sm" asChild>
                       <Link href={`/dashboard/ojt/assignments/${a.id}`}>
                         {next.canAct ? "Continue" : "Open"}

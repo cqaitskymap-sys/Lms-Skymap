@@ -29,8 +29,8 @@ const LINKS: {
   { href: "/dashboard/ojt/topics", label: "Topics", hint: "What jobs to train", icon: HardHat, permission: "ojt:write", step: "1" },
   { href: "/dashboard/ojt/planner", label: "Plan months", hint: "When to choose people and train", icon: Calendar, permission: "ojt:write", step: "2" },
   { href: "/dashboard/ojt/matrix", label: "Select people", hint: "Who needs each topic", icon: ClipboardList, permission: "ojt:assign", step: "3" },
-  { href: "/dashboard/ojt/schedule", label: "Book date", hint: "Trainer, day and room", icon: BookOpen, permission: "ojt:schedule", step: "4" },
-  { href: "/dashboard/ojt/execution", label: "Train", hint: "Show the job and score", icon: PlayCircle, permission: "ojt:conduct", step: "5" },
+  { href: "/dashboard/ojt/schedule", label: "Self study", hint: "Employee reads the SOP, then takes the exam", icon: BookOpen, permission: "ojt:schedule", step: "4" },
+  { href: "/dashboard/ojt/execution", label: "Train", hint: "Only for an older trainer session", icon: PlayCircle, permission: "ojt:conduct", step: "5" },
   { href: "/dashboard/ojt/assignments", label: "All records", hint: "Every person’s OJT", icon: ListChecks },
   { href: "/dashboard/ojt/reports", label: "Reports", hint: "Print and export", icon: FileBarChart, permission: "ojt:export" },
 ];

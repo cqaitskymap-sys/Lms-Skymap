@@ -10,7 +10,6 @@ import { hasPermission } from "@/lib/rbac/permissions";
 import {
   acknowledgeOjt,
   approveOjtByQa,
-  assignOjtTrainer,
   cancelOjtAssignment,
   deleteOjtAssignment,
   deleteOjtAttachment,
@@ -20,8 +19,8 @@ import {
   listOjtStaffOptions,
   markRetrainingRequired,
   recordOjtExecution,
+  releaseOjtSelfStudy,
   rescheduleRetraining,
-  scheduleOjtAssignment,
   startOjtExecution,
   submitOjtEvaluation,
   trainerSignOffOjt,
@@ -30,13 +29,12 @@ import {
 } from "@/lib/services/ojt";
 import { toOjtActor } from "@/lib/ojt/actor";
 import { OJT_UPDATED_EVENT } from "@/lib/ojt/demo-store";
-import { calendarDateToIso, OJT_ACK_STATEMENT, monthName } from "@/lib/ojt/constants";
+import { OJT_ACK_STATEMENT, monthName } from "@/lib/ojt/constants";
 import {
   canTransition,
   criterionScaleForModel,
   displayOjtStatus,
   evaluationDidFail,
-  executionDateInPlan,
 } from "@/lib/ojt/workflow";
 import { formatDate, formatDateTime } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -150,10 +148,8 @@ export default function OjtAssignmentDetailPage({
               criterionId: c.id,
               label: c.label,
               isRequired: c.isRequired,
-              result: existing?.result || ("pass" as const),
-              rating:
-                existing?.rating ??
-                (criterionScaleForModel(c.ratingScale, model) === "1-5" ? 3 : undefined),
+              result: existing?.result,
+              rating: existing?.rating,
               comments: existing?.comments,
             };
           })
@@ -202,7 +198,6 @@ export default function OjtAssignmentDetailPage({
     role !== "super_admin" &&
     !!row?.hodVerification?.userId &&
     row.hodVerification.userId === profile?.uid;
-  const canAuthorizeDeviation = role === "qa" || role === "super_admin";
   const canRetrain = !!role && hasPermission(role, "ojt:retrain");
   const canAssign = !!role && hasPermission(role, "ojt:assign");
 
@@ -272,7 +267,7 @@ export default function OjtAssignmentDetailPage({
               router.push("/dashboard/ojt/assignments");
             }}
           />
-          <StatusBadge status={shownStatus} label={ojtStatusLabel(shownStatus)} />
+          <StatusBadge status={shownStatus} label={ojtStatusLabel(shownStatus, row.selfStudy)} />
         </div>
       </div>
 
@@ -318,145 +313,63 @@ export default function OjtAssignmentDetailPage({
         </Card>
       </div>
 
-      {(canAssign || canSchedule) && ["selected", "assigned", "draft"].includes(row.status) && (
-        <Card id="ojt-schedule" className="scroll-mt-24">
+      {row.selfStudy && !["completed", "cancelled"].includes(row.status) && (
+        <Card id="ojt-self-study" className="scroll-mt-24">
           <CardHeader>
-            <CardTitle>Pick trainer & book a date</CardTitle>
+            <CardTitle>Self study</CardTitle>
             <CardDescription>
-              Prefer a date in {monthName(row.plannedExecutionMonth)} {row.year}. If the date is in another month, write a reason.
+              There is no trainer. {row.employeeName} logs in with employee ID {row.employeeCode}, reads the SOP, then takes the exam.
             </CardDescription>
           </CardHeader>
-          <CardContent className="grid gap-3 md:grid-cols-2">
-            <div className="space-y-1">
-              <Label>Trainer</Label>
-              <Select
-                value={row.trainerId || "none"}
-                onValueChange={(v) => {
-                  if (!actor || v === "none") return;
-                  const u = trainers.find((t) => t.uid === v);
-                  void run(
-                    () => assignOjtTrainer(row.id, v, u?.displayName || v, actor),
-                    "Trainer assigned"
-                  );
-                }}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Assign trainer" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">Unassigned</SelectItem>
-                  {trainers.map((u) => (
-                    <SelectItem key={u.uid} value={u.uid}>
-                      {u.displayName}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            {canSchedule && (
+          <CardContent className="flex flex-wrap gap-2">
+            {profile?.employeeId === row.employeeId || (role && hasPermission(role, "sops:read")) ? (
               <>
-                <div className="space-y-1">
-                  <Label>Execution date</Label>
-                  <Input
-                    type="date"
-                    value={exec.actualExecutionDate}
-                    onChange={(e) => setExecFromUser({ ...exec, actualExecutionDate: e.target.value })}
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label>Start</Label>
-                  <Input
-                    type="time"
-                    value={exec.startTime}
-                    onChange={(e) => setExecFromUser({ ...exec, startTime: e.target.value })}
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label>End</Label>
-                  <Input
-                    type="time"
-                    value={exec.endTime}
-                    onChange={(e) => setExecFromUser({ ...exec, endTime: e.target.value })}
-                  />
-                </div>
-                <div className="space-y-1 md:col-span-2">
-                  <Label>Location</Label>
-                  <Input
-                    value={exec.location}
-                    onChange={(e) => setExecFromUser({ ...exec, location: e.target.value })}
-                    placeholder="e.g. Dispensing room"
-                  />
-                </div>
-                {exec.actualExecutionDate &&
-                  !executionDateInPlan(calendarDateToIso(exec.actualExecutionDate), row) && (
-                    <div className="space-y-1 md:col-span-2">
-                      {canAuthorizeDeviation ? (
-                        <>
-                          <Label>Authorized deviation reason</Label>
-                          <Textarea
-                            value={exec.deviationReason}
-                            onChange={(e) => setExecFromUser({ ...exec, deviationReason: e.target.value })}
-                            placeholder="Required when the date is outside the planned execution month"
-                          />
-                        </>
-                      ) : (
-                        <p className="text-sm text-amber-800 dark:text-amber-200">
-                          This date is outside the planned execution month. Ask QA or an admin to schedule it.
-                        </p>
-                      )}
-                    </div>
-                  )}
-                <Button
-                  disabled={busy || !row.trainerId || !exec.actualExecutionDate}
-                  onClick={() => {
-                    if (!actor || !row.trainerId || !exec.actualExecutionDate) return;
-                    const outside = !executionDateInPlan(
-                      calendarDateToIso(exec.actualExecutionDate),
-                      row
-                    );
-                    if (outside && !canAuthorizeDeviation) {
-                      toast.error("A QA officer or admin must authorize a date outside the planned month.");
-                      return;
-                    }
-                    if (outside && !exec.deviationReason.trim()) {
-                      toast.error("Date is outside the planned execution month. Record an authorized deviation reason.");
-                      return;
-                    }
-                    void run(
-                      () =>
-                        scheduleOjtAssignment(
-                          row.id,
-                          {
-                            executionDate: exec.actualExecutionDate,
-                            startTime: exec.startTime,
-                            endTime: exec.endTime,
-                            location: exec.location,
-                            trainerId: row.trainerId!,
-                            trainerName: row.trainerName,
-                            deviation: outside
-                              ? {
-                                  reason: exec.deviationReason,
-                                  approvedBy: actor.uid,
-                                  approvedByName: actor.name,
-                                  approvalDate: new Date().toISOString(),
-                                }
-                              : undefined,
-                          },
-                          actor
-                        ),
-                      "OJT scheduled"
-                    );
-                  }}
-                >
-                  Save schedule
-                </Button>
+                {row.sopId ? (
+                  <Button asChild>
+                    <Link href={`/dashboard/sops/${row.sopId}`}>Read SOP</Link>
+                  </Button>
+                ) : (
+                  <p className="text-sm text-amber-700 dark:text-amber-300">Link a SOP on this topic before the employee can study.</p>
+                )}
+                {(profile?.employeeId === row.employeeId || (role && hasPermission(role, "exams:read"))) && (
+                  <Button asChild variant="outline">
+                    <Link href="/dashboard/exams">Take exam</Link>
+                  </Button>
+                )}
               </>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                {row.employeeName} opens this from their own login.
+              </p>
             )}
+            <p className="w-full text-sm text-muted-foreground">Passing the exam closes this OJT. It does not issue a certificate.</p>
           </CardContent>
         </Card>
       )}
 
-      {isTrainer && ["scheduled", "rescheduled", "in_progress"].includes(row.status) && (
+      {!row.selfStudy && (canAssign || canSchedule) && ["selected", "assigned", "draft"].includes(row.status) && (
+        <Card id="ojt-schedule" className="scroll-mt-24">
+          <CardHeader>
+            <CardTitle>Start self study</CardTitle>
+            <CardDescription>
+              OJT does not use a trainer. The employee logs in, reads the SOP, then takes the exam. No certificate is issued.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button
+              disabled={busy || !actor}
+              onClick={() => {
+                if (!actor) return;
+                void run(() => releaseOjtSelfStudy(row.id, actor), "Self study started");
+              }}
+            >
+              Start self study
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
+      {isTrainer && !row.selfStudy && ["scheduled", "rescheduled", "in_progress"].includes(row.status) && (
         <Card id="ojt-execution" className="scroll-mt-24">
           <CardHeader>
             <CardTitle>Training notes</CardTitle>
@@ -538,7 +451,7 @@ export default function OjtAssignmentDetailPage({
         </Card>
       )}
 
-      {isTrainer && ["in_progress", "scheduled", "rescheduled"].includes(row.status) && (
+      {isTrainer && !row.selfStudy && ["in_progress", "scheduled", "rescheduled"].includes(row.status) && (
         <Card id="ojt-evaluation" className="scroll-mt-24">
           <CardHeader>
             <CardTitle>Score the person</CardTitle>
@@ -556,7 +469,7 @@ export default function OjtAssignmentDetailPage({
                   <div className="mt-2 flex flex-wrap gap-3">
                     {criterionScaleForModel(c.ratingScale, scoringModel) === "1-5" ? (
                       <Select
-                        value={String(score?.rating ?? 3)}
+                        value={score?.rating != null ? String(score.rating) : undefined}
                         onValueChange={(v) =>
                           setScoresFromUser((prev) =>
                             prev.map((s) =>
@@ -572,7 +485,7 @@ export default function OjtAssignmentDetailPage({
                         }
                       >
                         <SelectTrigger className="w-28">
-                          <SelectValue />
+                          <SelectValue placeholder="Rate" />
                         </SelectTrigger>
                         <SelectContent>
                           {[1, 2, 3, 4, 5].map((n) => (
@@ -584,7 +497,7 @@ export default function OjtAssignmentDetailPage({
                       </Select>
                     ) : (
                       <Select
-                        value={score?.result || "pass"}
+                        value={score?.result}
                         onValueChange={(v) =>
                           setScoresFromUser((prev) =>
                             prev.map((s) =>
@@ -596,7 +509,7 @@ export default function OjtAssignmentDetailPage({
                         }
                       >
                         <SelectTrigger className="w-28">
-                          <SelectValue />
+                          <SelectValue placeholder="Score" />
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="pass">Pass</SelectItem>
@@ -628,7 +541,12 @@ export default function OjtAssignmentDetailPage({
             />
             <div className="flex flex-wrap gap-2">
               <Button
-                disabled={busy}
+                disabled={
+                  busy ||
+                  scores.some(
+                    (score) => score.isRequired !== false && score.result == null && score.rating == null
+                  )
+                }
                 onClick={() => {
                   if (!actor) return;
                   const scored = scores.map((score) => {
@@ -685,7 +603,10 @@ export default function OjtAssignmentDetailPage({
             <CardTitle>Evaluation result</CardTitle>
           </CardHeader>
           <CardContent className="space-y-2 text-sm">
-            <StatusBadge status={row.evaluation.overallResult === "pass" ? "completed" : "failed"} />
+            <StatusBadge
+              status={row.evaluation.overallResult === "pass" ? "completed" : "failed"}
+              label={row.evaluation.overallResult === "pass" ? "Pass" : "Fail"}
+            />
             {row.evaluation.overallRating != null ? (
               <p className="text-muted-foreground">Average rating: {row.evaluation.overallRating} / 5</p>
             ) : null}
@@ -846,7 +767,7 @@ export default function OjtAssignmentDetailPage({
         </Card>
       )}
 
-      {canRetrain && (row.status === "failed" || row.status === "retraining_required") && (
+      {!row.selfStudy && canRetrain && (row.status === "failed" || row.status === "retraining_required") && (
         <Card id="ojt-retrain" className="scroll-mt-24">
           <CardHeader>
             <CardTitle>Book retraining</CardTitle>

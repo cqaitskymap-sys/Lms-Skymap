@@ -2,7 +2,10 @@ import "server-only";
 import { adminDb } from "@/lib/firebase/admin";
 import { COLLECTIONS } from "@/lib/firebase/client";
 import type { JobDescription, JdSignoff, JdSignoffSlot } from "@/types";
+import { FieldValue } from "firebase-admin/firestore";
 import {
+  absenceHandoverWriteFields,
+  acknowledgeAbsenceParty,
   buildJdComputerGeneratedSignature,
   compactJdSignoff,
   getJdSignoff,
@@ -48,6 +51,20 @@ async function collectByField(field: string, value: string): Promise<JobDescript
   }
 }
 
+async function collectByArrayContains(field: string, value: string): Promise<JobDescription[]> {
+  if (!value) return [];
+  try {
+    const snap = await adminDb
+      .collection(COLLECTIONS.jobDescriptions)
+      .where(field, "array-contains", value)
+      .get();
+    return snap.docs.map((d) => asJd(d.id, d.data() as Record<string, unknown>));
+  } catch (err) {
+    console.warn(`[jd] query ${field} array-contains failed`, err);
+    return [];
+  }
+}
+
 export async function listAbsenceHandoverJdsForUser(actor: {
   uid: string;
   employeeId?: string;
@@ -55,6 +72,7 @@ export async function listAbsenceHandoverJdsForUser(actor: {
   const extraPromise = employeeIdsForAuthUser(actor.uid, actor.employeeId);
   const uidPromise = Promise.all([
     collectByField("absenceHandoverUserId", actor.uid),
+    collectByArrayContains("absenceHandoverUserIds", actor.uid),
     collectByField("assignedBy.userId", actor.uid),
     collectByField("acceptedBy.userId", actor.uid),
   ]);
@@ -62,6 +80,7 @@ export async function listAbsenceHandoverJdsForUser(actor: {
   const empPromise = Promise.all(
     extraEmployeeIds.flatMap((empId) => [
       collectByField("absenceHandoverEmployeeId", empId),
+      collectByArrayContains("absenceHandoverEmployeeIds", empId),
       collectByField("assignedBy.employeeId", empId),
       collectByField("acceptedBy.employeeId", empId),
     ])
@@ -77,18 +96,6 @@ export async function listAbsenceHandoverJdsForUser(actor: {
     (b.createdAt || "").localeCompare(a.createdAt || "")
   );
   return { items, extraEmployeeIds };
-}
-
-function applyAbsenceAck(name: string, now: string, actorUid: string) {
-  return {
-    absenceHandoverStatus: "acknowledged" as const,
-    absenceHandoverAcknowledgedAt: now,
-    absenceHandoverAcknowledgedBy: actorUid,
-    absenceHandoverAcknowledgedByName: name,
-    absenceHandoverSignatureText: buildJdComputerGeneratedSignature(name, now),
-    updatedAt: now,
-    updatedBy: actorUid,
-  };
 }
 
 function applyNestedAck(
@@ -126,6 +133,28 @@ export async function acknowledgeJdSignoffForUser(
 
   const jd = asJd(snap.id, (snap.data() || {}) as Record<string, unknown>);
   const extraIds = await employeeIdsForAuthUser(actor.uid, actor.employeeId);
+  const now = new Date().toISOString();
+
+  if (slot === "absence_handover") {
+    const parties = acknowledgeAbsenceParty(jd, actor, extraIds, now);
+    const fields = absenceHandoverWriteFields(parties);
+    const patch: Record<string, unknown> = {
+      updatedAt: now,
+      updatedBy: actor.uid,
+    };
+    for (const [key, value] of Object.entries(fields)) {
+      patch[key] = value === undefined ? FieldValue.delete() : value;
+    }
+    await ref.update(patch);
+    const next: JobDescription = { ...jd, updatedAt: now, updatedBy: actor.uid };
+    const record = next as unknown as Record<string, unknown>;
+    for (const [key, value] of Object.entries(fields)) {
+      if (value === undefined) delete record[key];
+      else record[key] = value;
+    }
+    return next;
+  }
+
   const signoff = getJdSignoff(jd, slot);
   if (!signoff || (!signoff.employeeId && !signoff.userId)) {
     throw new Error("This Job Description has no person named for that signature");
@@ -136,13 +165,8 @@ export async function acknowledgeJdSignoffForUser(
   if (!isJdSignoffPending(jd, slot)) {
     throw new Error("This signature is already approved");
   }
-
-  const now = new Date().toISOString();
   const name = (actor.name || signoff.name || "Assignee").trim();
-  const patch =
-    slot === "absence_handover"
-      ? applyAbsenceAck(name, now, actor.uid)
-      : applyNestedAck(slot, signoff, name, now, actor.uid);
+  const patch = applyNestedAck(slot, signoff, name, now, actor.uid);
 
   await ref.update(patch);
   return { ...jd, ...patch } as JobDescription;

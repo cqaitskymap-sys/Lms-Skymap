@@ -57,7 +57,7 @@ export default function QuestionsPage() {
     if (bankId !== "all" || difficulty !== "all" || type !== "all") {
       return "No questions match the current filters.";
     }
-    return "This bank has no questions yet.";
+    return "No questions yet.";
   };
 
   return (

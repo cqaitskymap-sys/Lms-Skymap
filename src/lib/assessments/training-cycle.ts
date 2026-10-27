@@ -25,12 +25,12 @@ export function attemptsRemaining(finishedInCycle: number, maxAttempts: number):
  * or failed without a covering pass/retrain keep the employee in the exam stage.
  */
 export function hasOutstandingTraining(
-  assignments: { id: string; sopId?: string; status?: string }[],
+  assignments: { id: string; sopId?: string; status?: string; excludeFromCertificate?: boolean }[],
   passedAssignmentId: string
 ): boolean {
-  const rows = assignments.map((row) =>
-    row.id === passedAssignmentId ? { ...row, status: "passed" } : row
-  );
+  const rows = assignments
+    .filter((row) => !row.excludeFromCertificate)
+    .map((row) => (row.id === passedAssignmentId ? { ...row, status: "passed" } : row));
 
   return rows.some((row) => {
     if (row.id === passedAssignmentId) return false;

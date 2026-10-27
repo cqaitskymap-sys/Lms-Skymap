@@ -3,16 +3,25 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
-import type { UserRole } from "@/types";
+import type { UserProfile, UserRole } from "@/types";
 import type { OjtFormApprovalConfig, OjtFormDocument, OjtFormKind, OjtFormSignoffRole } from "@/types/ojt";
-import { OJT_FORM_SIGNOFF_LABELS, formatOfficialDate, formatRevisionNumber } from "@/lib/ojt/constants";
-import { canSignFormRole, formApprovalsFor, latestSignoff } from "@/lib/ojt/forms";
 import {
+  DEFAULT_OJT_FORM_APPROVALS,
+  OJT_FORM_SIGNOFF_LABELS,
+  PLANNER_FORM_APPROVALS,
+  formatOfficialDate,
+  formatRevisionNumber,
+} from "@/lib/ojt/constants";
+import { canSignFormRole, formApprovalsFor, formAssignee, latestSignoff, requiredRolesForApproval } from "@/lib/ojt/forms";
+import {
+  assignOjtFormApprover,
   createOjtFormRevision,
   getOjtSettings,
   signOjtFormDocument,
   updateOjtFormDocumentMeta,
 } from "@/lib/services/ojt";
+import { listUsersByRoles } from "@/lib/services/users";
+import { ROLE_LABELS } from "@/lib/rbac/permissions";
 import { toOjtActor } from "@/lib/ojt/actor";
 import { useAuth } from "@/contexts/auth-context";
 import { hasPermission } from "@/lib/rbac/permissions";
@@ -22,21 +31,18 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { StatusBadge } from "@/components/shared/status-badge";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
-const SIGNOFF_ORDER: OjtFormSignoffRole[] = [
-  "prepared_by",
-  "checked_by_head",
-  "approved_by_qa",
-];
+function eligibleRoles(role: OjtFormSignoffRole): UserRole[] {
+  if (role === "approved_by_qa") return ["qa", "super_admin"];
+  return ["department_head", "qa", "super_admin"];
+}
 
-function canSignRole(role: OjtFormSignoffRole, userRole?: UserRole | null): boolean {
-  if (!userRole) return false;
-  if (userRole === "super_admin") return true;
-  if (role === "approved_by_qa") return userRole === "qa";
-  if (role === "checked_by_head") {
-    return userRole === "department_head" || userRole === "qa";
-  }
-  return hasPermission(userRole, "ojt:write");
+function signAction(role: OjtFormSignoffRole): "prepared" | "checked" | "verified" | "approved" {
+  if (role === "prepared_by") return "prepared";
+  if (role === "approved_by_qa") return "approved";
+  if (role === "verified_by_hod") return "verified";
+  return "checked";
 }
 
 export function OjtFormApprovalPanel({
@@ -60,6 +66,7 @@ export function OjtFormApprovalPanel({
   const [effectiveDate, setEffectiveDate] = useState(form?.effectiveDate?.slice(0, 10) || "");
   const [revisionReason, setRevisionReason] = useState("");
   const [approvalConfig, setApprovalConfig] = useState<OjtFormApprovalConfig | null>(null);
+  const [staff, setStaff] = useState<UserProfile[]>([]);
 
   useEffect(() => {
     setEffectiveDate(form?.effectiveDate?.slice(0, 10) || "");
@@ -79,8 +86,25 @@ export function OjtFormApprovalPanel({
     };
   }, [kind]);
 
+  useEffect(() => {
+    let cancelled = false;
+    void listUsersByRoles(["super_admin", "qa", "department_head"])
+      .then((rows) => {
+        if (!cancelled) setStaff(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setStaff([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const canWrite = profile?.role ? hasPermission(profile.role, "ojt:write") : false;
-  const title = kind === "planner" ? "Sign the yearly plan" : "Sign the people list";
+  const title = kind === "planner" ? "Approve the yearly plan" : "Approve the people list";
+  const signoffOrder = requiredRolesForApproval(
+    approvalConfig || (kind === "planner" ? PLANNER_FORM_APPROVALS : DEFAULT_OJT_FORM_APPROVALS)
+  );
 
   const run = async (fn: () => Promise<unknown>, ok: string) => {
     if (!profile) return;
@@ -104,7 +128,7 @@ export function OjtFormApprovalPanel({
           <div>
             <CardTitle>{title}</CardTitle>
             <CardDescription>
-              When this page is ready, sign in order: Prepare → HOD check → QA approve.
+              Choose the person for each block. That person gets the request when it is their turn, and their electronic signature is what prints.
             </CardDescription>
           </div>
           <StatusBadge status={form?.status || "draft"} />
@@ -153,34 +177,95 @@ export function OjtFormApprovalPanel({
         </div>
 
         <div className="grid gap-2 md:grid-cols-2 lg:grid-cols-3">
-          {SIGNOFF_ORDER.map((role) => {
+          {signoffOrder.map((role) => {
             const latest = form ? latestSignoff(form, role) : undefined;
             const signed = latest && latest.action !== "rejected" ? latest : undefined;
             const rejected = latest?.action === "rejected" ? latest : undefined;
             const labels = OJT_FORM_SIGNOFF_LABELS[role];
-            const action =
-              role === "prepared_by" ? "prepared" : role === "approved_by_qa" ? "approved" : "checked";
+            const action = signAction(role);
+            const assignee = form ? formAssignee(form, role) : undefined;
             const priorReady =
               !approvalConfig || !form || canSignFormRole(form, approvalConfig, role);
+            const allowed = new Set(eligibleRoles(role));
+            const choices = staff.filter((user) => allowed.has(user.role));
+            const known = assignee && choices.some((user) => user.uid === assignee.userId);
+            const isAssignee =
+              Boolean(assignee && profile && (assignee.userId === profile.uid || profile.role === "super_admin"));
             return (
               <div key={role} className="rounded-lg border p-3 text-sm">
                 <p className="font-medium">{labels.title}</p>
                 <p className="text-muted-foreground">{labels.subtitle}</p>
+                {!signed && (
+                  <div className="mt-2 space-y-1">
+                    <Label className="text-xs">Who approves</Label>
+                    <Select
+                      value={assignee?.userId || undefined}
+                      disabled={!canWrite || Boolean(form?.locked) || busy || !departmentId}
+                      onValueChange={(userId) => {
+                        const person = choices.find((user) => user.uid === userId);
+                        const name = person?.displayName || (assignee?.userId === userId ? assignee.userName : "");
+                        if (!name || !profile) return;
+                        const message = priorReady
+                          ? name === profile.displayName
+                            ? "You can add your electronic signature"
+                            : `Sent to ${name} for electronic signature`
+                          : `${name} will be asked after the previous signature`;
+                        void run(
+                          () =>
+                            assignOjtFormApprover({
+                              kind,
+                              year,
+                              departmentId,
+                              departmentName,
+                              role,
+                              userId,
+                              userName: name,
+                              actor: toOjtActor(profile),
+                            }),
+                          message
+                        );
+                      }}
+                    >
+                      <SelectTrigger className="h-9">
+                        <SelectValue placeholder="Select who will approve" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {assignee && !known && (
+                          <SelectItem value={assignee.userId}>{assignee.userName}</SelectItem>
+                        )}
+                        {choices.map((user) => (
+                          <SelectItem key={user.uid} value={user.uid}>
+                            {user.displayName || user.email} · {ROLE_LABELS[user.role]}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
                 {signed ? (
-                  <p className="mt-2 text-xs">
-                    {signed.userName} · {formatOfficialDate(signed.timestamp)}
-                  </p>
+                  <div className="mt-2">
+                    <p className="text-base leading-tight text-sky-800" style={{ fontFamily: '"Segoe Script", "Lucida Handwriting", cursive' }}>
+                      {signed.userName}
+                    </p>
+                    <p className="text-[10px] italic text-muted-foreground">
+                      Electronically computer-generated signature
+                    </p>
+                    <p className="text-xs">{formatOfficialDate(signed.timestamp)}</p>
+                  </div>
                 ) : rejected ? (
                   <p className="mt-2 text-xs text-destructive">
                     Rejected by {rejected.userName} · {formatOfficialDate(rejected.timestamp)}
                   </p>
+                ) : assignee ? (
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    {priorReady
+                      ? `Waiting for ${assignee.userName} to sign`
+                      : `${assignee.userName} will be asked after the previous signature`}
+                  </p>
                 ) : (
-                  <p className="mt-2 text-xs text-muted-foreground">Sign & Date pending</p>
+                  <p className="mt-2 text-xs text-muted-foreground">Select who will approve</p>
                 )}
-                {canSignRole(role, profile?.role) && !form?.locked && !signed && !priorReady && (
-                  <p className="mt-2 text-xs text-muted-foreground">Waiting for the previous signature</p>
-                )}
-                {canSignRole(role, profile?.role) && !form?.locked && !signed && priorReady && (
+                {isAssignee && !form?.locked && !signed && priorReady && (
                   <Button
                     size="sm"
                     className="mt-2"
@@ -199,12 +284,12 @@ export function OjtFormApprovalPanel({
                             comment,
                             actor: toOjtActor(profile),
                           }),
-                        `${labels.title} recorded`
+                        "Electronically computer-generated signature added"
                       )
                     }
                   >
                     {busy && <Loader2 className="mr-2 h-3 w-3 animate-spin" />}
-                    Sign as {labels.subtitle}
+                    Add electronic signature
                   </Button>
                 )}
               </div>

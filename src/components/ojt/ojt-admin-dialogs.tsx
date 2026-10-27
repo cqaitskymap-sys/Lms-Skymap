@@ -46,22 +46,37 @@ export function OjtTopicEditDialog({
 }) {
   const { profile } = useAuth();
   const [busy, setBusy] = useState(false);
-  const [title, setTitle] = useState("");
   const [departmentId, setDepartmentId] = useState("");
-  const [sopId, setSopId] = useState("none");
+  const [sopId, setSopId] = useState("");
   const [reference, setReference] = useState("");
+  const [fallbackTitle, setFallbackTitle] = useState("");
+
+  const sopOptions = [...sops].sort(
+    (a, b) => a.title.localeCompare(b.title) || a.sopNumber.localeCompare(b.sopNumber)
+  );
+  const selectedSop = sopOptions.find((s) => s.id === sopId);
 
   useEffect(() => {
     if (!topic || !open) return;
-    setTitle(topic.trainingTopic);
+    const matched =
+      sops.find((s) => s.id === topic.sopId) ||
+      sops.find((s) => s.title.trim().toLowerCase() === topic.trainingTopic.trim().toLowerCase());
     setDepartmentId(topic.departmentId);
-    setSopId(topic.sopId || "none");
-    setReference(topic.referenceDocumentNumber || topic.sopNumber || "");
-  }, [topic, open]);
+    setSopId(matched?.id || "");
+    setReference(topic.referenceDocumentNumber || topic.sopNumber || matched?.sopNumber || "");
+    setFallbackTitle(topic.trainingTopic);
+  }, [topic, open, sops]);
+
+  const handleSopChange = (id: string) => {
+    setSopId(id);
+    const sop = sops.find((s) => s.id === id);
+    if (sop?.sopNumber) setReference(sop.sopNumber);
+  };
 
   const handleSave = async () => {
-    if (!profile || !topic || !title.trim()) {
-      toast.error("Training topic is required");
+    const trainingTopic = selectedSop?.title.trim() || fallbackTitle.trim();
+    if (!profile || !topic || !trainingTopic) {
+      toast.error("SOP title is required");
       return;
     }
     const department = departments.find((d) => d.id === departmentId);
@@ -70,11 +85,11 @@ export function OjtTopicEditDialog({
       await updateOjtTopic(
         topic.id,
         {
-          trainingTopic: title.trim(),
+          trainingTopic,
           departmentId: department?.id || topic.departmentId,
           departmentName: department?.name || topic.departmentName,
-          sopId: sopId === "none" ? undefined : sopId,
-          referenceDocumentNumber: reference.trim() || (sopId === "none" ? "NA" : undefined),
+          ...(selectedSop ? { sopId: selectedSop.id } : {}),
+          referenceDocumentNumber: reference.trim() || selectedSop?.sopNumber || topic.referenceDocumentNumber || "NA",
         },
         toOjtActor(profile)
       );
@@ -112,20 +127,16 @@ export function OjtTopicEditDialog({
             </Select>
           </div>
           <div className="space-y-1">
-            <Label>Training topic</Label>
-            <Input value={title} onChange={(e) => setTitle(e.target.value)} />
-          </div>
-          <div className="space-y-1">
-            <Label>SOP (current version)</Label>
-            <Select value={sopId} onValueChange={setSopId}>
+            <Label>SOP title</Label>
+            <Select value={sopId || undefined} onValueChange={handleSopChange}>
               <SelectTrigger>
-                <SelectValue placeholder="Optional SOP" />
+                <SelectValue placeholder={fallbackTitle || "Select SOP title"} />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="none">No SOP / NA</SelectItem>
-                {sops.map((s) => (
+                {sopOptions.map((s) => (
                   <SelectItem key={s.id} value={s.id}>
-                    {s.sopNumber} — {s.title}
+                    {s.title}
+                    {s.sopNumber ? ` (${s.sopNumber})` : ""}
                   </SelectItem>
                 ))}
               </SelectContent>

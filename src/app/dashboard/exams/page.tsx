@@ -26,6 +26,7 @@ import { listSopsDetailed } from "@/lib/services/sops";
 import { getEmployeeAssignments } from "@/lib/services/training";
 import { getEmployeeInductionBundle } from "@/lib/services/induction";
 import { useMyTniLearning } from "@/hooks/use-tni-learning";
+import { hasPermission } from "@/lib/rbac/permissions";
 import { TRAINING_UPDATED_EVENT } from "@/lib/training/demo-store";
 import { ExamTimer } from "@/components/exams/exam-timer";
 import { ExamProgressNav } from "@/components/exams/exam-progress-nav";
@@ -54,13 +55,6 @@ import {
 import type { AssessmentAttempt, Exam, SopDocument, TrainingAssignment } from "@/types";
 
 type Phase = "list" | "exam" | "result" | "review";
-
-const OPEN_TRAINING = new Set([
-  "assigned",
-  "in_progress",
-  "training_scheduled",
-  "training_completed",
-]);
 
 function latestActiveSopExam(rows: Exam[], sopId?: string): Exam | undefined {
   if (!sopId) return undefined;
@@ -102,7 +96,12 @@ function ExamsPageInner() {
   answersRef.current = answers;
 
   const isEmployee = profile?.role === "employee";
-  const { progress: tniLearning } = useMyTniLearning(
+  const {
+    progress: tniLearning,
+    loading: tniLoading,
+    error: tniError,
+    refresh: refreshTni,
+  } = useMyTniLearning(
     isEmployee ? profile?.employeeId : undefined,
     isEmployee ? profile?.uid : undefined
   );
@@ -250,30 +249,19 @@ function ExamsPageInner() {
     });
   }, [isEmployee, exams, intendedSopIds, inductionAssignmentByModule]);
 
-  const canStartExam = (e: Exam) => {
-    if (!isEmployee) return true;
-    if (e.inductionModuleId) return Boolean(inductionAssignmentByModule[e.inductionModuleId]);
-    if (!e.sopId) return false;
-    if (!intendedSopIds.has(e.sopId)) return false;
-    const ready = myAssignments.some(
-      (a) =>
-        a.sopId === e.sopId &&
-        (a.status === "assessment_pending" || a.status === "retraining")
-    );
-    const stillTraining = myAssignments.some(
-      (a) => a.sopId === e.sopId && OPEN_TRAINING.has(a.status)
-    );
-    if (stillTraining && !ready) return false;
-    if (acknowledgedSopIds.has(e.sopId)) return true;
-    return ready;
-  };
-
   const assignmentForExam = (sopId?: string) =>
     myAssignments.find(
       (a) =>
         a.sopId === sopId &&
         (a.status === "assessment_pending" || a.status === "retraining")
     );
+
+  const canStartExam = (e: Exam) => {
+    if (!isEmployee) return true;
+    if (e.inductionModuleId) return Boolean(inductionAssignmentByModule[e.inductionModuleId]);
+    if (!e.sopId || !intendedSopIds.has(e.sopId)) return false;
+    return Boolean(assignmentForExam(e.sopId));
+  };
 
   const handleAssignExam = async () => {
     if (!profile) return;
@@ -474,6 +462,11 @@ function ExamsPageInner() {
           onReview={exam.allowReview ? () => setPhase("review") : undefined}
           onBack={() => setPhase("list")}
           leaderboardHref={exam.leaderboardEnabled ? "#leaderboard" : undefined}
+          certificateMessage={
+            myAssignments.find((row) => row.id === attempt.assignmentId)?.excludeFromCertificate
+              ? "This OJT exam does not issue a certificate."
+              : undefined
+          }
         />
         {exam.leaderboardEnabled && (
           <div id="leaderboard">
@@ -690,10 +683,20 @@ function ExamsPageInner() {
               </Card>
             )}
 
-            {examsLoading ? (
+            {examsLoading || (isEmployee && tniLoading) ? (
               <div className="flex items-center gap-2 text-muted-foreground">
                 <Loader2 className="h-4 w-4 animate-spin" /> Loading exams…
               </div>
+            ) : isEmployee && tniError ? (
+              <Card>
+                <CardContent className="flex flex-col items-center gap-3 py-12 text-center">
+                  <p className="font-medium">Could not load your training list</p>
+                  <p className="text-sm text-muted-foreground">{tniError}</p>
+                  <Button size="sm" variant="outline" onClick={() => void refreshTni()}>
+                    Retry
+                  </Button>
+                </CardContent>
+              </Card>
             ) : visibleExams.length === 0 ? (
               <Card>
                 <CardContent className="flex flex-col items-center gap-3 py-12 text-center">
@@ -815,13 +818,15 @@ function ExamsPageInner() {
                 })}
               </div>
             )}
-            <p className="text-xs text-muted-foreground">
-              Manage items in{" "}
-              <Link href="/dashboard/questions" className="underline">
-                Question Bank
-              </Link>
-              .
-            </p>
+            {profile?.role && hasPermission(profile.role, "questions:read") && (
+              <p className="text-xs text-muted-foreground">
+                Manage items in{" "}
+                <Link href="/dashboard/questions" className="underline">
+                  Question Bank
+                </Link>
+                .
+              </p>
+            )}
           </TabsContent>
 
           <TabsContent value="leaderboard">

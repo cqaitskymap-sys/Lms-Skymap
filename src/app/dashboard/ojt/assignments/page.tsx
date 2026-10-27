@@ -159,7 +159,7 @@ export default function OjtAssignmentsPage() {
           </Select>
           {canSchedule && (
             <Button asChild variant="outline">
-              <Link href="/dashboard/ojt/schedule">Book a date</Link>
+              <Link href="/dashboard/ojt/schedule">Self study</Link>
             </Button>
           )}
         </CardContent>
@@ -172,14 +172,16 @@ export default function OjtAssignmentsPage() {
             </div>
           ) : visible.length === 0 ? (
             <OjtEmptyState
-              title="No matching records"
+              title={rows.length > 0 ? "No records match these filters" : "No matching records"}
               description={
-                profile?.role === "employee"
-                  ? "When your department selects you for a topic, it will show up here."
-                  : "Select people in step 3 to create records, or change the filters above."
+                rows.length > 0
+                  ? "Change the search, year, or status above."
+                  : profile?.role === "employee"
+                    ? "When your department selects you for a topic, it will show up here."
+                    : "Select people in step 3 to create records, or change the filters above."
               }
-              actionHref={canSchedule ? "/dashboard/ojt/matrix" : undefined}
-              actionLabel={canSchedule ? "Select people" : undefined}
+              actionHref={rows.length > 0 || !canSchedule ? undefined : "/dashboard/ojt/matrix"}
+              actionLabel={rows.length > 0 || !canSchedule ? undefined : "Select people"}
             />
           ) : (
             <Table>
@@ -213,9 +215,9 @@ export default function OjtAssignmentsPage() {
                     <TableCell className="text-sm">
                       {monthName(a.plannedExecutionMonth)} {a.year}
                     </TableCell>
-                    <TableCell>{a.trainerName || "Not assigned"}</TableCell>
+                    <TableCell>{a.selfStudy ? "Self study" : a.trainerName || "Not assigned"}</TableCell>
                     <TableCell>
-                      <StatusBadge status={displayOjtStatus(a)} label={ojtStatusLabel(displayOjtStatus(a))} />
+                      <StatusBadge status={displayOjtStatus(a)} label={ojtStatusLabel(displayOjtStatus(a), a.selfStudy)} />
                     </TableCell>
                     <TableCell className="max-w-[16rem] text-sm text-muted-foreground">
                       {next.title}

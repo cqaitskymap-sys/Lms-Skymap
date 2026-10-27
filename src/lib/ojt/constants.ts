@@ -32,6 +32,15 @@ export const DEFAULT_OJT_FORM_APPROVALS: OjtFormApprovalConfig = {
   requireApprovedByQa: true,
 };
 
+/** Planner sheet signs: Prepare → Coordinator → HOD → Department Head → QA. */
+export const PLANNER_FORM_APPROVALS: OjtFormApprovalConfig = {
+  requirePreparedBy: true,
+  requireCheckedByCoordinator: true,
+  requireVerifiedByHod: true,
+  requireCheckedByHead: true,
+  requireApprovedByQa: true,
+};
+
 export const DEFAULT_PLANNER_FORM_NUMBER = "SOP/QA/002/F02-02";
 export const DEFAULT_MATRIX_FORM_NUMBER = "SOP/QA/002/F15-00";
 export const DEFAULT_OJT_COMPANY_NAME = "SKYMAP PHARMACEUTICALS PVT. LTD, ROORKEE";
@@ -57,7 +66,7 @@ export const DEFAULT_OJT_SETTINGS: Omit<OjtSettings, "createdAt" | "updatedAt" |
   matrixFormNumber: DEFAULT_MATRIX_FORM_NUMBER,
   companyName: DEFAULT_OJT_COMPANY_NAME,
   companyDivision: DEFAULT_OJT_DIVISION,
-  plannerApprovals: { ...DEFAULT_OJT_FORM_APPROVALS },
+  plannerApprovals: { ...PLANNER_FORM_APPROVALS },
   matrixApprovals: { ...DEFAULT_OJT_FORM_APPROVALS },
 };
 
@@ -83,7 +92,7 @@ export const OPEN_OJT_STATUSES: readonly OjtStatus[] = [
 
 export const OJT_STATUS_LABELS: Record<OjtStatus, string> = {
   draft: "Not started",
-  selected: "Needs trainer",
+  selected: "Self study",
   assigned: "Needs date",
   scheduled: "Ready to train",
   in_progress: "Training started",

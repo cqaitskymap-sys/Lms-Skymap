@@ -406,11 +406,17 @@ export interface JobDescription extends Timestamps {
   approvedBy?: string;
   approvedAt?: string;
   effectiveFrom: string;
-  /** Colleague named to cover this role during absence */
+  /** Colleague named to cover this role during absence (first person; kept for older records) */
   absenceHandoverEmployeeId?: string;
   absenceHandoverName?: string;
   /** Linked Auth uid — used for inbox targeting and acknowledge permission */
   absenceHandoverUserId?: string;
+  /** Up to 3 colleagues. Each one approves the absence handover separately. */
+  absenceHandovers?: JdSignoff[];
+  /** Denormalized so inbox queries can find every named colleague */
+  absenceHandoverEmployeeIds?: string[];
+  absenceHandoverUserIds?: string[];
+  /** Acknowledged only after every named colleague has approved */
   absenceHandoverStatus?: "pending" | "acknowledged";
   absenceHandoverAcknowledgedAt?: string;
   absenceHandoverAcknowledgedBy?: string;
@@ -659,6 +665,10 @@ export interface TrainingAssignment extends Timestamps {
   isRetraining: boolean;
   previousAssignmentId?: string;
   triggeredBySopRevision?: boolean;
+  /** Set when this row exists only so an OJT employee can self-study and sit the exam. */
+  ojtAssignmentId?: string;
+  /** OJT self-study. Passing this exam must not issue a training certificate. */
+  excludeFromCertificate?: boolean;
 }
 
 export type QuestionType =

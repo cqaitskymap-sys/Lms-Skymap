@@ -15,6 +15,9 @@ import {
 } from "@/lib/services/notifications";
 import { approveJdHandoverAssignment, fetchMyJdSignoffs } from "@/lib/services/jd-handover";
 import { approveTniSignoffAssignment, fetchMyTniSignoffs } from "@/lib/services/tni-signoff";
+import { signOjtFormDocument } from "@/lib/services/ojt";
+import { toOjtActor } from "@/lib/ojt/actor";
+import type { OjtFormSignoffRole } from "@/types/ojt";
 import { TRAINING_UPDATED_EVENT, notifyTrainingUpdated } from "@/lib/training/demo-store";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -71,6 +74,18 @@ function handoverSlot(n: Notification): string {
   if (n.metadata?.kind === "jd_assigned_by") return "assigned_by";
   if (n.metadata?.kind === "jd_accepted_by") return "accepted_by";
   return "absence_handover";
+}
+
+function isOjtFormSignoff(n: Notification): boolean {
+  const meta = n.metadata;
+  return meta?.kind === "ojt_form_signoff" && Boolean(meta.role && meta.departmentId && meta.year && meta.ojtKind);
+}
+
+function ojtSignAction(role: string): "prepared" | "checked" | "verified" | "approved" {
+  if (role === "prepared_by") return "prepared";
+  if (role === "approved_by_qa") return "approved";
+  if (role === "verified_by_hod") return "verified";
+  return "checked";
 }
 
 function isJdHandoverNotification(n: Notification): boolean {
@@ -189,6 +204,38 @@ export default function NotificationsPage() {
         await markRead(n);
         setResolvedKeys((prev) => new Set(prev).add(resolvedKey));
         toast.message("This signature is already approved");
+      } else {
+        toast.error(message);
+      }
+    } finally {
+      setApprovingId(null);
+    }
+  };
+
+  const handleApproveOjtForm = async (n: Notification) => {
+    if (!profile || !n.metadata) return;
+    const role = n.metadata.role as OjtFormSignoffRole;
+    const resolvedKey = `ojt:${n.metadata.ojtKind}:${n.metadata.departmentId}:${n.metadata.year}:${role}`;
+    setApprovingId(n.id);
+    try {
+      await signOjtFormDocument({
+        kind: n.metadata.ojtKind === "matrix" ? "matrix" : "planner",
+        year: Number(n.metadata.year),
+        departmentId: n.metadata.departmentId,
+        departmentName: n.metadata.departmentName,
+        role,
+        action: ojtSignAction(role),
+        actor: toOjtActor(profile),
+      });
+      toast.success("Electronically computer-generated signature added");
+      await markRead(n);
+      setResolvedKeys((prev) => new Set(prev).add(resolvedKey));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Approval failed";
+      if (/already has an electronic signature/i.test(message)) {
+        await markRead(n);
+        setResolvedKeys((prev) => new Set(prev).add(resolvedKey));
+        toast.message("This signature is already added");
       } else {
         toast.error(message);
       }
@@ -365,6 +412,24 @@ export default function NotificationsPage() {
                           className="h-7 text-xs"
                           disabled={approvingId === n.id}
                           onClick={() => void handleApproveTniSignoff(n)}
+                        >
+                          {approvingId === n.id ? (
+                            <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <CheckCircle2 className="mr-1 h-3.5 w-3.5" />
+                          )}
+                          Approve
+                        </Button>
+                      )}
+                      {isOjtFormSignoff(n) &&
+                        !resolvedKeys.has(
+                          `ojt:${n.metadata?.ojtKind}:${n.metadata?.departmentId}:${n.metadata?.year}:${n.metadata?.role}`
+                        ) && (
+                        <Button
+                          size="sm"
+                          className="h-7 text-xs"
+                          disabled={approvingId === n.id}
+                          onClick={() => void handleApproveOjtForm(n)}
                         >
                           {approvingId === n.id ? (
                             <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />

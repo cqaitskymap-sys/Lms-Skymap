@@ -123,7 +123,15 @@ export function useSopReadingSession(params: {
           setPageCount((prev) => Math.max(prev, savedCount));
           setReachedLastPage((prev) => prev || Boolean(saved.reachedLastPage));
           setAllPagesViewed((prev) => prev || savedViewed);
-          completedRef.current = Boolean(saved.completedAt) && savedViewed;
+          completedRef.current = isReadingComplete({
+            elapsedSeconds: saved.elapsedSeconds || 0,
+            requiredSeconds: resolveReadingSeconds(
+              readingMinutesRef.current,
+              saved.pageCount,
+              hasPdf
+            ),
+            allPagesViewed: savedViewed,
+          });
         }
       }
       setReady(true);

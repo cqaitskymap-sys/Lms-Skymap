@@ -107,11 +107,14 @@ export function QuestionRenderer({
             const showReview = review && correctIds.length > 0;
 
             return (
-              <label
+              <button
                 key={o.id}
+                type="button"
+                disabled={disabled}
+                onClick={() => toggle(o.id)}
                 className={cn(
-                  "flex cursor-pointer items-center gap-3 rounded-md border p-3 transition-colors",
-                  !disabled && "hover:bg-accent/50",
+                  "flex w-full items-center gap-3 rounded-md border p-3 text-left transition-colors",
+                  !disabled && "cursor-pointer hover:bg-accent/50",
                   disabled && "cursor-default",
                   isSelected && !showReview && "border-primary/50 bg-primary/5",
                   showReview && isCorrect && "border-emerald-500/50 bg-emerald-500/10",
@@ -121,10 +124,11 @@ export function QuestionRenderer({
                 <Checkbox
                   checked={isSelected}
                   disabled={disabled}
-                  onCheckedChange={() => toggle(o.id)}
+                  tabIndex={-1}
+                  className="pointer-events-none"
                 />
                 <span className="font-normal leading-snug">{o.text}</span>
-              </label>
+              </button>
             );
           })}
         </div>

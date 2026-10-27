@@ -110,7 +110,7 @@ export async function assignTniSopsToEmployee(params: {
   for (const sopId of sopIds) {
     // A passed, failed, or still-open row already covers this SOP.
     // Re-saving the TNI must not open another assigned copy of a finished SOP.
-    if (existing.some((a) => a.sopId === sopId)) continue;
+    if (existing.some((a) => a.sopId === sopId && !a.excludeFromCertificate)) continue;
 
     const sop = catalog.find((s) => s.id === sopId);
     const assignment: TrainingAssignment = {

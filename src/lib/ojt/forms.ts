@@ -1,5 +1,6 @@
 import type {
   OjtFormApprovalConfig,
+  OjtFormAssignee,
   OjtFormDocument,
   OjtFormKind,
   OjtFormSignoff,
@@ -14,6 +15,7 @@ import {
   DEFAULT_OJT_FORM_APPROVALS,
   DEFAULT_OJT_SETTINGS,
   DEFAULT_PLANNER_FORM_NUMBER,
+  PLANNER_FORM_APPROVALS,
   formatRevisionNumber,
 } from "@/lib/ojt/constants";
 
@@ -27,16 +29,22 @@ export function mergeOjtSettings(raw?: Partial<OjtSettings> | null): OjtSettings
     ...raw,
     id: "global",
     plannerApprovals: {
-      ...DEFAULT_OJT_FORM_APPROVALS,
+      ...PLANNER_FORM_APPROVALS,
       ...raw?.plannerApprovals,
-      requireCheckedByCoordinator: false,
-      requireVerifiedByHod: false,
+      requirePreparedBy: true,
+      requireCheckedByCoordinator: true,
+      requireVerifiedByHod: true,
+      requireCheckedByHead: true,
+      requireApprovedByQa: true,
     },
     matrixApprovals: {
       ...DEFAULT_OJT_FORM_APPROVALS,
       ...raw?.matrixApprovals,
+      requirePreparedBy: true,
       requireCheckedByCoordinator: false,
       requireVerifiedByHod: false,
+      requireCheckedByHead: true,
+      requireApprovedByQa: true,
     },
     plannerFormNumber: raw?.plannerFormNumber || DEFAULT_PLANNER_FORM_NUMBER,
     matrixFormNumber: raw?.matrixFormNumber || DEFAULT_MATRIX_FORM_NUMBER,
@@ -58,6 +66,13 @@ export function formApprovalsFor(kind: OjtFormKind, settings: OjtSettings): OjtF
 
 export function formNumberFor(kind: OjtFormKind, settings: OjtSettings): string {
   return kind === "planner" ? settings.plannerFormNumber : settings.matrixFormNumber;
+}
+
+export function formAssignee(
+  doc: OjtFormDocument,
+  role: OjtFormSignoffRole
+): OjtFormAssignee | undefined {
+  return (doc.assignees || []).find((row) => row.role === role);
 }
 
 export function latestSignoff(
@@ -100,6 +115,8 @@ export function statusAfterFormSignoff(
 export function requiredRolesForApproval(config: OjtFormApprovalConfig): OjtFormSignoffRole[] {
   const roles: OjtFormSignoffRole[] = [];
   if (config.requirePreparedBy) roles.push("prepared_by");
+  if (config.requireCheckedByCoordinator) roles.push("checked_by_coordinator");
+  if (config.requireVerifiedByHod) roles.push("verified_by_hod");
   if (config.requireCheckedByHead) roles.push("checked_by_head");
   if (config.requireApprovedByQa) roles.push("approved_by_qa");
   return roles;
@@ -116,7 +133,7 @@ export function canApproveForm(doc: OjtFormDocument, config: OjtFormApprovalConf
   return missingRequiredSignoffs(doc, { ...config, requireApprovedByQa: false }).length === 0;
 }
 
-/** Sign-offs must follow the required order: Prepare, then HOD, then QA. */
+/** Sign-offs follow the printed form: Prepare, Coordinator, HOD, Department Head, then QA. */
 export function canSignFormRole(
   doc: OjtFormDocument,
   config: OjtFormApprovalConfig,
@@ -156,6 +173,7 @@ export function emptyFormDocument(params: {
     formNumber: formNumberFor(params.kind, params.settings),
     status: "draft",
     companyName: params.settings.companyName,
+    assignees: [],
     signoffs: [],
     revisions: [],
     locked: false,

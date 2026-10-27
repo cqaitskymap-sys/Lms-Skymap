@@ -63,9 +63,8 @@ export default function OjtTopicsPage() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [departmentId, setDepartmentId] = useState(profile?.departmentId || "");
-  const [title, setTitle] = useState("");
   const [reference, setReference] = useState("");
-  const [sopId, setSopId] = useState("none");
+  const [sopId, setSopId] = useState("");
   const [editingTopic, setEditingTopic] = useState<OjtTopic | null>(null);
 
   const refresh = useCallback(async (opts?: { silent?: boolean }) => {
@@ -100,26 +99,41 @@ export default function OjtTopicsPage() {
     [activeDepartments, departmentId]
   );
 
+  const sopOptions = useMemo(
+    () => [...sops].sort((a, b) => a.title.localeCompare(b.title) || a.sopNumber.localeCompare(b.sopNumber)),
+    [sops]
+  );
+
+  const selectedSop = useMemo(
+    () => sopOptions.find((s) => s.id === sopId),
+    [sopOptions, sopId]
+  );
+
+  const handleSopChange = (id: string) => {
+    setSopId(id);
+    const sop = sopOptions.find((s) => s.id === id);
+    setReference(sop?.sopNumber || "");
+  };
+
   const handleCreate = async () => {
-    if (!profile || !department || !title.trim()) {
-      toast.error("Department and training topic are required");
+    if (!profile || !department || !selectedSop) {
+      toast.error("Department and SOP title are required");
       return;
     }
     setBusy(true);
     try {
       await createOjtTopic(
         {
-          trainingTopic: title.trim(),
+          trainingTopic: selectedSop.title.trim(),
           departmentId: department.id,
           departmentName: department.name,
-          sopId: sopId === "none" ? undefined : sopId,
-          referenceDocumentNumber: reference.trim() || (sopId === "none" ? "NA" : undefined),
+          sopId: selectedSop.id,
+          referenceDocumentNumber: reference.trim() || selectedSop.sopNumber || "NA",
         },
         toOjtActor(profile)
       );
-      setTitle("");
       setReference("");
-      setSopId("none");
+      setSopId("");
       toast.success("OJT topic created");
       await refresh();
     } catch (err) {
@@ -158,8 +172,8 @@ export default function OjtTopicsPage() {
         </p>
       </div>
       <OjtPageHint title="What to do here">
-        Pick a department, type the topic name (example: Dispensing of raw materials), then click Save topic.
-        Link an SOP if this training is for a procedure. You can skip SOP and write NA.
+        Pick a department, choose the SOP title from the list, then click Save topic.
+        The reference number fills in from that SOP. You can still change it.
       </OjtPageHint>
 
       {canWrite && (
@@ -167,7 +181,7 @@ export default function OjtTopicsPage() {
           <CardHeader>
             <CardTitle>Add a topic</CardTitle>
             <CardDescription>
-              Name the job. Link an SOP if this is for a written procedure; otherwise leave SOP as No SOP / NA.
+              Choose an approved SOP title. The reference number fills in from that SOP.
             </CardDescription>
           </CardHeader>
           <CardContent className="grid gap-3 md:grid-cols-2">
@@ -187,20 +201,16 @@ export default function OjtTopicsPage() {
               </Select>
             </div>
             <div className="space-y-1">
-              <Label>Training topic</Label>
-              <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Dispensing of raw materials" />
-            </div>
-            <div className="space-y-1">
-              <Label>SOP (current version)</Label>
-              <Select value={sopId} onValueChange={setSopId}>
+              <Label>SOP title</Label>
+              <Select value={sopId || undefined} onValueChange={handleSopChange}>
                 <SelectTrigger>
-                  <SelectValue placeholder="Optional SOP" />
+                  <SelectValue placeholder="Select SOP title" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="none">No SOP / NA</SelectItem>
-                  {sops.map((s) => (
+                  {sopOptions.map((s) => (
                     <SelectItem key={s.id} value={s.id}>
-                      {s.sopNumber} — {s.title}
+                      {s.title}
+                      {s.sopNumber ? ` (${s.sopNumber})` : ""}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -241,7 +251,11 @@ export default function OjtTopicsPage() {
           ) : topics.length === 0 ? (
             <OjtEmptyState
               title="No topics yet"
-              description="Add the first job for this department using the form above."
+              description={
+                canWrite
+                  ? "Add the first job for this department using the form above."
+                  : "No topics have been added for this department yet."
+              }
             />
           ) : (
             <Table>

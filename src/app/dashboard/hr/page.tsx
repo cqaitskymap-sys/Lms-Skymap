@@ -104,6 +104,13 @@ export default function HrDashboardPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
+                  {employees.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={4} className="text-center text-muted-foreground">
+                        No employees yet.
+                      </TableCell>
+                    </TableRow>
+                  ) : null}
                   {employees.map((e) => (
                     <TableRow key={e.id}>
                       <TableCell>

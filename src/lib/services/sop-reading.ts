@@ -71,9 +71,10 @@ function mergeProgress(
   });
   const pagesSeen = viewed.pagesSeen;
   const allPagesViewed = viewed.allPagesViewed;
-  const completedAt = allPagesViewed
-    ? newer.completedAt || (documentChanged ? undefined : older.completedAt)
-    : undefined;
+  const completedAt =
+    isReadingComplete({ elapsedSeconds, requiredSeconds, allPagesViewed })
+      ? newer.completedAt || (documentChanged ? undefined : older.completedAt)
+      : undefined;
   return {
     ...newer,
     elapsedSeconds,

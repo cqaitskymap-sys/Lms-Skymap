@@ -13,6 +13,8 @@ interface ExamResultSummaryProps {
   onReview?: () => void;
   onBack?: () => void;
   leaderboardHref?: string;
+  /** Replaces the default certificate sentence. OJT self-study passes this. */
+  certificateMessage?: string;
 }
 
 export function CertificateEligibilityBadge({
@@ -44,6 +46,7 @@ export function ExamResultSummary({
   onReview,
   onBack,
   leaderboardHref,
+  certificateMessage,
 }: ExamResultSummaryProps) {
   const passed = !!attempt.passed;
 
@@ -98,7 +101,8 @@ export function ExamResultSummary({
         </p>
         {passed ? (
           <p className="text-sm text-muted-foreground">
-            A training certificate is generated only after every assigned exam is passed.
+            {certificateMessage ||
+              "A training certificate is generated only after every assigned exam is passed."}
           </p>
         ) : null}
 

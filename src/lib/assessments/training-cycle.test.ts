@@ -33,3 +33,16 @@ test("a failed sibling SOP blocks lifecycle pass until it is covered", () => {
     false
   );
 });
+
+test("OJT self-study rows do not block a training certificate", () => {
+  assert.equal(
+    hasOutstandingTraining(
+      [
+        { id: "a", sopId: "sop-1", status: "passed" },
+        { id: "ojt", sopId: "sop-2", status: "assigned", excludeFromCertificate: true },
+      ],
+      "a"
+    ),
+    false
+  );
+});
