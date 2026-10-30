@@ -46,7 +46,7 @@ export default function HomePage() {
             <Button
               size="lg"
               variant="outline"
-              className="rounded-full border-slate-900/15 bg-white/90 px-7 text-slate-900 backdrop-blur-md hover:bg-white dark:border-white/45 dark:bg-slate-950/70 dark:text-white dark:hover:bg-slate-950/85"
+              className="rounded-full border-white bg-white px-7 text-slate-900 shadow-sm hover:bg-white"
               asChild
             >
               <Link href="/verify">Verify certificate</Link>

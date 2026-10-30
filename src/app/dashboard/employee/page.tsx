@@ -112,7 +112,7 @@ export default function EmployeeDashboardPage() {
         <MotionItem>
           <GlassCard className="h-full">
             <div className="flex items-start gap-3 p-1">
-              <BookOpen className="mt-0.5 h-5 w-5 text-cyan-700" />
+              <BookOpen className="mt-0.5 h-5 w-5 text-cyan-700 dark:text-cyan-300" />
               <div>
                 <p className="font-medium">SOPs</p>
                 <p className="text-sm text-muted-foreground">Read every TNI SOP</p>
@@ -126,7 +126,7 @@ export default function EmployeeDashboardPage() {
         <MotionItem>
           <GlassCard className="h-full">
             <div className="flex items-start gap-3 p-1">
-              <ClipboardCheck className="mt-0.5 h-5 w-5 text-cyan-700" />
+              <ClipboardCheck className="mt-0.5 h-5 w-5 text-cyan-700 dark:text-cyan-300" />
               <div>
                 <p className="font-medium">Exam</p>
                 <p className="text-sm text-muted-foreground">Unlocks after you finish reading and acknowledge the SOP</p>
@@ -140,7 +140,7 @@ export default function EmployeeDashboardPage() {
         <MotionItem>
           <GlassCard className="h-full">
             <div className="flex items-start gap-3 p-1">
-              <GraduationCap className="mt-0.5 h-5 w-5 text-cyan-700" />
+              <GraduationCap className="mt-0.5 h-5 w-5 text-cyan-700 dark:text-cyan-300" />
               <div>
                 <p className="font-medium">Certificates</p>
                 <p className="text-sm text-muted-foreground">Issued after you pass the exam</p>
@@ -154,7 +154,7 @@ export default function EmployeeDashboardPage() {
         <MotionItem>
           <GlassCard className="h-full">
             <div className="flex items-start gap-3 p-1">
-              <ClipboardCheck className="mt-0.5 h-5 w-5 text-cyan-700" />
+              <ClipboardCheck className="mt-0.5 h-5 w-5 text-cyan-700 dark:text-cyan-300" />
               <div>
                 <p className="font-medium">On Job Training</p>
                 <p className="text-sm text-muted-foreground">Read the assigned SOP, then take the exam. OJT does not issue a certificate.</p>

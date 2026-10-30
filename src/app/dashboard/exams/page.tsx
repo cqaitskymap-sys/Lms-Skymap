@@ -749,12 +749,13 @@ function ExamsPageInner() {
                         {e.description || sopLabel(e.sopId)}
                       </CardDescription>
                     </CardHeader>
-                    <CardContent className="flex items-center justify-between gap-3">
-                      <div className="text-sm text-muted-foreground">
+                    <CardContent className="space-y-3">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="min-w-0 text-sm text-muted-foreground">
                         {e.questionCount} Q · {e.durationMinutes} min · Pass{" "}
                         {e.passPercentage}% · Max {e.maxAttempts} attempts
                       </div>
-                      <div className="flex items-center gap-1">
+                      <div className="flex shrink-0 items-center gap-1">
                         <AdminDeleteButton
                           confirmTitle={`Delete exam “${e.title}”?`}
                           confirmDescription="This exam and related attempts/results will be removed permanently."
@@ -784,15 +785,6 @@ function ExamsPageInner() {
                           <Button
                             size="sm"
                             disabled={busy || !unlocked}
-                            title={
-                              unlocked
-                                ? undefined
-                                : assignmentId
-                                  ? undefined
-                                  : acknowledgedSopIds.has(e.sopId || "")
-                                    ? "This SOP is still in training. The exam opens when training is marked ready."
-                                    : "Read and acknowledge the SOP before starting."
-                            }
                             onClick={(ev) => {
                               ev.stopPropagation();
                               if (!unlocked) return;
@@ -812,6 +804,14 @@ function ExamsPageInner() {
                           </Button>
                         )}
                       </div>
+                      </div>
+                      {isEmployee && !unlocked && !e.inductionModuleId && (
+                        <p className="text-xs text-muted-foreground">
+                          {acknowledgedSopIds.has(e.sopId || "")
+                            ? "This SOP is still in training. The exam opens when training is marked ready."
+                            : "Read and acknowledge the SOP before starting."}
+                        </p>
+                      )}
                     </CardContent>
                   </Card>
                   );

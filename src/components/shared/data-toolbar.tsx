@@ -75,7 +75,7 @@ export function DataToolbar({
             value={f.value || "all"}
             onValueChange={(v) => onFilterChange?.(f.key, v === "all" ? "" : v)}
           >
-            <SelectTrigger className="w-[160px]">
+            <SelectTrigger className="w-full min-w-[12.5rem] sm:w-[220px]">
               <SelectValue placeholder={f.label} />
             </SelectTrigger>
             <SelectContent>

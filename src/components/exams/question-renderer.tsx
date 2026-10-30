@@ -111,6 +111,7 @@ export function QuestionRenderer({
                 key={o.id}
                 type="button"
                 disabled={disabled}
+                aria-pressed={isSelected}
                 onClick={() => toggle(o.id)}
                 className={cn(
                   "flex w-full items-center gap-3 rounded-md border p-3 text-left transition-colors",
@@ -121,12 +122,24 @@ export function QuestionRenderer({
                   showReview && isSelected && !isCorrect && "border-destructive/50 bg-destructive/10"
                 )}
               >
-                <Checkbox
-                  checked={isSelected}
-                  disabled={disabled}
-                  tabIndex={-1}
-                  className="pointer-events-none"
-                />
+                {multi ? (
+                  <Checkbox
+                    checked={isSelected}
+                    disabled={disabled}
+                    tabIndex={-1}
+                    className="pointer-events-none"
+                  />
+                ) : (
+                  <span
+                    aria-hidden
+                    className={cn(
+                      "flex h-4 w-4 shrink-0 items-center justify-center rounded-full border",
+                      isSelected ? "border-primary" : "border-muted-foreground/50"
+                    )}
+                  >
+                    {isSelected && <span className="h-2 w-2 rounded-full bg-primary" />}
+                  </span>
+                )}
                 <span className="font-normal leading-snug">{o.text}</span>
               </button>
             );

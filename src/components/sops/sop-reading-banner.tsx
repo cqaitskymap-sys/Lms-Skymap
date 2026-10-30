@@ -36,7 +36,7 @@ export function SopReadingBanner({
     return (
       <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3">
         <div className="flex items-start gap-2">
-          <CheckCircle2 className="mt-0.5 h-5 w-5 text-emerald-600" />
+          <CheckCircle2 className="mt-0.5 h-5 w-5 text-emerald-700 dark:text-emerald-400" />
           <div>
             <p className="text-sm font-medium">Reading complete</p>
             <p className="text-xs text-muted-foreground">
@@ -64,7 +64,7 @@ export function SopReadingBanner({
               <Clock className="h-3.5 w-3.5" />
               Time remaining
             </span>
-            <span className={cn("font-mono", timerComplete && "text-emerald-600")}>
+            <span className={cn("font-mono", timerComplete && "text-emerald-700 dark:text-emerald-400")}>
               {timerComplete ? "Done" : formatReadingClock(remainingSeconds)}
             </span>
           </div>
@@ -78,7 +78,7 @@ export function SopReadingBanner({
                 <ScrollText className="h-3.5 w-3.5" />
                 Pages scrolled
               </span>
-              <span className={cn("font-mono", allPagesViewed && "text-emerald-600")}>
+              <span className={cn("font-mono", allPagesViewed && "text-emerald-700 dark:text-emerald-400")}>
                 {allPagesViewed
                   ? "All pages"
                   : `${pagesSeen.length}/${pageCount || "…"}`}

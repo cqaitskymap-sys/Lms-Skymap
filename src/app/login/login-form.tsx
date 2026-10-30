@@ -100,7 +100,7 @@ function LoginForm() {
 
   return (
     <div className="flex min-h-screen lg:h-screen lg:overflow-hidden">
-      <div className="relative hidden w-1/2 overflow-hidden bg-slate-900 lg:block">
+      <div className="relative hidden w-1/2 overflow-y-auto bg-slate-900 lg:block">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src="/brand/login-bg.jpg"

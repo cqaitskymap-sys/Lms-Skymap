@@ -24,6 +24,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { formatDate } from "@/lib/utils";
+import { LIFECYCLE_STAGES } from "@/lib/lifecycle/stages";
 import { toast } from "sonner";
 import * as XLSX from "xlsx";
 import type { Department, Employee } from "@/types";
@@ -149,16 +150,12 @@ export default function EmployeesPage() {
           filters={[
             {
               key: "status",
-              label: "Status",
+              label: "Lifecycle",
               value: status,
-              options: [
-                { label: "Pending verification", value: "hr_verification" },
-                { label: "Induction assigned", value: "induction_assigned" },
-                { label: "Induction completed", value: "induction_completed" },
-                { label: "Handed over", value: "department_handover" },
-                { label: "In training", value: "training" },
-                { label: "Qualified", value: "qualified" },
-              ],
+              options: LIFECYCLE_STAGES.map((stage) => ({
+                label: stage.label,
+                value: stage.stage,
+              })),
             },
           ]}
           onFilterChange={(key, value) => {
@@ -174,7 +171,7 @@ export default function EmployeesPage() {
             <CardTitle>Directory ({filtered.length})</CardTitle>
           </CardHeader>
           <CardContent>
-            <Table>
+            <Table className="min-w-[760px]">
               <TableHeader>
                 <TableRow>
                   <TableHead>Code</TableHead>

@@ -60,7 +60,7 @@ export function ExamResultSummary({
         <p className="text-5xl font-bold tracking-tight">{attempt.percentage}%</p>
         <p
           className={
-            passed ? "font-semibold text-emerald-600" : "font-semibold text-destructive"
+            passed ? "font-semibold text-emerald-700 dark:text-emerald-400" : "font-semibold text-destructive"
           }
         >
           {attempt.status === "expired" ? "EXPIRED" : passed ? "PASSED" : "FAILED"}

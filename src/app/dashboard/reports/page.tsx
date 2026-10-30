@@ -31,8 +31,8 @@ import { toast } from "sonner";
 
 const TONE: Record<string, string> = {
   default: "text-foreground",
-  success: "text-emerald-600",
-  warning: "text-amber-600",
+  success: "text-emerald-700 dark:text-emerald-400",
+  warning: "text-amber-700 dark:text-amber-300",
   danger: "text-destructive",
 };
 

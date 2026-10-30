@@ -123,13 +123,13 @@ export default function OjtAssignmentsPage() {
         </h1>
         <p className="text-muted-foreground">
           {profile?.role === "employee"
-            ? "Open a row when your trainer has scored you, then click Confirm."
+            ? "Open a record, read the SOP, then take the exam. OJT does not issue a certificate."
             : "Search a person or topic. The Next step column tells you what to do."}
         </p>
       </div>
       <OjtPageHint>
         {profile?.role === "employee"
-          ? "You only need to confirm after training. Planning and booking are done by your department."
+          ? "Self study has no trainer. Read the assigned SOP, then sit the exam."
           : "Each row is one person + one topic. Click Continue when it is your turn."}
       </OjtPageHint>
       <Card>
@@ -184,7 +184,7 @@ export default function OjtAssignmentsPage() {
               actionLabel={rows.length > 0 || !canSchedule ? undefined : "Select people"}
             />
           ) : (
-            <Table>
+            <Table className="min-w-[880px]">
               <TableHeader>
                 <TableRow>
                   <TableHead>Employee</TableHead>
